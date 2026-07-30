@@ -2,9 +2,12 @@
 // arrays (verbatim, inheritance resolved). Keyed by model_type. UI presentation
 // metadata lives here, not in the physics engine. To regenerate after a model
 // gains/changes a tunable parameter, dump each class's effective interface from
-// explain-engine/ModelIndex.js and replace MODEL_INTERFACES below.
+// explain-engine/ModelIndex.js and replace MODEL_INTERFACES below. A regeneration
+// must keep the custom-registry import and the merge in getInterfaceForType at the
+// bottom of this file — that is the extension point custom models rely on.
 
 import type { InterfaceField } from "./types";
+import { CUSTOM_MODEL_INTERFACES } from "./custom-registry";
 
 export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
   "Drugs": [
@@ -6694,6 +6697,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
 };
 
 // Resolve the editable interface for a given model_type (empty if unknown).
+// Custom models win over built-ins, so a student entry can also override one.
 export function getInterfaceForType(modelType: string): InterfaceField[] {
-  return MODEL_INTERFACES[modelType] ?? [];
+  return CUSTOM_MODEL_INTERFACES[modelType] ?? MODEL_INTERFACES[modelType] ?? [];
 }

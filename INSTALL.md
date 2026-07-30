@@ -100,10 +100,15 @@ sudo apt-get install -y nodejs git
 ## 2. Get the code and install dependencies
 
 ```sh
-git clone <repository-url>
-cd explain-user-js-new
+git clone --recurse-submodules <repository-url>
+cd explain-ui
 npm install
 ```
+
+`--recurse-submodules` is required: the simulation engine lives in a separate repository
+mounted at `explain-engine/`, and without the flag that directory is left empty and nothing
+runs. If you already cloned without it, `git submodule update --init` fixes an existing
+checkout.
 
 `npm install` reads `package-lock.json` and downloads dependencies into `node_modules/`
 (this takes a minute or two the first time). Use plain **npm** — don't mix in yarn/pnpm, so
@@ -214,6 +219,8 @@ picked up.
 
 ## Next steps
 
+- **Writing your own models and scenarios:** [`STUDENT_WORKFLOW.md`](./STUDENT_WORKFLOW.md) —
+  branches, the custom-model extension points, and how to hand work in.
 - **Documentation index:** [`docs/README.md`](./docs/README.md) — the UI⇄engine map.
 - **Engine architecture & model reference:** [`explain-engine/README.md`](./explain-engine/README.md)
   and the per-model docs in [`explain-engine/docs/`](./explain-engine/docs/) (start with
