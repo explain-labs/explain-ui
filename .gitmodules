@@ -1,4 +1,4 @@
 [submodule "explain"]
 	path = explain-engine
-	url = git@github.com:Dobutamine/explain-engine.git
+	url = git@github.com:explain-labs/explain-engine.git
 	branch = main

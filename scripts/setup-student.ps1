@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$RepoSsh = "git@github.com:Dobutamine/explain-ui.git"
+$RepoSsh = "git@github.com:explain-labs/explain-ui.git"
 
 function Info($msg) { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
 function Warn($msg) { Write-Host "WARNING: $msg" -ForegroundColor Yellow }

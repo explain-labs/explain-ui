@@ -17,7 +17,7 @@ worker's shared-memory channels).
 
 > **Note on layout:** the engine's reference docs live *in the engine repository*, beside the code they
 > document, so they resolve for anyone who clones
-> [`explain-engine`](https://github.com/Dobutamine/explain-engine) on its own — it is the citable artifact.
+> [`explain-engine`](https://github.com/explain-labs/explain-engine) on its own — it is the citable artifact.
 > They appear here at `explain-engine/docs/` only because the engine is mounted as a submodule. **A checkout
 > without `git submodule update --init` has no engine docs**, and the app's doc viewer will show no Engine
 > group.

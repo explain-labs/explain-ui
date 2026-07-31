@@ -10,7 +10,7 @@
 # doesn't start the app.
 set -euo pipefail
 
-REPO_HTTPS="https://github.com/Dobutamine/explain-ui.git"
+REPO_HTTPS="https://github.com/explain-labs/explain-ui.git"
 
 info() { printf '\n==> %s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }

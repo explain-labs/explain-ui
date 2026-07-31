@@ -133,7 +133,7 @@ is controlled from the main thread through the `Model` wrapper (`Model.js`).
 This repository is self-contained: it has no runtime or build dependencies, and the tooling
 under `scripts/` (headless harness, probes, sensitivity-analysis campaign) runs on plain Node
 with no install step. Consumers mount it as a git submodule — see
-[`explain-ui`](https://github.com/Dobutamine/explain-ui) for the web app built on it.
+[`explain-ui`](https://github.com/explain-labs/explain-ui) for the web app built on it.
 
 > **Where to read next**
 > - [`./docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — the full engine architecture (two-thread design, build/step loop, wire protocol, scaling/tuning, realtime data plane). Start there for deep detail.
@@ -5536,7 +5536,7 @@ A scenario file is a single JSON document that describes one complete patient/ex
 
 > **This repo is the source of truth for scenarios — edit `model_definitions/` here.**
 >
-> Consumers generate their own copy from it. In the [explain-ui](https://github.com/Dobutamine/explain-ui)
+> Consumers generate their own copy from it. In the [explain-ui](https://github.com/explain-labs/explain-ui)
 > web app, `scripts/sync-scenarios.mjs` copies this directory into its `public/model_definitions/`
 > on every `predev`/`prebuild` and serves it statically. **That copy is generated, gitignored, and
 > overwritten** — editing a canonical scenario there loses your work on the next `npm run dev`. (The
@@ -8340,7 +8340,7 @@ How to exercise and verify the Explain engine **headlessly** — build a scenari
 > **read-only** — they never modify engine source — and run with **`node` directly**:
 >
 > ```bash
-> git clone git@github.com:Dobutamine/explain-engine.git && cd explain-engine
+> git clone git@github.com:explain-labs/explain-engine.git && cd explain-engine
 > node scripts/probe_vitals.mjs term_neonate   # no npm install needed
 > ```
 >

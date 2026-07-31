@@ -5,7 +5,7 @@
 #
 # It does the things a deploy needs and `git pull` alone does NOT:
 #   1. `git pull` the repo checkout, then update the `explain` submodule — the
-#      engine now lives in a separate repo (github.com/Dobutamine/explain-engine)
+#      engine now lives in a separate repo (github.com/explain-labs/explain-engine)
 #      mounted at explain-engine/, so the bot's builder explain-engine/scripts/build_patient.mjs
 #      and the scenario library only arrive when the submodule is synced
 #   2. copy the bot-facing docs into the bot's workdir (the bot reads them there,

@@ -31,14 +31,14 @@ your projects; it is safe to re-run if something goes wrong halfway.
 macOS / Linux:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/Dobutamine/explain-ui/main/scripts/setup-student.sh
+curl -fsSLO https://raw.githubusercontent.com/explain-labs/explain-ui/main/scripts/setup-student.sh
 bash setup-student.sh <yourname>
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/Dobutamine/explain-ui/main/scripts/setup-student.ps1 -OutFile setup-student.ps1
+irm https://raw.githubusercontent.com/explain-labs/explain-ui/main/scripts/setup-student.ps1 -OutFile setup-student.ps1
 powershell -ExecutionPolicy Bypass -File .\setup-student.ps1 <yourname>
 ```
 
@@ -47,7 +47,7 @@ When it finishes, start the app with `npm run dev` and skip ahead to section 2.
 ### By hand (what the script does)
 
 ```sh
-git clone --recurse-submodules git@github.com:Dobutamine/explain-ui.git
+git clone --recurse-submodules git@github.com:explain-labs/explain-ui.git
 cd explain-ui
 npm install
 ```

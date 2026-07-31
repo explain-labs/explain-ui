@@ -18,14 +18,14 @@ from the folder where you keep your projects:
 **macOS / Linux**
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/Dobutamine/explain-ui/main/scripts/run-explain.sh
+curl -fsSLO https://raw.githubusercontent.com/explain-labs/explain-ui/main/scripts/run-explain.sh
 bash run-explain.sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Dobutamine/explain-ui/main/scripts/run-explain.ps1 -OutFile run-explain.ps1
+irm https://raw.githubusercontent.com/explain-labs/explain-ui/main/scripts/run-explain.ps1 -OutFile run-explain.ps1
 powershell -ExecutionPolicy Bypass -File .\run-explain.ps1
 ```
 
@@ -42,7 +42,7 @@ HTTPS while cloning:
 
 ```sh
 git -c url."https://github.com/".insteadOf="git@github.com:" \
-  clone --recurse-submodules https://github.com/Dobutamine/explain-ui.git
+  clone --recurse-submodules https://github.com/explain-labs/explain-ui.git
 cd explain-ui
 git config url."https://github.com/".insteadOf "git@github.com:"
 npm install
