@@ -10,6 +10,16 @@ This repository is the web app (Vue 3 + Vite). The simulation engine itself
 lives in [`explain-engine/`](explain-engine/), a git submodule that runs inside
 a Web Worker.
 
+Both repositories are part of the
+[**Explain Labs**](https://github.com/explain-labs) organization —
+[`explain-labs/explain-ui`](https://github.com/explain-labs/explain-ui) (this
+repo) and
+[`explain-labs/explain-engine`](https://github.com/explain-labs/explain-engine).
+The org page carries the shared overview of how the two fit together. If you
+cloned before they moved there from the `Dobutamine` account, your clone still
+works through GitHub's redirects, but run `git submodule sync` once to pick up
+the engine's new URL.
+
 ## Run it locally
 
 You need [git](https://git-scm.com) and [Node.js 20+](https://nodejs.org). Then,
