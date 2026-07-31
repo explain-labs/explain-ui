@@ -10,6 +10,7 @@
 set -euo pipefail
 
 REPO_SSH="git@github.com:explain-labs/explain-ui.git"
+ENGINE_SSH="git@github.com:explain-labs/explain-engine.git"
 
 info() { printf '\n==> %s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -100,10 +101,17 @@ fi
 
 # --- 5. Repair the submodule if it's missing ----------------------------------
 
+git submodule sync >/dev/null 2>&1 || true
+
 if [ ! -f explain-engine/Model.js ]; then
   info "explain-engine/ is empty — fetching the submodule"
   git submodule update --init
 fi
+
+# .gitmodules records the engine over HTTPS so that anyone can clone the app
+# anonymously. Students push an engine branch of their own, so give this clone
+# the SSH remote their key already authenticates against.
+git -C explain-engine remote set-url origin "$ENGINE_SSH"
 
 # --- 6. Refuse to touch branches over uncommitted work ------------------------
 

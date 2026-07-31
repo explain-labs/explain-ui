@@ -46,18 +46,17 @@ script any time to update to the latest version and start again. Add
 
 ### By hand
 
-The engine submodule is recorded with an SSH URL, so a plain
-`git clone --recurse-submodules` fails without a GitHub SSH key. Rewrite it to
-HTTPS while cloning:
-
 ```sh
-git -c url."https://github.com/".insteadOf="git@github.com:" \
-  clone --recurse-submodules https://github.com/explain-labs/explain-ui.git
+git clone --recurse-submodules https://github.com/explain-labs/explain-ui.git
 cd explain-ui
-git config url."https://github.com/".insteadOf "git@github.com:"
 npm install
 npm run dev
 ```
+
+`--recurse-submodules` matters — without it `explain-engine/` is empty and
+nothing runs. If you already cloned without it, `git submodule update --init`
+fixes it. A clone made before the engine submodule switched to an HTTPS URL
+needs `git submodule sync` once to pick up the change.
 
 ## Working on Explain
 

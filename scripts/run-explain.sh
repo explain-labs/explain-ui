@@ -49,8 +49,6 @@ if [ "$node_major" -lt 20 ]; then
 fi
 
 # --- 2. Locate or clone the repository ----------------------------------------
-# The engine submodule's recorded URL is SSH-only; the insteadOf rewrite lets
-# everything fetch anonymously over HTTPS instead.
 
 if toplevel=$(git rev-parse --show-toplevel 2>/dev/null); then
   if grep -q '"name": "explain-user"' "$toplevel/package.json" 2>/dev/null; then
@@ -65,17 +63,14 @@ elif [ -f explain-ui/package.json ]; then
   cd explain-ui
 else
   info "Downloading Explain (this can take a minute)"
-  git -c url."https://github.com/".insteadOf="git@github.com:" \
-    clone --recurse-submodules "$REPO_HTTPS"
+  git clone --recurse-submodules "$REPO_HTTPS"
   cd explain-ui
 fi
 
-# Persist the HTTPS rewrite for future submodule updates — but only in clones
-# whose origin is already HTTPS, so SSH-based clones (developers, students) are
-# left alone.
-case "$(git remote get-url origin)" in
-  https://*) git config url."https://github.com/".insteadOf "git@github.com:" ;;
-esac
+# Adopt the submodule URL recorded in .gitmodules. This is a no-op for fresh
+# clones and repairs older ones, whose stored engine URL predates the move to
+# the explain-labs org and to HTTPS.
+git submodule sync >/dev/null 2>&1 || true
 
 # --- 3. Repair the submodule if it's missing ----------------------------------
 

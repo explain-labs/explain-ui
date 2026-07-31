@@ -16,6 +16,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoSsh = "git@github.com:explain-labs/explain-ui.git"
+$EngineSsh = "git@github.com:explain-labs/explain-engine.git"
 
 function Info($msg) { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
 function Warn($msg) { Write-Host "WARNING: $msg" -ForegroundColor Yellow }
@@ -104,10 +105,17 @@ if ($LASTEXITCODE -eq 0 -and $toplevel) {
 
 # --- 5. Repair the submodule if it's missing ----------------------------------
 
+& git -C . submodule sync 2>&1 | Out-Null
+
 if (-not (Test-Path "explain-engine/Model.js")) {
     Info "explain-engine/ is empty — fetching the submodule"
     Invoke-Git . submodule update --init
 }
+
+# .gitmodules records the engine over HTTPS so that anyone can clone the app
+# anonymously. Students push an engine branch of their own, so give this clone
+# the SSH remote their key already authenticates against.
+Invoke-Git explain-engine remote set-url origin $EngineSsh
 
 # --- 6. Refuse to touch branches over uncommitted work ------------------------
 

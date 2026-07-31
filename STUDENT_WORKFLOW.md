@@ -49,11 +49,18 @@ When it finishes, start the app with `npm run dev` and skip ahead to section 2.
 ```sh
 git clone --recurse-submodules git@github.com:explain-labs/explain-ui.git
 cd explain-ui
+git -C explain-engine remote set-url origin git@github.com:explain-labs/explain-engine.git
 npm install
 ```
 
 `--recurse-submodules` matters. Without it, `explain-engine/` is an empty directory and
 nothing works. If you already cloned without it, run `git submodule update --init` now.
+
+The `remote set-url` line matters too. `.gitmodules` records the engine over HTTPS so that
+anyone can clone and run the app without a GitHub account; you are going to *push* an engine
+branch, so you want the SSH remote your key authenticates against. Skip it and the
+`git push` below fails asking for a username and password. (The setup script does this for
+you.)
 
 Create your branch in the app repo:
 
