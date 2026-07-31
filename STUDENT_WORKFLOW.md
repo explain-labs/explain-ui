@@ -18,7 +18,33 @@ lines to otherwise-empty stubs, picking up changes from `main` stays conflict-fr
 
 ## 1. One-time setup
 
-You need your instructor to add you as a collaborator on both repositories first.
+You need two things before you start: your instructor must add you as a collaborator on
+both repositories, and you need [an SSH key registered with GitHub](https://docs.github.com/en/authentication/connecting-to-github-with-ssh).
+
+### The easy way: the setup script
+
+The setup script does everything in this section for you — checks your tools, clones the
+repository with its engine submodule, installs dependencies, and creates + pushes your
+`student/<yourname>` branch in both repositories. Run it from the folder where you keep
+your projects; it is safe to re-run if something goes wrong halfway.
+
+macOS / Linux:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/Dobutamine/explain-ui/main/scripts/setup-student.sh
+bash setup-student.sh <yourname>
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Dobutamine/explain-ui/main/scripts/setup-student.ps1 -OutFile setup-student.ps1
+powershell -ExecutionPolicy Bypass -File .\setup-student.ps1 <yourname>
+```
+
+When it finishes, start the app with `npm run dev` and skip ahead to section 2.
+
+### By hand (what the script does)
 
 ```sh
 git clone --recurse-submodules git@github.com:Dobutamine/explain-ui.git
@@ -211,6 +237,10 @@ so they can be read together.
 
 **`explain-engine/` is empty** — cloned without `--recurse-submodules`. Run
 `git submodule update --init`.
+
+**PowerShell says "running scripts is disabled on this system"** — start the setup script
+exactly as shown in section 1, with `powershell -ExecutionPolicy Bypass -File .\setup-student.ps1`;
+that bypasses the policy for this one run without changing any system setting.
 
 **`ERROR: <type> model not found` at build** — either a `model_type` typo in the scenario
 JSON, or a missing export line in `CustomModelIndex.js`.
