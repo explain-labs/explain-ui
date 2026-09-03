@@ -21,6 +21,13 @@ lines to otherwise-empty stubs, picking up changes from `main` stays conflict-fr
 You need two things before you start: your instructor must add you as a collaborator on
 both repositories, and you need [an SSH key registered with GitHub](https://docs.github.com/en/authentication/connecting-to-github-with-ssh).
 
+The collaborator invitation arrives as an email (and shows up at
+<https://github.com/notifications> and on each repository's page). **Accept both of them
+before you run anything below** — one for `explain-ui`, one for `explain-engine`. Until you
+do, the setup script's GitHub check fails and `git push` is rejected. If you do not have an
+SSH key, or your laptop will not let you use one, see the HTTPS fallback under
+[Troubleshooting](#troubleshooting).
+
 ### The easy way: the setup script
 
 The setup script does everything in this section for you — checks your tools, clones the
@@ -263,6 +270,20 @@ somewhere too early in the module graph. Custom models must be reached only thro
 `explain-engine/model_definitions/` (not `public/model_definitions/`, which is generated),
 and the dev server needs a restart to re-run the copy.
 
+**`git push` asks for a username and password, or SSH will not work on your laptop** —
+you can do the whole workflow over HTTPS instead. Install the
+[GitHub CLI](https://cli.github.com), run `gh auth login` once (choose HTTPS, and let it
+set up git credentials), then clone with
+`git clone --recurse-submodules https://github.com/explain-labs/explain-ui.git` and **skip**
+the `git -C explain-engine remote set-url` step in section 1 — `.gitmodules` already records
+the engine over HTTPS. Everything else in this document is unchanged. Note that
+`setup-student.sh` / `.ps1` clone over SSH, so on this route do section 1 by hand.
+
+**`git status` lists thousands of files under `node_modules/`** — you cloned before
+`node_modules` was removed from version control. Fix your clone with
+`git rm -r --cached node_modules`, commit that, or simply re-clone. Never `git add -A` with
+those files showing: committing them onto your branch makes every later rebase conflict.
+
 **Engine changes don't show up in the app** — the app is pinned to a recorded engine
 commit. Check `git -C explain-engine branch --show-current`; if it says something other
 than your branch, you are on a detached HEAD: `git -C explain-engine checkout student/<yourname>`.
@@ -277,10 +298,24 @@ rename it.
 
 One-time, in the GitHub web interface, for **both** repositories:
 
-1. **Settings → Collaborators** — add each student with **Write** access.
-2. **Settings → Branches** — add a protection rule for `main`: require a pull request
-   before merging, and block force pushes and deletions. Leave `student/*` unprotected so
-   students can force-push their own rebases.
+1. **Settings → Collaborators** — add each student with **Write** access. Students are
+   *outside collaborators*, not organization members: both repositories are public, and
+   GitHub does not charge a seat for an outside collaborator on a public repository,
+   whereas every organization member consumes one. The equivalent from the command line is
+
+   ```sh
+   for R in explain-ui explain-engine; do
+     gh api -X PUT /repos/explain-labs/$R/collaborators/<github-username> -f permission=push
+   done
+   ```
+
+   Do both repositories — students push an engine branch as well as an app branch.
+2. **Settings → Rules** — a ruleset named *main protection* on each repository, scoped to
+   the default branch only: require a pull request before merging, require **1** approving
+   review so a student cannot merge their own work, and block force pushes and deletions.
+   Because the ruleset targets only `~DEFAULT_BRANCH`, `student/*` stays unprotected and
+   students can force-push their own rebases. Organization admins keep a bypass, so your own
+   commits to `main` are unaffected.
 
 Keep the three extension-point files empty on `main` —
 `explain-engine/CustomModelIndex.js`, `src/model-interface/custom-registry.ts`, and the

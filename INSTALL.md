@@ -1,7 +1,7 @@
 # Installation Guide
 
 This is the **Explain** web app — a Vue 3 + Vite + TypeScript front end around the
-`explain/` physiological simulation engine (which runs in a Web Worker). This guide covers
+`explain-engine/` physiological simulation engine (which runs in a Web Worker). This guide covers
 **macOS**, **Windows**, and **Linux**.
 
 > **The simulator runs fully standalone.** `npm install` + `npm run dev` is all you need to
@@ -100,7 +100,16 @@ sudo apt-get install -y nodejs git
 ## 2. Get the code and install dependencies
 
 ```sh
-git clone --recurse-submodules <repository-url>
+git clone --recurse-submodules https://github.com/explain-labs/explain-ui.git
+cd explain-ui
+npm install
+```
+
+If you are a student who has been added as a collaborator and will push a branch of your
+own, clone over SSH instead so your key authenticates the push:
+
+```sh
+git clone --recurse-submodules git@github.com:explain-labs/explain-ui.git
 cd explain-ui
 npm install
 ```
@@ -117,6 +126,11 @@ the lockfile stays authoritative.
 > On Windows, if you cloned into a deeply nested folder and hit a path-length error, either
 > clone closer to the drive root (e.g. `C:\dev\`) or enable long paths:
 > `git config --system core.longpaths true`.
+
+> **Students:** stop here and switch to [`STUDENT_WORKFLOW.md`](STUDENT_WORKFLOW.md) for the
+> one-time branch setup (`scripts/setup-student.sh`, or the same steps by hand). It picks up
+> exactly where this section leaves off and gives you your own `student/<name>` branch in
+> both repositories. The rest of this guide is about running and building the app.
 
 ---
 
