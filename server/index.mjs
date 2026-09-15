@@ -262,7 +262,8 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
-server.listen(PORT, () => {
+// HOST unset = all interfaces (unchanged default); production sets HOST=127.0.0.1 behind a proxy.
+server.listen({ port: PORT, host: process.env.HOST || undefined }, () => {
   console.log(`Explain app server on http://localhost:${PORT}`);
   console.log(`  static dir : ${path.relative(ROOT, DIST)}/`);
   console.log(`  /api/chat  : ${BOT_URL ? `-> ${BOT_URL}/v1/ask` : "NOT configured (set EXPLAIN_BOT_URL/KEY)"}`);

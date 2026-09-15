@@ -27,6 +27,7 @@ Then open `http://localhost:8080` (override with `PORT`).
 | `EXPLAIN_BOT_URL` | bot base URL, e.g. `http://lucys-mac-mini.tail990503.ts.net:8091` (proxy hits `${EXPLAIN_BOT_URL}/v1/ask`) |
 | `EXPLAIN_BOT_API_KEY` | bot `X-API-Key` |
 | `PORT` | listen port (default `8080`) |
+| `HOST` | listen address (default: all interfaces; set `127.0.0.1` behind a reverse proxy) |
 | `DIST_DIR` | static dir (default `dist`) |
 
 The same `.env.local` used by `npm run dev` works here via `--env-file`

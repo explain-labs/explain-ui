@@ -171,7 +171,8 @@ npm run start      # serves dist/ on http://localhost:8080 (override with PORT)
 static build **with the COOP/COEP headers the realtime engine prefers** and hosts the
 optional `/api/*` backend routes. It loads `.env.local` via `--env-file` (Node 20.6+). If your
 process manager already injects env vars, use `npm run serve` instead. Override the port with
-the `PORT` env var and the static directory with `DIST_DIR`.
+the `PORT` env var and the static directory with `DIST_DIR`. Behind a reverse proxy, set
+`HOST=127.0.0.1` so the server only listens locally (default: all interfaces).
 
 > **Why the COOP/COEP headers?** They make `crossOriginIsolated === true`, which enables
 > `SharedArrayBuffer` — the preferred realtime data-plane transport. The engine
