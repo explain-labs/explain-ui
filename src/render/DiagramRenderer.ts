@@ -1,5 +1,5 @@
 import { Application, Assets, Sprite, Graphics, Text, Texture } from "pixi.js";
-import { animMagOffset, animTintOffset } from "@explain/helpers/RealtimeChannels";
+import { ANIM_TIME_SLOT, animMagOffset, animTintOffset } from "@explain/helpers/RealtimeChannels";
 import { DEOX_RGB, TO2_HI, TO2_LO, rgbFromTo2 } from "./diagramConstants";
 import type {
   AnimFrame,
@@ -714,6 +714,10 @@ export class DiagramRenderer implements RendererAdapter {
   onFrame(_chart: ChartFrame | null, anim: AnimFrame | null) {
     if (!this.ready || !anim) return;
     const frame = anim.frame;
+    // After a (re)build the reader hands over the fresh, still zero-filled anim
+    // buffer once. Real frames are packed after model steps (time > 0); an
+    // empty one would reset every disc to the placeholder volume.
+    if (!(frame[ANIM_TIME_SLOT] > 0)) return;
 
     // compartments: scale by volume, tint by to2 (smoothed), glow by fill
     for (const name in this.comps) {
