@@ -653,6 +653,19 @@ export class DiagramRenderer implements RendererAdapter {
       const cy = this.yCenter + this.yOffset;
       g.arc(cx, cy, r, a0, a1, pathType === "arc_r");
       geom = { type: "arc", cx, cy, r, from: a0, to: a1 };
+    } else if (pathType === "arc_flip") {
+      // mirrored chord-arc: the centre on the other side of the chord, so the curve
+      // bends the opposite way; the short arc then runs anticlockwise. a2 is unwrapped
+      // below a1 so pointOnPath/samplePath interpolate along the drawn arc. (A separate
+      // type because many shipped diagrams set "arc_r" on off-ring connectors, which
+      // this branch has always drawn like "arc".)
+      const r = this.ringR;
+      const { cx, cy } = circleCenterThrough(to.x, to.y, from.x, from.y, r);
+      const a1 = angleOnCircle(cx, cy, from.x, from.y);
+      let a2 = angleOnCircle(cx, cy, to.x, to.y);
+      while (a2 > a1) a2 -= 2 * Math.PI;
+      g.arc(cx, cy, r, a1, a2, true);
+      geom = { type: "arc", cx, cy, r, from: a1, to: a2 };
     } else {
       // chord-arc: circle of radius r passing through both endpoint sprites
       const r = this.ringR;
