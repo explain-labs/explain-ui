@@ -39,6 +39,7 @@ export class MonitorRenderer implements RendererAdapter {
   private headCol = -1; // current sweep column (shared across lanes)
   private nums: Record<string, number> = {};
   private highlight = new Set<number>(); // lane indices framed for a lesson step
+  private hidden = new Set<number>(); // lane indices left out of the layout
 
   constructor(el: HTMLElement, lanes: MonitorLane[], windowS = DEFAULT_WINDOW_S) {
     this.el = el;
@@ -74,6 +75,15 @@ export class MonitorRenderer implements RendererAdapter {
    *  Pulses while frames arrive; static when the sim is paused. */
   setHighlight(indices: number[]) {
     this.highlight = new Set(indices);
+    this.draw();
+  }
+
+  /** Leave lanes (by index) out of the layout; the rest share the height. [] shows all.
+   * A lane that comes back starts from an empty sweep rather than stale data. */
+  setHidden(indices: number[]) {
+    const next = new Set(indices);
+    for (const li of next) if (!this.hidden.has(li)) this.filled[li]?.fill(0);
+    this.hidden = next;
     this.draw();
   }
 
@@ -119,16 +129,17 @@ export class MonitorRenderer implements RendererAdapter {
     ctx.fillRect(0, 0, w, h);
 
     const plotR = w - GUTTER; // right edge of the waveform area
-    const n = this.lanes.length;
-    const laneH = h / n;
+    const visible = this.lanes.map((_, li) => li).filter((li) => !this.hidden.has(li));
+    const laneH = h / Math.max(1, visible.length);
 
-    for (let li = 0; li < n; li++) {
+    for (let k = 0; k < visible.length; k++) {
+      const li = visible[k];
       const lane = this.lanes[li];
-      const top = li * laneH;
+      const top = k * laneH;
       const bot = top + laneH;
 
       // lane divider
-      if (li > 0) {
+      if (k > 0) {
         ctx.strokeStyle = "rgba(255,255,255,0.07)";
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -249,21 +260,36 @@ export class MonitorRenderer implements RendererAdapter {
     const value = lane.readNumeric(this.nums);
     const sub = lane.readSub?.(this.nums);
     const cx = w - 10;
-    const midY = (top + bot) / 2;
 
-    ctx.fillStyle = lane.color;
+    // unit on the top line, level with the lane label
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.textAlign = "right";
     ctx.textBaseline = "alphabetic";
-    ctx.font = "600 26px system-ui, sans-serif";
-    ctx.fillText(value, cx, midY + (sub ? 0 : 6));
-    if (sub) {
-      ctx.font = "12px system-ui, sans-serif";
-      ctx.fillStyle = lane.color + "cc";
-      ctx.fillText(sub, cx, midY + 16);
-    }
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.font = "10px system-ui, sans-serif";
     ctx.fillText(lane.unit, cx, top + 14);
+
+    // The value (and sub-value) fill the space below the unit line. Short lanes
+    // shrink the font and move the sub-value beside the value instead of under it.
+    const CAP = 0.72; // cap height as a fraction of the font size
+    const MAX = 26; // value font size in a roomy lane
+    const SUB = 12; // sub-value font size
+    const areaTop = top + 18;
+    const avail = Math.max(8, bot - 4 - areaTop);
+    const stacked = !!sub && avail >= MAX * CAP + 4 + SUB * CAP;
+    const below = stacked ? 4 + SUB * CAP : 0;
+    const size = Math.max(10, Math.min(MAX, (avail - below) / CAP));
+    const baseline = areaTop + (avail - size * CAP - below) / 2 + size * CAP;
+
+    ctx.fillStyle = lane.color;
+    ctx.font = `600 ${size.toFixed(1)}px system-ui, sans-serif`;
+    ctx.fillText(value, cx, baseline);
+    if (sub) {
+      const valueW = ctx.measureText(value).width;
+      ctx.font = `${SUB}px system-ui, sans-serif`;
+      ctx.fillStyle = lane.color + "cc";
+      if (stacked) ctx.fillText(sub, cx, baseline + below);
+      else ctx.fillText(sub, cx - valueW - 4, baseline);
+    }
   }
 
   private clearBuffers() {

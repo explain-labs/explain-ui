@@ -59,8 +59,8 @@ const monitorsStore = useMonitorsStore();
 const isolated = globalThis.crossOriginIsolated === true;
 const calcSecs = ref(10);
 const CALC_OPTIONS = [5, 10, 30, 60, 120, 300]; // seconds to calculate
-const vizTab = ref("diagram"); // active visualization tab: diagram | chart | loop | monitor | ventilator | chat | docs
-const monitorTab = ref("monitoring"); // active right-column tab (more to come)
+const vizTab = ref("diagram"); // active visualization tab: diagram | chart | loop | chat | docs
+const monitorTab = ref("monitoring"); // active right-column tab: monitoring | monitor | ventilator
 const controlTab = ref("editor"); // active left-column tab (more to come)
 const editingMonitors = ref(false); // inline edit mode for the monitoring panel
 const monitorPrefs = useMonitorPrefs(); // compact / unitSystem / sparkWindowSec (persisted)
@@ -337,7 +337,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </div>
     </div>
 
-    <!-- Parameters (left 1/4) · Diagram/Chart/PV-loop tabs (center 1/2) · Monitor (right 1/4) -->
+    <!-- Parameters (left 1/4) · Diagram/Chart/PV-loop tabs (center 1/2) · Numerics/patient monitor/ventilator graphs (right 1/4) -->
     <div v-if="modelReady" class="flex flex-col lg:flex-row gap-3 items-start">
       <div class="w-full lg:w-1/4 min-w-0">
         <Tabs v-model:value="controlTab">
@@ -423,12 +423,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <Tab value="loop" v-tooltip.top="'PV-loop'" aria-label="PV-loop">
               <i class="pi pi-chart-scatter"></i>
             </Tab>
-            <Tab value="monitor" v-tooltip.top="'Patient monitor'" aria-label="Patient monitor">
-              <i class="pi pi-desktop"></i>
-            </Tab>
-            <Tab value="ventilator" v-tooltip.top="'Ventilator graphs'" aria-label="Ventilator graphs">
-              <i class="pi pi-cloud"></i>
-            </Tab>
             <Tab value="chat" v-tooltip.top="'Explain AI Bot'" aria-label="Explain AI Bot">
               <i class="pi pi-comments"></i>
             </Tab>
@@ -446,12 +440,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <TabPanel value="loop">
               <LoopChart />
             </TabPanel>
-            <TabPanel value="monitor">
-              <Monitor />
-            </TabPanel>
-            <TabPanel value="ventilator">
-              <VentilatorScope />
-            </TabPanel>
             <TabPanel value="chat">
               <ChatPanel />
             </TabPanel>
@@ -466,6 +454,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           <TabList>
             <Tab value="monitoring" v-tooltip.top="'Monitoring'" aria-label="Monitoring">
               <i class="pi pi-gauge"></i>
+            </Tab>
+            <Tab value="monitor" v-tooltip.top="'Patient monitor'" aria-label="Patient monitor">
+              <i class="pi pi-desktop"></i>
+            </Tab>
+            <Tab value="ventilator" v-tooltip.top="'Ventilator graphs'" aria-label="Ventilator graphs">
+              <i class="pi pi-cloud"></i>
             </Tab>
           </TabList>
           <TabPanels>
@@ -620,6 +614,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   No monitor groups. Add one to start.
                 </p>
               </div>
+            </TabPanel>
+            <TabPanel value="monitor">
+              <!-- shorter than the component default to suit the narrow column -->
+              <Monitor height="35vh" min-height="260px" />
+            </TabPanel>
+            <TabPanel value="ventilator">
+              <VentilatorScope height="35vh" min-height="260px" />
             </TabPanel>
           </TabPanels>
         </Tabs>
