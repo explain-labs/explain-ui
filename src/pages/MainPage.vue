@@ -672,7 +672,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <span class="opacity-60">seconds</span>
       </div>
 
-      <!-- right: local model loading (model developers only) + state save/load -->
+      <!-- right: scenario picker (full for model developers, read-only for everyone else) + state save/load -->
       <div class="flex items-center gap-1.5 justify-self-end">
         <template v-if="auth.user?.modelDeveloper">
           <span class="opacity-70">local models</span>
@@ -711,7 +711,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             @click="current && deleteScenario(current)"
           />
         </template>
-        <template v-if="auth.lesson?.allowScenarioSwitch && !auth.user?.modelDeveloper">
+        <template
+          v-if="!auth.user?.modelDeveloper && (!auth.lesson || auth.lesson.allowScenarioSwitch)"
+        >
           <span class="opacity-70">scenario</span>
           <Select v-model="current" :options="scenarios" size="small" class="w-56" />
         </template>
