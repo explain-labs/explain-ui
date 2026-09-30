@@ -40,3 +40,26 @@ export async function getStatesCollection() {
   const client = await getClient();
   return client.db().collection(STATES_COLLECTION);
 }
+
+// Collection of already-used launch-token ids (jti), for replay protection of
+// externally signed nicupicu launch tokens. A TTL index on `expiresAt` lets
+// MongoDB purge each entry once its token could no longer verify anyway; the
+// unique index on `jti` makes "insert" double as an atomic "was it used?" check.
+const LAUNCH_JTI_COLLECTION = "launch_jti";
+let jtiIndexesReady = null;
+
+export async function getLaunchJtiCollection() {
+  const client = await getClient();
+  const col = client.db().collection(LAUNCH_JTI_COLLECTION);
+  if (!jtiIndexesReady) {
+    jtiIndexesReady = Promise.all([
+      col.createIndex({ jti: 1 }, { unique: true }),
+      col.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ]).catch((e) => {
+      jtiIndexesReady = null;
+      throw e;
+    });
+  }
+  await jtiIndexesReady;
+  return col;
+}

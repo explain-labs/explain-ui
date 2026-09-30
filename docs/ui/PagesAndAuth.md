@@ -71,6 +71,7 @@ The center `chat` tab hosts `ChatPanel.vue` (see [ChatAndBot](./ChatAndBot.md)).
 
 ### Startup load priority (`onMounted`)
 
+0. A **lesson account** (nicupicu.nl launch) always opens its own lesson via `loadLesson()`: `lesson.stateId` if set, else `lesson.scenario`. See [Lesson launch](#lesson-launch-nicupicunl) below.
 1. A model developer's chosen **local** scenario (`defaultLocalState`, if present in the scenario list).
 2. The user's default **cloud** state (`defaultState` → `statesStore.loadState` → `loadFromObject`).
 3. The bundled `term_neonate` (or the first available scenario).
@@ -83,6 +84,16 @@ Both are branded, centered forms backed entirely by the auth store; both call `a
 
 - **`LoginPage`** — email + password (`Password`, `:feedback="false"`, `toggle-mask`). On success routes to `redirectTarget()` — the `?redirect=` query (only if it starts with `/`) or `/`.
 - **`RegisterPage`** — name, email, institution, password + confirm. Client-side checks: name & email non-empty, password ≥ `MIN_PASSWORD` (8), passwords match (`mismatch`/`canSubmit`). Creates a non-admin account; the server signs the user in (cookie) on success → routes to `/`. Open self-registration.
+
+## Lesson launch (nicupicu.nl)
+
+`GET /api/auth/launch?t=<token>` logs a visitor straight into a per-lesion **lesson account** and redirects to `/`, skipping `/login`. Accounts are managed with `scripts/lesson-account.mjs`; the token formats, the reference signers for nicupicu and the server env vars are in [NICUPICU_INTEGRATION](./NICUPICU_INTEGRATION.md).
+
+- `AuthUser.lesson` (a `LessonProfile`, `null` for normal accounts) and the `auth.lesson` getter carry the profile: `id`, `title`, `scenario`, `stateId`, `allowScenarioSwitch`, `readonly`.
+- In lesson mode `MainPage` shows the lesson title plus a **Restart lesson** button (`loadLesson()`) instead of the email, hides `SaveStatePanel` when `readonly`, and shows a plain scenario `Select` only when `allowScenarioSwitch`.
+- The real gate is on the server: `server/states.mjs` answers 403 to save/delete/set-default for read-only lesson accounts, and lets a lesson read exactly its own `lesson.stateId`.
+- A failed launch lands on `/login?launch=invalid` (or `=error`); `LoginPage` shows a short explanation.
+- **Dev:** `fetchMe()` first asks `/api/auth/me` and adopts the session only if it is a lesson account, so a launch can be tested under `npm run dev`; otherwise it keeps the local developer.
 
 ## Wiring
 
@@ -103,7 +114,7 @@ router.beforeEach ── auth.fetchMe() (cookie rehydrate; DEV → makeDevUser)
 
 - **No token, ever.** The session is an HttpOnly cookie; the store mirrors public fields only. Every auth fetch must send `credentials: "include"`.
 - **Guard ≠ security.** `beforeEach` is a UX gate; a determined client can route freely — the server cookie check on each `/api/*` call is the boundary.
-- **Dev auto-login bypasses MongoDB.** `import.meta.env.DEV` makes `fetchMe()` mint a local admin/model-developer `developer@localhost` and never hits `/api/auth`. Production (`DEV === false`) always uses the real login. The dev developer's startup default lives in `localStorage`, not MongoDB.
+- **Dev auto-login bypasses MongoDB.** `import.meta.env.DEV` makes `fetchMe()` mint a local admin/model-developer `developer@localhost`; the only real session it adopts in dev is a lesson launch. Production (`DEV === false`) always uses the real login. The dev developer's startup default lives in `localStorage`, not MongoDB.
 - **`redirect` is validated.** `redirectTarget()` only honours a `?redirect=` that starts with `/` (open-redirect guard).
 - **Model-developer-only UI.** The scenario picker, startup-star toggle, and delete-definition button render only for `auth.user?.modelDeveloper`; `AdminUsersButton` only for `admin`.
 - **COI matters for performance.** The bottom-bar `COI` flag reflects `globalThis.crossOriginIsolated`; the SharedArrayBuffer realtime transport is active only when the app is cross-origin isolated.
