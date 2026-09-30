@@ -34,7 +34,12 @@ export class MonitorRenderer implements RendererAdapter {
   private idx: number[] = []; // slot index per lane (-1 until resolved)
 
   private plotW = 0; // plot-area width in CSS px == column-store length
-  private cols: Float64Array[] = []; // per lane: value at each sweep column
+  // Several samples land in each column (e.g. ~6 at 200 Hz over a 6 s sweep on a
+  // narrow canvas), so each column keeps the min/max envelope, not just the last
+  // sample — otherwise short spikes such as the ECG R wave come and go.
+  private cols: Float64Array[] = []; // per lane: last sample in each sweep column
+  private colMin: Float64Array[] = []; // per lane: lowest sample in each column
+  private colMax: Float64Array[] = []; // per lane: highest sample in each column
   private filled: Uint8Array[] = []; // per lane: 1 if that column has data
   private headCol = -1; // current sweep column (shared across lanes)
   private nums: Record<string, number> = {};
@@ -102,11 +107,38 @@ export class MonitorRenderer implements RendererAdapter {
       const t = rows[base];
       const phase = ((t % w) + w) % w; // 0..windowS, robust to negatives
       const c = Math.min(this.plotW - 1, Math.floor((phase / w) * this.plotW));
+      const prev = this.headCol;
+      const fresh = c !== prev;
+      // columns the head jumped over (samples sparser than columns on a wide
+      // canvas); a jump of half the sweep or more is a restart, not a gap
+      const skipped = prev >= 0 && fresh ? (c - prev + this.plotW) % this.plotW - 1 : 0;
+      const gap = skipped > 0 && skipped < this.plotW / 2 ? skipped : 0;
       for (let li = 0; li < this.lanes.length; li++) {
         const si = this.idx[li];
         if (si < 0) continue;
-        this.cols[li][c] = rows[base + si];
-        this.filled[li][c] = 1;
+        const v = rows[base + si];
+        const last = this.cols[li];
+        const mn = this.colMin[li];
+        const mx = this.colMax[li];
+        const fl = this.filled[li];
+        // interpolate across skipped columns so they don't keep the previous sweep
+        if (gap && fl[prev]) {
+          const v0 = last[prev];
+          for (let k = 1; k <= gap; k++) {
+            const cc = (prev + k) % this.plotW;
+            const iv = v0 + ((v - v0) * k) / (gap + 1);
+            last[cc] = mn[cc] = mx[cc] = iv;
+            fl[cc] = 1;
+          }
+        }
+        if (fresh || !fl[c]) {
+          mn[c] = mx[c] = v;
+        } else {
+          if (v < mn[c]) mn[c] = v;
+          if (v > mx[c]) mx[c] = v;
+        }
+        last[c] = v;
+        fl[c] = 1;
       }
       this.headCol = c;
     }
@@ -194,6 +226,8 @@ export class MonitorRenderer implements RendererAdapter {
     plotR: number,
   ) {
     const col = this.cols[li];
+    const mn = this.colMin[li];
+    const mx = this.colMax[li];
     const fl = this.filled[li];
     if (!col) return;
 
@@ -205,9 +239,8 @@ export class MonitorRenderer implements RendererAdapter {
     } else {
       for (let c = 0; c < this.plotW; c++) {
         if (!fl[c]) continue;
-        const v = col[c];
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
+        if (mn[c] < lo) lo = mn[c];
+        if (mx[c] > hi) hi = mx[c];
       }
       if (lo === Infinity) return; // nothing to draw yet
       if (hi - lo < 1e-9) {
@@ -238,15 +271,22 @@ export class MonitorRenderer implements RendererAdapter {
         if (lane.fill) {
           ctx.beginPath();
           ctx.moveTo(sx(c), baseline);
-          for (let k = c; k <= end; k++) ctx.lineTo(sx(k), sy(col[k]));
+          for (let k = c; k <= end; k++) ctx.lineTo(sx(k), sy(mx[k]));
           ctx.lineTo(sx(end), baseline);
           ctx.closePath();
           ctx.fillStyle = lane.color + "22"; // ~13% alpha
           ctx.fill();
         }
         ctx.beginPath();
+        // per column: full min→max extent, ending on the last sample so the
+        // next column joins on
         ctx.moveTo(sx(c), sy(col[c]));
-        for (let k = c + 1; k <= end; k++) ctx.lineTo(sx(k), sy(col[k]));
+        for (let k = c; k <= end; k++) {
+          const x = sx(k);
+          ctx.lineTo(x, sy(mn[k]));
+          ctx.lineTo(x, sy(mx[k]));
+          ctx.lineTo(x, sy(col[k]));
+        }
         ctx.strokeStyle = lane.color;
         ctx.lineWidth = 1.5;
         ctx.stroke();
@@ -301,6 +341,8 @@ export class MonitorRenderer implements RendererAdapter {
 
   private alloc() {
     this.cols = this.lanes.map(() => new Float64Array(this.plotW));
+    this.colMin = this.lanes.map(() => new Float64Array(this.plotW));
+    this.colMax = this.lanes.map(() => new Float64Array(this.plotW));
     this.filled = this.lanes.map(() => new Uint8Array(this.plotW));
     this.headCol = -1;
   }
