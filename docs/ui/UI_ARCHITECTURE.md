@@ -98,13 +98,13 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 │ controlTab    │ vizTab                                        │ monitorTab                   │
 │ (left ¼)      │ (center ½)                                    │ (right ¼)                    │
 │               │                                               │                              │
-│ editor        │ diagram | chart | loop | monitor | ventilator │ monitoring                   │
-│ ventilator    │   | chat                                      │   (NumericReadoutPanel ×N,   │
-│ ecls          │                                               │    dashboard switcher,       │
-│ resuscitation │ Diagram · RealtimeChart · LoopChart ·         │    compact/trend prefs,      │
-│ pregnancy     │ Monitor · VentilatorScope · ChatPanel         │    manage/export)            │
-│ scaler        │                                               │                              │
-│ events        │                                               │                              │
+│ editor        │ diagram | chart | loop | chat | docs          │ monitoring | monitor |       │
+│ ventilator    │                                               │   ventilator                 │
+│ ecls          │ Diagram · RealtimeChart · LoopChart ·         │ (NumericReadoutPanel ×N,     │
+│ resuscitation │ ChatPanel · DocViewer                         │  dashboard switcher,         │
+│ pregnancy     │                                               │  compact/trend prefs,        │
+│ scaler        │                                               │  manage/export) ·            │
+│ events        │                                               │ Monitor · VentilatorScope    │
 ├───────────────┴──────────────────────────────────────────────┴──────────────────────────────┤
 └─ bottom bar ── COI/MODEL/STATUS · ▶/■ + fast-forward(calcSecs) · local-scenario loader · Save ┘
 ```
@@ -112,8 +112,8 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 | Column | Tab values | Components | Doc |
 |---|---|---|---|
 | Left (`controlTab`) | `editor` `ventilator` `ecls` `resuscitation` `pregnancy` `scaler` `events` | `ModelEditor`, `VentilatorPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
-| Center (`vizTab`) | `diagram` `chart` `loop` `monitor` `ventilator` `chat` | `Diagram`, `RealtimeChart`, `LoopChart`, `Monitor`, `VentilatorScope`, `ChatPanel` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md) |
-| Right (`monitorTab`) | `monitoring` | `NumericReadoutPanel` (×group) | [Numerics](./Numerics.md) |
+| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md) |
+| Right (`monitorTab`) | `monitoring` `monitor` `ventilator` | `NumericReadoutPanel` (×group), `Monitor`, `VentilatorScope` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
 
 The bottom bar holds the run controls: a single ▶/■ toggle (also bound to **Spacebar**, suppressed
 while typing in inputs), a fast-forward `calculate(calcSecs)` button with a `CALC_OPTIONS`

@@ -15,6 +15,14 @@ const { addRenderer, removeRenderer } = useRealtimeBus();
 const { watch: watchProps, watchSlow, slowValues, modelReady } = useExplain();
 let adapter: MonitorRenderer | null = null;
 
+const props = withDefaults(
+  defineProps<{
+    height?: string; // CSS height of the sweep canvas
+    minHeight?: string;
+  }>(),
+  { height: "70vh", minHeight: "480px" },
+);
+
 // format a slow-stream value, "—" when absent
 const f = (n: Record<string, number>, p: string, d: number, scale = 1) => {
   const v = n[p];
@@ -118,7 +126,7 @@ onBeforeUnmount(() => {
     <div
       ref="el"
       class="w-full rounded overflow-hidden"
-      style="height: 70vh; min-height: 480px; background: #0a0e14"
+      :style="{ height: props.height, minHeight: props.minHeight, background: '#0a0e14' }"
     ></div>
   </div>
 </template>

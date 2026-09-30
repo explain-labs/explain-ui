@@ -60,8 +60,8 @@ Rendered only when `modelReady`. A sticky top header (logo, active-state name, u
 | Column | Tab model | Tabs |
 |---|---|---|
 | **Left ¼** — controls | `controlTab` (`"editor"`) | Model editor · Ventilator · ECLS · Resuscitation · Pregnancy/Labor · Scaler · Event scheduler |
-| **Center ½** — visualization | `vizTab` (`"diagram"`) | `diagram` · `chart` · `loop` (PV-loop) · `monitor` · `ventilator` · `chat` |
-| **Right ¼** — numerics | `monitorTab` (`"monitoring"`) | Monitoring (`NumericReadoutPanel` per group + export/compact/trend-window/manage controls) |
+| **Center ½** — visualization | `vizTab` (`"diagram"`) | `diagram` · `chart` · `loop` (PV-loop) · `chat` · `docs` |
+| **Right ¼** — numerics & waveforms | `monitorTab` (`"monitoring"`) | Monitoring (`NumericReadoutPanel` per group + export/compact/trend-window/manage controls) · `monitor` (patient monitor) · `ventilator` (ventilator graphs) |
 
 The center `chat` tab hosts `ChatPanel.vue` (see [ChatAndBot](./ChatAndBot.md)). The monitoring column derives its groups from the monitors store, synced to the scenario's `configuration.monitors` on every (re)build (`watch(modelReady, …, {immediate:true})`), and supports inline dashboard management + CSV/TSV snapshot export.
 

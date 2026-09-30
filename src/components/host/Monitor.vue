@@ -12,7 +12,7 @@ import { ALL_LANES, LANE_DEFS, type LaneId } from "@/render/monitorLanes";
 // reactivity; only the slow numerics do (safe at ~1 Hz).
 const el = ref<HTMLDivElement | null>(null);
 const { addRenderer, removeRenderer } = useRealtimeBus();
-const { watch: watchProps, watchSlow, slowValues, modelReady } = useExplain();
+const { watch: watchProps, watchSlow, slowValues, modelState, modelReady } = useExplain();
 let adapter: MonitorRenderer | null = null;
 
 const props = withDefaults(
@@ -30,7 +30,10 @@ const props = withDefaults(
 // mount); hosts that need a different set remount it.
 const LANES = props.lanes.map((id) => LANE_DEFS[id]);
 const FAST_PATHS = LANES.map((l) => l.signal);
-const SLOW_PATHS = LANES.flatMap((l) => l.slow);
+// The CO₂ lane is only shown while the ventilator is on (capnography needs the
+// airway circuit). Its on/off state rides the slow stream as well.
+const VENT_ENABLED = "Ventilator.is_enabled";
+const SLOW_PATHS = [...LANES.flatMap((l) => l.slow), VENT_ENABLED];
 
 // sweep window (full left→right travel time)
 const WINDOW_OPTIONS = [
@@ -47,6 +50,25 @@ const latest = computed<Record<string, number>>(() => {
 });
 
 watch(windowS, (v) => adapter?.setWindow(v));
+
+// Slow-stream value when present; otherwise the last full state snapshot (the
+// collector drops watches on disabled models after a calculate()).
+const ventOn = computed<boolean>(() => {
+  const v = (latest.value as Record<string, unknown>)[VENT_ENABLED];
+  if (typeof v === "boolean") return v;
+  return !!(modelState.value as any)?.models?.Ventilator?.is_enabled;
+});
+// calculate() ends with that clean-up then sends a state snapshot — re-add the
+// watch so switching the ventilator back on is picked up
+watch(modelState, () => {
+  if (modelReady.value) watchSlow([VENT_ENABLED]);
+});
+
+function applyHidden() {
+  const i = props.lanes.indexOf("co2");
+  adapter?.setHidden(i >= 0 && !ventOn.value ? [i] : []);
+}
+watch(ventOn, applyHidden);
 
 function applyHighlight() {
   const ids = props.highlight ?? [];
@@ -70,6 +92,7 @@ onMounted(() => {
   watchSlow(SLOW_PATHS); // numerics on the slow stream
   adapter.setNumerics(latest.value);
   applyHighlight();
+  applyHidden();
 });
 
 onBeforeUnmount(() => {
