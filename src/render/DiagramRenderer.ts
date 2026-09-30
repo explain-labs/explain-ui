@@ -720,26 +720,7 @@ export class DiagramRenderer implements RendererAdapter {
       const idx = this.animIndex[name];
       if (idx === undefined) continue;
       const node = this.comps[name];
-      const mag = frame[animMagOffset(idx)];
-      const r = radiusFromVolume(mag > 0 ? mag : 0.15);
-      node.lastR = r;
-      this.setCompartmentScale(node, r);
-      if (!node.layout.general.tinting) continue;
-
-      // ease the tint toward the target colour to damp per-frame to2 flicker
-      node.lastTo2 = frame[animTintOffset(idx)];
-      const tgt = rgbFromTo2(node.lastTo2, this.to2Lo, this.to2Hi);
-      node.cr += (tgt[0] - node.cr) * TINT_LERP;
-      node.cg += (tgt[1] - node.cg) * TINT_LERP;
-      node.cb += (tgt[2] - node.cb) * TINT_LERP;
-      const rgb: [number, number, number] = [node.cr, node.cg, node.cb];
-      node.sprite.tint = packRgb(rgb);
-      if (node.rim) node.rim.tint = packRgb(lerpRgb(rgb, WHITE_RGB, RIM_LIGHTEN));
-      if (node.glow) {
-        node.glow.tint = packRgb(rgb);
-        const fill = clamp01((r - 0.2) / 0.35); // fuller → brighter halo
-        node.glow.alpha = GLOW_ALPHA_MAX * (0.25 + 0.75 * fill);
-      }
+      this.applyCompartment(node, frame[animMagOffset(idx)], frame[animTintOffset(idx)], TINT_LERP);
     }
 
     // connectors: the path stays a fixed neutral grey; the dot train streams
@@ -750,6 +731,50 @@ export class DiagramRenderer implements RendererAdapter {
       const flow = frame[animMagOffset(idx)];
       const tint = frame[animTintOffset(idx)];
       this.advanceDots(conn, flow, tint);
+    }
+  }
+
+  /** Size a compartment by volume and ease its tint toward to2 by `lerp`
+   *  (1 = snap). Shared by the realtime frames and the state-snapshot seed. */
+  private applyCompartment(node: CompNode, vol: number, to2: number, lerp: number) {
+    const r = radiusFromVolume(vol > 0 ? vol : 0.15);
+    node.lastR = r;
+    this.setCompartmentScale(node, r);
+    if (!node.layout.general.tinting) return;
+
+    // ease the tint toward the target colour to damp per-frame to2 flicker
+    node.lastTo2 = to2;
+    const tgt = rgbFromTo2(node.lastTo2, this.to2Lo, this.to2Hi);
+    node.cr += (tgt[0] - node.cr) * lerp;
+    node.cg += (tgt[1] - node.cg) * lerp;
+    node.cb += (tgt[2] - node.cb) * lerp;
+    const rgb: [number, number, number] = [node.cr, node.cg, node.cb];
+    node.sprite.tint = packRgb(rgb);
+    if (node.rim) node.rim.tint = packRgb(lerpRgb(rgb, WHITE_RGB, RIM_LIGHTEN));
+    if (node.glow) {
+      node.glow.tint = packRgb(rgb);
+      const fill = clamp01((r - 0.2) / 0.35); // fuller → brighter halo
+      node.glow.alpha = GLOW_ALPHA_MAX * (0.25 + 0.75 * fill);
+    }
+  }
+
+  /** Size + tint compartments from a full model-state snapshot. Anim frames
+   *  only flow while the sim runs, so without this a freshly loaded (or
+   *  fast-forwarded) model shows placeholder-sized discs until Play. Mirrors
+   *  AnimationPacker: volume summed over the compartment's models, tint from
+   *  the first of them carrying a to2. */
+  seedFromModels(models: Record<string, any> | null | undefined) {
+    if (!this.ready || !models) return;
+    for (const name in this.comps) {
+      const node = this.comps[name];
+      if (node.layout.general.animatedBy !== "vol") continue;
+      const names = this.diagram.components[name]?.models;
+      const refs = (Array.isArray(names) ? names : []).map((n: string) => models[n]).filter(Boolean);
+      if (!refs.length) continue;
+      let vol = 0;
+      for (const m of refs) if (typeof m.vol === "number") vol += m.vol;
+      const tintRef = refs.find((m: any) => typeof m.to2 === "number");
+      this.applyCompartment(node, vol, tintRef ? tintRef.to2 : 0, 1);
     }
   }
 
