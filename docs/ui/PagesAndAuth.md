@@ -25,12 +25,14 @@ The app is a three-route Vue SPA: a single working page (`MainPage.vue`) behind 
 | `/` | `main` | `MainPage` | `requiresAuth: true` |
 | `/login` | `login` | `LoginPage` | — |
 | `/register` | `register` | `RegisterPage` | — |
+| `/lesson/:id` | `lesson` | `LessonPage` (lazy) | `requiresAuth: true` |
 
 History mode is `createWebHistory()`. `beforeEach(async (to))`:
 
 1. On the first navigation, rehydrate the session from the cookie — `if (!auth.ready) await auth.fetchMe()`.
 2. A `requiresAuth` route hit by an unauthenticated user → redirect to `{ name: "login", query: { redirect: to.fullPath } }`.
 3. An already-authed user visiting `/login` or `/register` → bounced to `{ name: "main" }`.
+4. Lessons: a lesson account whose `lesson.id` has lesson content is sent from `main` to its own `/lesson/<id>` (and kept there); an unknown lesson id goes to `main`. See [LESSONS](./LESSONS.md).
 
 The guard comment is explicit that this is a UX gate; the server's cookie check is the real boundary.
 

@@ -38,6 +38,7 @@ export class MonitorRenderer implements RendererAdapter {
   private filled: Uint8Array[] = []; // per lane: 1 if that column has data
   private headCol = -1; // current sweep column (shared across lanes)
   private nums: Record<string, number> = {};
+  private highlight = new Set<number>(); // lane indices framed for a lesson step
 
   constructor(el: HTMLElement, lanes: MonitorLane[], windowS = DEFAULT_WINDOW_S) {
     this.el = el;
@@ -67,6 +68,13 @@ export class MonitorRenderer implements RendererAdapter {
       this.clearBuffers();
       this.draw();
     }
+  }
+
+  /** Frame lanes (by index) in amber to point at them from a lesson; [] clears.
+   *  Pulses while frames arrive; static when the sim is paused. */
+  setHighlight(indices: number[]) {
+    this.highlight = new Set(indices);
+    this.draw();
   }
 
   /** Push the latest slow-stream numeric snapshot (dot-path keyed). */
@@ -135,8 +143,17 @@ export class MonitorRenderer implements RendererAdapter {
       ctx.lineTo(plotR + 0.5, bot);
       ctx.stroke();
 
+      // lesson highlight: amber frame round the whole lane
+      const hl = this.highlight.has(li);
+      if (hl) {
+        const pulse = 0.6 + 0.3 * Math.sin(performance.now() / 280);
+        ctx.strokeStyle = `rgba(251,191,36,${pulse.toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1.5, top + 1.5, w - 3, laneH - 3);
+      }
+
       // lane label
-      ctx.fillStyle = lane.color;
+      ctx.fillStyle = hl ? "#fbbf24" : lane.color;
       ctx.font = "11px system-ui, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";

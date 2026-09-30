@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, computed } from "vue";
+import { onMounted, onBeforeUnmount, ref, computed, watch } from "vue";
 import ToggleButton from "primevue/togglebutton";
 import ColorPicker from "primevue/colorpicker";
 import InputNumber from "primevue/inputnumber";
@@ -15,6 +15,24 @@ import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS } from "@/rend
 // type-only import is erased at build; the renderer (and PixiJS) is loaded
 // lazily below so Pixi lands in its own async chunk, not the main bundle.
 import type { DiagramRenderer as DiagramRendererT } from "@/render/DiagramRenderer";
+
+// `toolbar: false` hides the edit toggle, and with it every edit affordance (the
+// inspector and edit bar only render in edit mode) — used by the lesson page.
+// `highlight` points at components/connectors by diagram name (pulsing amber
+// outline + optional caption per name) — used by lesson steps.
+export interface DiagramHighlight {
+  names: string[];
+  labels?: Record<string, string>;
+}
+const props = withDefaults(
+  defineProps<{ toolbar?: boolean; height?: string; minHeight?: string; highlight?: DiagramHighlight | null }>(),
+  { toolbar: true, height: "65vh", minHeight: "480px", highlight: null },
+);
+
+function applyHighlight() {
+  adapter?.setHighlight(props.highlight?.names ?? [], props.highlight?.labels ?? {});
+}
+watch(() => props.highlight, applyHighlight, { deep: true });
 
 const el = ref<HTMLDivElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -104,6 +122,7 @@ async function mountRenderer(diagram: any) {
   if (diagram?.settings?.scaling > 0) globalScale.value = diagram.settings.scaling;
   if (diagram?.settings?.to2_lo > 0) to2Lo.value = diagram.settings.to2_lo;
   if (diagram?.settings?.to2_hi > 0) to2Hi.value = diagram.settings.to2_hi;
+  if (props.highlight) applyHighlight();
   addRenderer(adapter);
   // publish to the chat/bot pipeline so it can drive diagram edits while mounted
   diagramStore.register(adapter);
@@ -225,7 +244,7 @@ function download(text: string, name: string) {
 
 <template>
   <div class="flex flex-col gap-2">
-    <div class="flex items-center gap-2 flex-wrap">
+    <div v-if="toolbar" class="flex items-center gap-2 flex-wrap">
       <ToggleButton
         v-model="editMode"
         on-label="Editing"
@@ -425,7 +444,7 @@ function download(text: string, name: string) {
     <div
       ref="el"
       class="diagram"
-      style="width: 100%; height: 65vh; min-height: 480px; position: relative"
+      :style="{ width: '100%', height: props.height, minHeight: props.minHeight, position: 'relative' }"
     ></div>
 
     <div v-if="editMode" class="flex items-center gap-2 flex-wrap">

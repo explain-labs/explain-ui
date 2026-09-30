@@ -24,7 +24,13 @@ const props = defineProps<{
   group: MonitorGroup;
   editable?: boolean; // manage mode: show this group's edit pencil
   compact?: boolean; // hide sparklines + denser grid
+  highlight?: string[]; // primary paths whose cards get a ring (lesson steps)
 }>();
+
+function isHighlighted(param: MonitorParam): boolean {
+  const path = param.props?.[0];
+  return !!path && !!props.highlight?.includes(path);
+}
 
 // per-group edit state — only this group becomes editable when its pencil is
 // clicked, so groups are edited one at a time. Leaving manage mode closes it.
@@ -257,8 +263,11 @@ function removeSecondProp(param: MonitorParam) {
       <div
         v-for="(p, i) in parameters"
         :key="i"
-        class="border border-surface-700 bg-surface-800/40 rounded flex flex-col gap-0.5 cursor-help"
-        :class="compact ? 'px-1 py-0.5' : 'px-1.5 py-1'"
+        class="border bg-surface-800/40 rounded flex flex-col gap-0.5 cursor-help transition-colors"
+        :class="[
+          compact ? 'px-1 py-0.5' : 'px-1.5 py-1',
+          isHighlighted(p) ? 'border-amber-400 ring-1 ring-amber-400/60 highlighted' : 'border-surface-700',
+        ]"
         @mouseenter="openDetail($event, p)"
         @mouseleave="closeDetail"
       >
@@ -528,3 +537,18 @@ function removeSecondProp(param: MonitorParam) {
     />
   </div>
 </template>
+
+<style scoped>
+/* brief pulse when a card becomes highlighted, so the eye finds it */
+.highlighted {
+  animation: highlight-pulse 1.2s ease-out 2;
+}
+@keyframes highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(251 191 36 / 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgb(251 191 36 / 0);
+  }
+}
+</style>

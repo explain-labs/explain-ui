@@ -3,7 +3,8 @@ import { onMounted, onBeforeUnmount, ref, computed, watch } from "vue";
 import Select from "primevue/select";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { useExplain } from "@/composables/useExplain";
-import { MonitorRenderer, type MonitorLane } from "@/render/MonitorRenderer";
+import { MonitorRenderer } from "@/render/MonitorRenderer";
+import { ALL_LANES, LANE_DEFS, type LaneId } from "@/render/monitorLanes";
 
 // Bedside patient-monitor host. Streams the Monitor model's purpose-built
 // waveform signals (fast chart channel) into a single sweep canvas, and feeds
@@ -14,75 +15,22 @@ const { addRenderer, removeRenderer } = useRealtimeBus();
 const { watch: watchProps, watchSlow, slowValues, modelReady } = useExplain();
 let adapter: MonitorRenderer | null = null;
 
-// format a slow-stream value, "—" when absent
-const f = (n: Record<string, number>, p: string, d: number) => {
-  const v = n[p];
-  return typeof v === "number" ? v.toFixed(d) : "—";
-};
+const props = withDefaults(
+  defineProps<{
+    lanes?: LaneId[]; // subset + order of lanes to show (default: all six)
+    height?: string; // CSS height of the sweep canvas
+    minHeight?: string;
+    showWindowSelect?: boolean; // show the sweep-window picker
+    highlight?: LaneId[]; // lanes to frame (lesson steps); must be among `lanes`
+  }>(),
+  { lanes: () => ALL_LANES, height: "70vh", minHeight: "480px", showWindowSelect: true },
+);
 
-// Lane definitions: waveform signal + colour + numeric readout. ABP uses the
-// post-ductal (AD) numerics to match the AD pressure waveform.
-const LANES: MonitorLane[] = [
-  {
-    signal: "Monitor.signals.ecg",
-    label: "ECG",
-    color: "#4ade80",
-    unit: "bpm",
-    readNumeric: (n) => f(n, "Monitor.heart_rate", 0),
-  },
-  {
-    signal: "Monitor.signals.sat_pre",
-    label: "SpO₂ pre",
-    color: "#22d3ee",
-    unit: "%",
-    fill: true,
-    readNumeric: (n) => f(n, "Monitor.sao2_pre", 0),
-  },
-  {
-    signal: "Monitor.signals.sat_post",
-    label: "SpO₂ post",
-    color: "#38bdf8",
-    unit: "%",
-    fill: true,
-    readNumeric: (n) => f(n, "Monitor.sao2_post", 0),
-  },
-  {
-    signal: "Monitor.signals.abp",
-    label: "ABP",
-    color: "#f87171",
-    unit: "mmHg",
-    readNumeric: (n) =>
-      `${f(n, "Monitor.minmax.abp_pres_max", 0)}/${f(n, "Monitor.minmax.abp_pres_min", 0)}`,
-    readSub: (n) => `(${f(n, "Monitor.minmax.abp_pres_mean", 0)})`,
-  },
-  {
-    signal: "Monitor.signals.resp",
-    label: "Resp",
-    color: "#e5e7eb",
-    unit: "/min",
-    readNumeric: (n) => f(n, "Monitor.resp_rate", 0),
-  },
-  {
-    signal: "Monitor.signals.co2",
-    label: "CO₂",
-    color: "#facc15",
-    unit: "kPa",
-    fill: true,
-    readNumeric: (n) => f(n, "Monitor.etco2", 1),
-  },
-];
-
+// Lanes are fixed for the component's lifetime (the renderer is built once on
+// mount); hosts that need a different set remount it.
+const LANES = props.lanes.map((id) => LANE_DEFS[id]);
 const FAST_PATHS = LANES.map((l) => l.signal);
-const SLOW_PATHS = [
-  "Monitor.heart_rate",
-  "Monitor.sao2_pre",
-  "Monitor.sao2_post",
-  "Monitor.minmax.abp_pres_max",
-  "Monitor.minmax.abp_pres_min",
-  "Monitor.minmax.abp_pres_mean",
-  "Monitor.resp_rate",
-  "Monitor.etco2",
-];
+const SLOW_PATHS = LANES.flatMap((l) => l.slow);
 
 // sweep window (full left→right travel time)
 const WINDOW_OPTIONS = [
@@ -99,6 +47,12 @@ const latest = computed<Record<string, number>>(() => {
 });
 
 watch(windowS, (v) => adapter?.setWindow(v));
+
+function applyHighlight() {
+  const ids = props.highlight ?? [];
+  adapter?.setHighlight(ids.map((id) => props.lanes.indexOf(id)).filter((i) => i >= 0));
+}
+watch(() => props.highlight, applyHighlight);
 watch(latest, (n) => adapter?.setNumerics(n));
 
 // build() replaces the DataCollector (watchlist is reset), so re-register every (re)build
@@ -115,6 +69,7 @@ onMounted(() => {
   watchProps(FAST_PATHS); // stream the waveform signals (additive)
   watchSlow(SLOW_PATHS); // numerics on the slow stream
   adapter.setNumerics(latest.value);
+  applyHighlight();
 });
 
 onBeforeUnmount(() => {
@@ -127,7 +82,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex flex-col gap-2">
-    <div class="flex items-center justify-end gap-1.5 text-xs">
+    <div v-if="showWindowSelect" class="flex items-center justify-end gap-1.5 text-xs">
       <span class="opacity-60">sweep</span>
       <Select
         v-model="windowS"
@@ -141,7 +96,7 @@ onBeforeUnmount(() => {
     <div
       ref="el"
       class="w-full rounded overflow-hidden"
-      style="height: 70vh; min-height: 480px; background: #0a0e14"
+      :style="{ height, minHeight, background: '#0a0e14' }"
     ></div>
   </div>
 </template>

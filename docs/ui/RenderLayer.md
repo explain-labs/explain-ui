@@ -108,6 +108,8 @@ interface MonitorLane {
 
 `onRegistry` resolves each lane's `signal` → slot index. Per row, time maps to a column `c = floor((time mod windowS)/windowS * plotW)`; the lane's value is written into `cols[li][c]` and `filled[li][c]=1`. `draw()` renders each lane (autoscale or `fixedRange`), the numerics gutter (`GUTTER = 132` px right column), and the shared sweep marker. `setWindow` re-allocs the width-keyed column store; the store is also reset on resize.
 
+`setHighlight(indices)` frames lanes in amber, with an amber caption and a gentle pulse, so a lesson step can point at them. The pulse only animates while frames arrive; a paused sim shows a static frame.
+
 ## DiagramRenderer (PixiJS v8)
 
 Viewer **and** editor for the circulation diagram. Lazily imported by `Diagram.vue` so PixiJS lands in its own async chunk. `init()` is async: creates the `Application`, preloads sprite pictos via `Assets.load`, builds procedural glow/vignette textures, then builds compartments and connectors from `diagram.components`.
@@ -115,6 +117,14 @@ Viewer **and** editor for the circulation diagram. Lazily imported by `Diagram.v
 **Per-frame (`onFrame(_chart, anim)`):** for each compartment, `radiusFromVolume(frame[animMagOffset(idx)])` scales the disc/glow/rim, and `frame[animTintOffset(idx)]` (`to2`) maps through `rgbFromTo2` across the `[to2Lo, to2Hi]` window onto a deox-blue → ox-red ramp, smoothed by `TINT_LERP`. For each connector, the magnitude is `|flow|` (advances + sizes the streaming dot train) and the tint is the upstream component's `to2`. `onRegistry` builds `animIndex[name] = component.index` from `payload.anim.components`.
 
 **Live control knobs (no rebuild):** `setScaling`, `setTo2Range(lo,hi)`, `setGrid`/`setGridSize`, `setLabel`, `setPicto`, `setModels`, `setTinting`. Several re-apply immediately so a paused sim updates and persist into `diagram.settings` for export.
+
+**Colour ramp:** `TO2_LO/TO2_HI`, `DEOX_RGB/OX_RGB`, `RAMP_GAMMA` and `rgbFromTo2` live in `diagramConstants.ts`, which has no Pixi. The lesson legend draws the same ramp from there via `to2RampCss()`.
+
+**Lesson highlight:** `setHighlight(names, labels)` points at components or connectors by diagram name.
+- It draws on its own `highlightG` layer, independent of the editor selection and of edit mode.
+- **Components** get an amber pulsing ring round the sprite; **connectors** get a wide amber glow along the path. Each can have an optional caption: under the sprite for a component, at the path midpoint for a connector.
+- It is redrawn on the Pixi ticker while active, so it follows volume-scaled sprites and resizes.
+- Unknown names are ignored; `[]` clears.
 
 **Editor:** `setEditMode`, `setConnectMode`, sprite drag (`onSpriteDown`/`onDragMove`/`onDragEnd` — snaps to the layout ring or commits a relative position, grid-snap when on), `select`/`clearSelection`/`deleteSelected`/`removeByName`, `addCompartment`, `connect`/`createConnection`, `applyLayoutPatch(name, patch)` (deep-merges into `component.layout` and re-renders live). `setSelectCallback(fn)` notifies the host of selection; `setChangeCallback(fn)` fires after **structural** edits (add/connect/delete/models/tinting) so the host can push the diagram to the engine for a live anim re-bind. `getDiagram()` returns the mutated definition for export. Connector hit-testing uses a `PolylineHitArea` so thin strokes are clickable.
 

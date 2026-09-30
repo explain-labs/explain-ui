@@ -53,7 +53,7 @@ One `LoopRenderer`. The user picks an x and a y `model.prop`; `applyView()` does
 
 ## Monitor.vue & VentilatorScope.vue
 
-Both build a `MonitorRenderer` from a fixed `LANES: MonitorLane[]` array and split fast vs. slow:
+Both build a `MonitorRenderer` from a `LANES: MonitorLane[]` array and split fast vs. slow. `Monitor.vue` takes its lanes from the `LANE_DEFS` catalogue in `src/render/monitorLanes.ts`. Optional props, whose defaults reproduce the full monitor: `lanes?: LaneId[]` (a subset, in order; fixed for the component's lifetime), `height?`/`minHeight?`, `showWindowSelect?` and `highlight?: LaneId[]` (lanes framed in amber through `MonitorRenderer.setHighlight`). Each lane carries its `slow` paths, so the watchlists follow the chosen lanes.
 
 - **Fast (waveforms):** `FAST_PATHS = LANES.map(l => l.signal)` → `watchProps(FAST_PATHS)`; the bus feeds these to `onFrame`, never through Vue.
 - **Slow (numerics):** `SLOW_PATHS` → `watchSlow(...)`; a `latest` computed reads the newest `slowValues` snapshot and `watch(latest, n => adapter.setNumerics(n))` pushes it into the renderer's gutter. Safe at ~1 Hz.
@@ -62,6 +62,8 @@ Both build a `MonitorRenderer` from a fixed `LANES: MonitorLane[]` array and spl
 `Monitor.vue` lanes: ECG, SpO₂ pre/post, ABP (post-ductal AD, max/min with mean sub), Resp, CO₂; signals are the `Monitor.signals.*` purpose-built waveforms, numerics are `Monitor.*` slow values. `VentilatorScope.vue` reuses the same renderer with Paw/Flow/Volume lanes off `Ventilator.pres`/`flow`/`vol` and PIP/PEEP/MV/Vt numerics (Vt scaled L→mL). Each has a **sweep** window select → `setWindow`.
 
 ## Diagram.vue — editor & live re-bind
+
+Optional props: `toolbar?` (default `true`; `false` hides the edit toggle and so every edit affordance, as on the lesson page), `height?` (default `65vh`), `minHeight?` (default `480px`) and `highlight?: { names, labels? }`, which is forwarded to `DiagramRenderer.setHighlight` (lesson pointing).
 
 The richest host. Pixi is **lazily** imported so it lands in its own chunk:
 
