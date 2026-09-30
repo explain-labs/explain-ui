@@ -35,6 +35,11 @@ type Status = "idle" | "loading" | "authed" | "error";
 // MongoDB login below. The developer's chosen default scenario is persisted per-device
 // in localStorage (mirrors the cloud `defaultLocalState` field).
 const DEV = import.meta.env.DEV;
+// Whether a MongoDB backend is available. Always true in production; in dev only
+// when .env.local sets MONGODB_URI. Without it, `npm run dev` is "local mode":
+// DB-backed features (cloud states, admin, lesson launch) are hidden, so model
+// developers need neither a DB nor an SSH tunnel.
+const HAS_DB = !DEV || __EXPLAIN_DEV_DB__;
 const LOCAL_DEFAULT_KEY = "explain.model.defaultLocalState";
 
 function makeDevUser(): AuthUser {
@@ -138,6 +143,12 @@ export const useAuthStore = defineStore("auth", () => {
     // lesson launch (/api/auth/launch) just set a real session, so launches can be
     // tested under `npm run dev`. Any other real session is ignored in dev.
     if (DEV) {
+      if (!HAS_DB) {
+        user.value = makeDevUser();
+        status.value = "authed";
+        ready.value = true;
+        return true;
+      }
       try {
         const res = await fetch("/api/auth/me", { credentials: "include" });
         const data = res.ok ? await res.json() : null;
@@ -221,6 +232,7 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   return {
+    hasDb: HAS_DB,
     user,
     lesson,
     status,

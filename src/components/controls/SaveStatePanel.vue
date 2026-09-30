@@ -191,6 +191,8 @@ function fmtDate(v: string | null): string {
       size="small"
       @click="openSaveDialog('file')"
     />
+    <!-- Cloud controls need MongoDB: hidden in dev local mode (no MONGODB_URI). -->
+    <template v-if="auth.hasDb">
     <!-- separate the local (developer) save from the cloud controls -->
     <span
       v-if="auth.user?.modelDeveloper"
@@ -230,6 +232,7 @@ function fmtDate(v: string | null): string {
       size="small"
       @click="openStatesDialog"
     />
+    </template>
     <!-- Load JSON button hidden for now; the file input below stays wired up. -->
     <Button
       v-if="false"

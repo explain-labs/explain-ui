@@ -42,7 +42,7 @@ State: `user: AuthUser | null`, `status` (`idle`/`loading`/`authed`/`error`), `e
 |---|---|
 | `login(email, password)` | POST `/api/auth/login`; on success stores `data.user` + sets `ready`. |
 | `register(fields)` | POST `/api/auth/register`; server signs the user in (sets cookie) on success. |
-| `fetchMe()` | Rehydrate from the cookie via `/api/auth/me`. **Dev bypass:** in `import.meta.env.DEV` it auto-logs-in a local `developer` account (`makeDevUser`) and never touches MongoDB. |
+| `fetchMe()` | Rehydrate from the cookie via `/api/auth/me`. **Dev bypass:** in `import.meta.env.DEV` it auto-logs-in a local `developer` account (`makeDevUser`). It probes `/api/auth/me` only when the dev server has a DB (to adopt a lesson-launch session). |
 | `logout()` | POST `/api/auth/logout`; clears client state regardless of network outcome. |
 | `listUsers()` / `setModelDeveloper(email, value)` | Admin-only (`/api/auth/users`, `/api/auth/set-model-developer`). |
 | `setDefaultLocalState(name)` | Dev-only: persist the developer's startup scenario to `localStorage`. |
@@ -115,6 +115,7 @@ router.beforeEach ── auth.fetchMe() (cookie rehydrate; DEV → makeDevUser)
 - **No token, ever.** The session is an HttpOnly cookie; the store mirrors public fields only. Every auth fetch must send `credentials: "include"`.
 - **Guard ≠ security.** `beforeEach` is a UX gate; a determined client can route freely — the server cookie check on each `/api/*` call is the boundary.
 - **Dev auto-login bypasses MongoDB.** `import.meta.env.DEV` makes `fetchMe()` mint a local admin/model-developer `developer@localhost`; the only real session it adopts in dev is a lesson launch. Production (`DEV === false`) always uses the real login. The dev developer's startup default lives in `localStorage`, not MongoDB.
+- **Local mode (dev without `MONGODB_URI`).** `vite.config.ts` defines `__EXPLAIN_DEV_DB__` (a boolean, never the URI). The auth store exposes `hasDb` (`!DEV || __EXPLAIN_DEV_DB__`), and when it is false the UI hides the DB-backed controls: the cloud buttons in `SaveStatePanel.vue` and `AdminUsersButton`. The dev snapshot endpoints (`/api/save-snapshot`, `/api/delete-snapshot`) check the session cookie by signature only, with no DB lookup. They allow the local developer and deny a lesson-launch session. So model developers need neither a DB nor an SSH tunnel.
 - **`redirect` is validated.** `redirectTarget()` only honours a `?redirect=` that starts with `/` (open-redirect guard).
 - **Model-developer-only UI.** The scenario picker, startup-star toggle, and delete-definition button render only for `auth.user?.modelDeveloper`; `AdminUsersButton` only for `admin`.
 - **COI matters for performance.** The bottom-bar `COI` flag reflects `globalThis.crossOriginIsolated`; the SharedArrayBuffer realtime transport is active only when the app is cross-origin isolated.

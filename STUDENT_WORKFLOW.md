@@ -96,6 +96,10 @@ git -C explain-engine branch --show-current
 
 Start the app with `npm run dev` and open the URL Vite prints.
 
+You don't need a database, an SSH tunnel or a login. With no `MONGODB_URI` in `.env.local`, the
+dev server runs in *local mode* and logs you in as the local `developer`. Snapshots are saved as
+files in the engine repo.
+
 ---
 
 ## 2. Writing your own model

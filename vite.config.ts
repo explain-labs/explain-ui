@@ -51,10 +51,13 @@ function snapshotApi(): Plugin {
     };
   };
 
-  // Guard: the local file-snapshot endpoints (save/delete) are model-developer
-  // only. Reads just the cookie header (leaves the body for the handler below)
-  // and verifies the session via the shared auth handler. Registered BEFORE each
-  // jsonPost handler on the same path, so connect runs it first.
+  // Guard: the local file-snapshot endpoints (save/delete). They only exist on
+  // this local dev server, where the user is the auto-logged-in local developer
+  // (no session cookie), so no MongoDB lookup is needed — model developers can
+  // run without a DB or tunnel. The one exception is a lesson-launch session
+  // being tested under dev: lesson accounts are read-only, so deny those. The
+  // cookie is checked by signature only. Registered BEFORE each jsonPost handler
+  // on the same path, so connect runs it first.
   const requireDeveloper = (req: any, res: any, next: () => void) => {
     if (req.method !== "POST") return next();
     const deny = (code: number, error: string) => {
@@ -62,11 +65,17 @@ function snapshotApi(): Plugin {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ ok: false, error }));
     };
-    import("./server/auth.mjs")
-      .then(async ({ me }) => {
-        const user = (await me(req.headers.cookie)).body?.user;
-        if (!user) return deny(401, "not authenticated");
-        if (!user.modelDeveloper) return deny(403, "model developers only");
+    Promise.all([import("./server/session.mjs"), import("./server/auth.mjs")])
+      .then(([{ parseCookies, verifySession, COOKIE_NAME }, { LESSON_EMAIL_DOMAIN }]) => {
+        let session: any = null;
+        try {
+          session = verifySession((parseCookies(req.headers.cookie) as Record<string, string>)[COOKIE_NAME]);
+        } catch {
+          /* no AUTH_SECRET → no real session can exist → the local developer */
+        }
+        if (String(session?.email ?? "").endsWith(`@${LESSON_EMAIL_DOMAIN}`)) {
+          return deny(403, "model developers only");
+        }
         next();
       })
       .catch((e) => deny(500, `auth error: ${String(e)}`));
@@ -439,6 +448,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
   plugins: [vue(), tailwindcss(), snapshotApi(), explainBotApi(env), authApi(env), statesApi()],
+  // Whether the dev server has a MongoDB configured (a boolean only — never the
+  // URI). Without one, `npm run dev` runs in local mode: the client hides the
+  // DB-backed features (cloud states, admin) instead of calling them. Read by the
+  // client only under DEV (see src/stores/auth.ts); prod always has the DB.
+  define: { __EXPLAIN_DEV_DB__: JSON.stringify(!!env.MONGODB_URI) },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

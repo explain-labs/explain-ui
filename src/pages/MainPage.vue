@@ -296,7 +296,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           />
         </template>
         <span v-else-if="auth.user" class="text-sm opacity-70">{{ auth.user.email }}</span>
-        <AdminUsersButton v-if="auth.user?.admin" />
+        <AdminUsersButton v-if="auth.user?.admin && auth.hasDb" />
         <Button
           icon="pi pi-sign-out"
           label="Sign out"

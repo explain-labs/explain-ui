@@ -202,6 +202,13 @@ cp .env.local.example .env.local      # Windows PowerShell: copy .env.local.exam
 | `MONGODB_URI` | Login & saved states | Full MongoDB connection string (the database name is taken from the path). |
 | `AUTH_SECRET` | Login sessions | Secret used to sign session cookies. Generate one with `openssl rand -base64 32`. |
 
+**Model development needs no database.** With `MONGODB_URI` left blank, `npm run dev` runs in
+*local mode*. You are logged in automatically as a local `developer`. Scenarios, file
+snapshots, monitor dashboards and event lists all work, because they are saved as files in the
+engine repo. The database-only features are hidden: cloud-saved states, the admin user list,
+and lesson-launch testing. Set `MONGODB_URI` (and open whatever tunnel it needs) only when you
+work on those.
+
 > **Never** prefix these with `VITE_` — that would inline the secrets into the client bundle.
 > They are read server-side only (by the Vite dev middleware in development, and by
 > `server/index.mjs` in production). See `server/README.md` for backend specifics.
@@ -226,6 +233,9 @@ picked up.
 - **Chat panel says the bot isn't configured** — set `EXPLAIN_BOT_URL` + `EXPLAIN_BOT_API_KEY`
   in `.env.local` and restart. This is expected when the backend isn't set up; the simulator
   still works.
+- **Cloud actions fail with `MongoServerSelectionError` in dev** — `MONGODB_URI` is set but the
+  database is unreachable (e.g. the SSH tunnel is closed). Open the tunnel, or blank
+  `MONGODB_URI` in `.env.local` and restart to run in local mode.
 - **A blank page or worker errors after a stale build** — delete `node_modules/.vite` (Vite's
   cache) and restart, or reinstall with `rm -rf node_modules && npm install`
   (Windows: `rmdir /s /q node_modules` then `npm install`).

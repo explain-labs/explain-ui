@@ -16,7 +16,7 @@ The Pinia stores in `src/stores/` hold the app's **control-plane** state: the au
 
 ## `auth`
 
-Mirrors the public user fields the server returns; the session itself is an HttpOnly cookie (JS never holds a token). In dev (`import.meta.env.DEV`) `fetchMe()` auto-logs-in a local `developer` account and never touches MongoDB.
+Mirrors the public user fields the server returns; the session itself is an HttpOnly cookie (JS never holds a token). In dev (`import.meta.env.DEV`) `fetchMe()` auto-logs-in a local `developer` account. `hasDb` is false in dev when the server has no `MONGODB_URI` (local mode), and the cloud/admin UI hides on it.
 
 | State | Type | Description |
 |---|---|---|
@@ -148,6 +148,6 @@ A bridge so the chat command pipeline can drive diagram edits without the render
 - **`monitors.persist()` is debounced 500 ms** (one file write per keystroke burst); `monitors`/`events` persist failures are logged and kept in memory only (prod has no save-snapshot endpoint).
 - **`monitors` mirrors the first dashboard into the legacy `configuration.monitors`** for backward-compat on every persist.
 - **`diagram.activeRenderer` is a `shallowRef`** holding the live PixiJS renderer — deliberately kept shallow and out of deep reactivity. When absent, diagram commands surface as an actionable invalid card rather than failing silently. `unregister` guards against a remount clearing a newer renderer.
-- **`auth` holds no token** — only mirrored public fields; the real session is the HttpOnly cookie sent via `credentials: "include"`. Dev mode never contacts MongoDB.
+- **`auth` holds no token** — only mirrored public fields; the real session is the HttpOnly cookie sent via `credentials: "include"`. Dev local mode (no `MONGODB_URI`) never contacts MongoDB.
 - **`chat` persists `autoApply`/`commandScope` to localStorage** and validates each bot command against `modelState` (batch-aware for diagram name dependencies). The bot-built patient `artifact` rides out-of-band on the message (too large, ~300 KB, for the command block).
 - **`stores` read but do not deep-diff engine snapshots** — they go through `useExplain`'s `shallowRef`s; nothing here subscribes the fast data plane.

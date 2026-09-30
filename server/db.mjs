@@ -17,7 +17,9 @@ function getClient() {
   if (!uri) throw new Error("MONGODB_URI not set");
   // Cache the connect() promise so concurrent callers share one handshake.
   if (!clientPromise) {
-    const client = new MongoClient(uri);
+    // Fail fast (default is 30 s) when the DB is configured but unreachable, e.g.
+    // a local dev whose SSH tunnel to the prod Mongo is closed.
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 3000 });
     clientPromise = client.connect().catch((e) => {
       // Reset so a later request can retry instead of reusing a rejected promise.
       clientPromise = null;
