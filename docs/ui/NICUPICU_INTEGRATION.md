@@ -8,7 +8,9 @@ This works through **one lesson account per lesion**, entered with a **launch li
 nicupicu module page ──(new tab)──▶ GET /api/auth/launch?t=<token>
                                      │ verify token → set explain_session cookie (8 h)
                                      ▼
-                                   302 → /  ── MainPage loads the lesson's scenario
+                                   302 → /  ── router guard ──▶ /lesson/<id>  (guided lesson page)
+                                                          └─▶ MainPage loads the lesson's scenario
+                                                              (when no lesson content exists for <id>)
 ```
 
 - **No password ever goes in a URL.** Passwords in links leak through browser history, server logs and `Referer` headers. The launch token takes the password's place. A lesson account has no password at all, so it cannot be used on `/login`.
@@ -32,7 +34,9 @@ A lesson account is a normal `users` document with a `lesson` profile and no `pa
 | `launchKeyHash` | sha256 of the static launch key (mode A). |
 | `disabled` | Blocks launches; existing sessions stop working on their next request. |
 
-In the app, a lesson session shows the lesson title and a **Restart lesson** button, which reloads the starting scenario. The session lasts 8 hours.
+If the repo has lesson content for the account's id (`src/lessons/<id>/`), the learner lands on the guided lesson page `/lesson/<id>`: step text in Dutch or English beside the live model, with interventions such as closing the duct. The lesson file's `scenario` is used there; the account's `stateId`, if set, still overrides it. Authoring is described in [LESSONS](./LESSONS.md).
+
+Without lesson content, the session opens MainPage with the lesson title and a **Restart lesson** button, which reloads the starting scenario. The session lasts 8 hours.
 
 ## Managing accounts
 

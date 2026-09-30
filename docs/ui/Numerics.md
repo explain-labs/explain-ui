@@ -30,7 +30,7 @@ A `MonitorGroup` is one collapsible `Panel` of params with a stable JSON `key`; 
 
 ## NumericReadoutPanel.vue
 
-Props: `group: MonitorGroup`, `editable?` (manage mode → show the edit pencil), `compact?` (hide sparklines, denser 4-col grid). No emits — edits mutate the `monitors` store directly, which auto-persists.
+Props: `group: MonitorGroup`, `editable?` (manage mode → show the edit pencil), `compact?` (hide sparklines, denser 4-col grid), `highlight?: string[]` (cards whose first prop path is listed get an amber ring and a short pulse; used by lesson steps). No emits — edits mutate the `monitors` store directly, which auto-persists.
 
 ### Read-only mode
 

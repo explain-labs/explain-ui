@@ -71,13 +71,14 @@ so buttons/selectors read dark-blue. Global CSS is `primeicons/primeicons.css` +
 
 ### Routing & the auth gate
 
-`src/router/index.ts` (`createWebHistory`) has three routes:
+`src/router/index.ts` (`createWebHistory`) has four routes:
 
 | Path | Name | Component | Meta |
 |---|---|---|---|
 | `/` | `main` | `MainPage.vue` | `requiresAuth: true` |
 | `/login` | `login` | `LoginPage.vue` | — |
 | `/register` | `register` | `RegisterPage.vue` | — |
+| `/lesson/:id` | `lesson` | `LessonPage.vue` (lazy) | `requiresAuth: true` — guided lessons, see [LESSONS](./LESSONS.md) |
 
 A `beforeEach` guard rehydrates the session on first navigation (`if (!auth.ready) await auth.fetchMe()`),
 redirects unauthenticated users away from protected routes to `/login?redirect=…`, and bounces
@@ -128,8 +129,9 @@ user default cloud state → bundled `term_neonate`.
 | Path | Holds | Doc |
 |---|---|---|
 | `src/main.ts`, `src/App.vue` | bootstrap + `<router-view>` shell | §2 above |
-| `src/router/` | the 3-route history router + auth guard | [PagesAndAuth](./PagesAndAuth.md) |
-| `src/pages/` | `MainPage` / `LoginPage` / `RegisterPage` (the "views") | [PagesAndAuth](./PagesAndAuth.md) |
+| `src/router/` | the 4-route history router + auth/lesson guard | [PagesAndAuth](./PagesAndAuth.md) |
+| `src/pages/` | `MainPage` / `LessonPage` / `LoginPage` / `RegisterPage` (the "views") | [PagesAndAuth](./PagesAndAuth.md) |
+| `src/lessons/`, `src/components/lesson/` | lesson content, intervention registry, lesson page parts | [LESSONS](./LESSONS.md) |
 | `src/composables/` | engine bridge, realtime bus, chart params, slow history, prefs | [Composables](./Composables.md) |
 | `src/stores/` | Pinia: `auth`, `model`, `states`, `monitors`, `events`, `chat`, `diagram` | [Stores](./Stores.md) |
 | `src/components/host/` | renderer host wrappers (mount canvas, register adapter) | [HostComponents](./HostComponents.md) |

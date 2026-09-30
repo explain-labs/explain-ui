@@ -1,5 +1,6 @@
 import { Application, Assets, Sprite, Graphics, Text, Texture } from "pixi.js";
 import { animMagOffset, animTintOffset } from "@explain/helpers/RealtimeChannels";
+import { DEOX_RGB, TO2_HI, TO2_LO, rgbFromTo2 } from "./diagramConstants";
 import type {
   AnimFrame,
   ChartFrame,
@@ -58,7 +59,12 @@ interface ConnNode {
 // come from the instantaneous flow; a smoothed magnitude gently scales the dot
 // size and fades the dots out on near-zero-flow vessels, so closed shunts read
 // as still. The path itself stays a fixed neutral grey backbone.
-const DOT_PICTO = "gfx/container.png"; // a small disc that rides the path
+// Sprite images live in public/gfx/. Always load them by ABSOLUTE path: a
+// relative "gfx/x.png" resolves against the page URL, so on /lesson/<id> it
+// became /lesson/gfx/x.png (the SPA's index.html) and the diagram failed to init.
+const gfxPath = (picto: string) => "/gfx/" + picto.replace(/^.*gfx\//, "");
+
+const DOT_PICTO = gfxPath("container.png"); // a small disc that rides the path
 const DOT_SCALE = 0.03; // base dot size (container.png is ~318 px → ~10 px)
 const DOT_ALPHA = 0.95;
 const DOT_LIGHTEN = 0.4; // lift the dot tint toward white so it pops on the path
@@ -133,6 +139,12 @@ export class DiagramRenderer implements RendererAdapter {
   private selected: string | null = null;
   private selectedKind: "comp" | "conn" | null = null;
   private selectionG: Graphics | null = null;
+  // lesson "pointing": pulsing amber outlines + optional captions, independent
+  // of the editor selection (see setHighlight)
+  private highlightG: Graphics | null = null;
+  private highlightNames: string[] = [];
+  private highlightTexts = new Map<string, Text>();
+  private highlightTick: (() => void) | null = null;
   private dragging: string | null = null;
   private dragOffsetX = 0;
   private dragOffsetY = 0;
@@ -203,9 +215,7 @@ export class DiagramRenderer implements RendererAdapter {
   private async preloadTextures() {
     const pictos = new Set<string>([DOT_PICTO]); // flow indicator (streaming dots)
     for (const comp of Object.values<any>(this.diagram?.components ?? {})) {
-      let p = comp.picto || "container.png";
-      if (!p.includes("gfx/")) p = "gfx/" + p;
-      pictos.add(p);
+      pictos.add(gfxPath(comp.picto || "container.png"));
     }
     await Assets.load([...pictos]);
   }
@@ -385,8 +395,7 @@ export class DiagramRenderer implements RendererAdapter {
 
   private makeCompartment(name: string, comp: any) {
     const layout = comp.layout;
-    let picto = comp.picto || "container.png";
-    if (!picto.includes("gfx/")) picto = "gfx/" + picto;
+    const picto = gfxPath(comp.picto || "container.png");
 
     const baseZ = layout.general.z_index;
     // pre-frame tint: the deoxygenated end of the ramp for tinted compartments,
@@ -558,8 +567,8 @@ export class DiagramRenderer implements RendererAdapter {
     const comp = this.diagram?.components?.[name];
     const node = this.comps[name];
     if (!comp || !node || !picto) return;
-    const path = picto.includes("gfx/") ? picto : "gfx/" + picto;
-    comp.picto = picto.replace("gfx/", "");
+    const path = gfxPath(picto);
+    comp.picto = picto.replace(/^.*gfx\//, "");
     await Assets.load(path);
     node.sprite.texture = Texture.from(path);
   }
@@ -1067,6 +1076,88 @@ export class DiagramRenderer implements RendererAdapter {
     g.rect(b.x, b.y, b.width, b.height).stroke({ width: 2, color: 0x22d3ee });
   }
 
+  // ---- Lesson highlight ----
+
+  /** Point at components and/or connectors by diagram name: a pulsing amber
+   *  outline (ring round a compartment, glow along a connector) plus an optional
+   *  caption per name. Unknown names are ignored; [] clears. Independent of the
+   *  editor selection and of edit mode. Redrawn every tick while active, so it
+   *  follows volume-scaled sprites and resizes. */
+  setHighlight(names: string[], labels: Record<string, string> = {}) {
+    this.highlightNames = [...names];
+    for (const t of this.highlightTexts.values()) t.destroy();
+    this.highlightTexts.clear();
+    if (!this.app) return;
+    if (!this.highlightG) {
+      this.highlightG = new Graphics();
+      this.highlightG.zIndex = 9998; // under the editor selection
+      this.highlightG.eventMode = "none";
+      this.app.stage.addChild(this.highlightG);
+    }
+    for (const name of names) {
+      const caption = labels[name];
+      if (!caption) continue;
+      const t = new Text({
+        text: caption,
+        style: {
+          fontFamily: "system-ui, -apple-system, sans-serif",
+          fontSize: 13 * this.scaling,
+          fontWeight: "600",
+          fill: HIGHLIGHT_COLOR,
+          stroke: { color: 0x000000, width: 4 },
+          align: "center",
+        },
+      });
+      t.anchor.set(0.5, 0.5);
+      t.eventMode = "none";
+      t.zIndex = 10000;
+      this.app.stage.addChild(t);
+      this.highlightTexts.set(name, t);
+    }
+    if (names.length && !this.highlightTick) {
+      this.highlightTick = () => this.drawHighlight();
+      this.app.ticker.add(this.highlightTick);
+    } else if (!names.length && this.highlightTick) {
+      this.app.ticker.remove(this.highlightTick);
+      this.highlightTick = null;
+    }
+    this.drawHighlight();
+  }
+
+  private drawHighlight() {
+    const g = this.highlightG;
+    if (!g) return;
+    g.clear();
+    if (!this.highlightNames.length) return;
+    const pulse = 0.55 + 0.35 * Math.sin(performance.now() / 280);
+    for (const name of this.highlightNames) {
+      const text = this.highlightTexts.get(name);
+      const conn = this.conns.find((c) => c.name === name);
+      if (conn?.geom) {
+        const pts = samplePath(conn.geom);
+        if (pts.length < 4) continue;
+        g.moveTo(pts[0], pts[1]);
+        for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
+        const w = numberOr(Number(conn.layout.path.width), 5) * this.scaling;
+        g.stroke({ width: w + 10, color: HIGHLIGHT_COLOR, alpha: 0.45 * pulse });
+        if (text) {
+          // caption at the path's midpoint, nudged off the line
+          const m = Math.floor(pts.length / 4) * 2;
+          text.position.set(pts[m], pts[m + 1] - 14 * this.scaling);
+        }
+        continue;
+      }
+      const node = this.comps[name];
+      if (!node) continue;
+      const b = node.sprite.getBounds();
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      const r = Math.max(b.width, b.height) / 2 + 6 * this.scaling;
+      g.circle(cx, cy, r).stroke({ width: 3, color: HIGHLIGHT_COLOR, alpha: pulse });
+      if (text) text.position.set(cx, cy + r + 10 * this.scaling);
+    }
+  }
+
   setConnectMode(on: boolean) {
     this.connectMode = on;
     this.connectFrom = null;
@@ -1080,7 +1171,7 @@ export class DiagramRenderer implements RendererAdapter {
     const name = this.uniqueName(modelName || "NEW");
     const comp = defaultCompartment(modelName, picto);
     this.diagram.components[name] = comp;
-    await Assets.load(["gfx/" + comp.picto]);
+    await Assets.load([gfxPath(comp.picto)]);
     this.makeCompartment(name, comp);
     this.select(name, "comp");
     this.onChangeCb?.();
@@ -1144,6 +1235,10 @@ export class DiagramRenderer implements RendererAdapter {
     this.comps = {};
     this.conns = [];
     this.selectionG = null;
+    this.highlightG = null; // destroyed with the stage (ticker goes with the app)
+    this.highlightTick = null;
+    this.highlightTexts.clear();
+    this.highlightNames = [];
     this.bgSprite = null;
     this.glowTex = null;
     this.vignetteTex = null;
@@ -1236,30 +1331,10 @@ function radiusFromVolume(vol: number): number {
 // peg the whole adult circuit to the venous (blue) end. Tuning the window per
 // diagram restores genuine venous↔arterial colour separation. (The legacy
 // per-diagram `max_to2` hint is unrelated and still ignored.)
-const TO2_LO = 3.0;
-const TO2_HI = 8.8;
-const DEOX_RGB = [0x16, 0x48, 0xb0]; // dark blue (deoxygenated)
-const OX_RGB = [0xe2, 0x3a, 0x66]; // pink-red (oxygenated)
-// Bias (>1) keeps the gradient blue across the venous range and swings to
-// pink-red only near the oxygenated top, so mid-saturation (venous) blood reads
-// blue-purple rather than pink. Linear interp would put systemic venous at the
-// midpoint, i.e. magenta.
-const RAMP_GAMMA = 4.0;
+// TO2_LO/TO2_HI, DEOX_RGB/OX_RGB, RAMP_GAMMA and rgbFromTo2 live in
+// diagramConstants.ts (Pixi-free) so the lesson legend draws the same ramp.
 const WHITE_RGB = [255, 255, 255];
-
-// Map blood O2 content (to2) onto the deox→ox ramp, returning unrounded rgb so
-// callers can smooth it over frames before packing to a tint int.
-function rgbFromTo2(to2: number, lo: number, hi: number): [number, number, number] {
-  if (Number.isNaN(to2)) return [0x66, 0x66, 0x66];
-  let t = (to2 - lo) / (hi - lo || 1e-6);
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  t = Math.pow(t, RAMP_GAMMA);
-  return [
-    DEOX_RGB[0] + (OX_RGB[0] - DEOX_RGB[0]) * t,
-    DEOX_RGB[1] + (OX_RGB[1] - DEOX_RGB[1]) * t,
-    DEOX_RGB[2] + (OX_RGB[2] - DEOX_RGB[2]) * t,
-  ];
-}
+const HIGHLIGHT_COLOR = 0xfbbf24; // lesson pointing (amber), distinct from the editor's cyan
 
 // pack an rgb triple (floats ok) into a 0xRRGGBB tint int
 function packRgb(rgb: number[]): number {

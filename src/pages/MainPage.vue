@@ -38,6 +38,8 @@ import LoopChart from "@/components/host/LoopChart.vue";
 import Monitor from "@/components/host/Monitor.vue";
 import VentilatorScope from "@/components/host/VentilatorScope.vue";
 import DocViewer from "@/components/host/DocViewer.vue";
+import { listLessons } from "@/lessons/index";
+import { t as tl } from "@/lessons/i18n";
 
 const store = useModelStore();
 const auth = useAuthStore();
@@ -142,6 +144,10 @@ const loadedName = computed(() => {
 });
 
 const DEFAULT_SCENARIO = "term_neonate";
+
+// guided lesson pages (/lesson/:id), linked from the header for non-lesson users
+const lessons = listLessons();
+const lessonsRef = ref<any>(null);
 
 // selecting a scenario loads it immediately (no Load button needed)
 watch(current, (name) => {
@@ -295,7 +301,30 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             @click="loadLesson"
           />
         </template>
-        <span v-else-if="auth.user" class="text-sm opacity-70">{{ auth.user.email }}</span>
+        <template v-else-if="lessons.length">
+          <Button
+            icon="pi pi-book"
+            label="Lessons"
+            size="small"
+            severity="secondary"
+            text
+            @click="lessonsRef?.toggle($event)"
+          />
+          <Popover ref="lessonsRef">
+            <div class="flex flex-col gap-1">
+              <Button
+                v-for="l in lessons"
+                :key="l.id"
+                :label="tl(l.title, 'en')"
+                size="small"
+                severity="secondary"
+                text
+                @click="router.push({ name: 'lesson', params: { id: l.id } })"
+              />
+            </div>
+          </Popover>
+        </template>
+        <span v-if="!auth.lesson && auth.user" class="text-sm opacity-70">{{ auth.user.email }}</span>
         <AdminUsersButton v-if="auth.user?.admin && auth.hasDb" />
         <Button
           icon="pi pi-sign-out"
