@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import Panel from "primevue/panel";
 import InputText from "primevue/inputtext";
 import InputNumber from "primevue/inputnumber";
 import Select from "primevue/select";
@@ -242,15 +241,28 @@ function removeSecondProp(param: MonitorParam) {
 
 <template>
   <!-- ===== read-only ===== -->
-  <Panel
+  <!-- same section header + chevron folding as the Common Tasks categories -->
+  <div
     v-if="!editing"
-    :header="group.title"
-    toggleable
-    v-model:collapsed="collapsedState"
+    class="rounded border border-surface-700"
     :class="editable && !group.enabled ? 'opacity-60' : ''"
   >
-    <template v-if="editable" #icons>
+    <div class="flex items-center">
+      <button
+        type="button"
+        class="flex flex-1 min-w-0 items-center gap-2 px-2 py-1.5 text-left hover:bg-surface-800"
+        @click="collapsedState = !collapsedState"
+      >
+        <i
+          :class="collapsedState ? 'pi pi-chevron-right' : 'pi pi-chevron-down'"
+          class="text-xs opacity-70"
+        ></i>
+        <span class="text-sm font-semibold truncate">{{ group.title }}</span>
+        <span class="ml-auto text-xs opacity-40">{{ parameters.length }}</span>
+      </button>
+      <!-- sibling of the header button: a button can't nest inside a button -->
       <Button
+        v-if="editable"
         v-tooltip.top="'Edit this group'"
         icon="pi pi-pencil"
         severity="secondary"
@@ -258,8 +270,12 @@ function removeSecondProp(param: MonitorParam) {
         text
         @click="editing = true"
       />
-    </template>
-    <div class="grid gap-1.5" :class="compact ? 'grid-cols-4' : 'grid-cols-2'">
+    </div>
+    <div
+      v-show="!collapsedState"
+      class="grid gap-1.5 p-2 pt-0"
+      :class="compact ? 'grid-cols-4' : 'grid-cols-2'"
+    >
       <div
         v-for="(p, i) in parameters"
         :key="i"
@@ -315,7 +331,7 @@ function removeSecondProp(param: MonitorParam) {
         <div class="opacity-40 break-all leading-tight">{{ (detailParam.props ?? []).join("  ·  ") }}</div>
       </div>
     </Popover>
-  </Panel>
+  </div>
 
   <!-- ===== editing ===== -->
   <div v-else class="rounded border border-surface-700 p-2 flex flex-col gap-2">
