@@ -37,7 +37,7 @@ watch(() => props.highlight, applyHighlight, { deep: true });
 const el = ref<HTMLDivElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const { addRenderer, removeRenderer } = useRealtimeBus();
-const { model, modelState } = useExplain();
+const { model, modelState, isRunning } = useExplain();
 // Publishes the live renderer so the chat/bot pipeline can drive diagram edits.
 const diagramStore = useDiagramStore();
 let adapter: DiagramRendererT | null = null;
@@ -78,6 +78,13 @@ const PATH_TYPES = [...PATH_TYPE_OPTIONS];
 const modelNames = computed(() => {
   const m = (modelState.value as any)?.models;
   return m ? Object.keys(m).sort() : [];
+});
+
+// Realtime anim frames only flow while the sim runs, so size the compartments
+// from each state snapshot (sent after every build and fast-forward) instead of
+// leaving placeholder-sized discs until Play.
+watch(modelState, (s) => {
+  if (!isRunning.value) adapter?.seedFromModels((s as any)?.models);
 });
 
 async function mountRenderer(diagram: any) {
@@ -123,6 +130,7 @@ async function mountRenderer(diagram: any) {
   if (diagram?.settings?.to2_lo > 0) to2Lo.value = diagram.settings.to2_lo;
   if (diagram?.settings?.to2_hi > 0) to2Hi.value = diagram.settings.to2_hi;
   if (props.highlight) applyHighlight();
+  adapter.seedFromModels((modelState.value as any)?.models);
   addRenderer(adapter);
   // publish to the chat/bot pipeline so it can drive diagram edits while mounted
   diagramStore.register(adapter);
