@@ -27,27 +27,31 @@ function getSecret() {
   return secret;
 }
 
-function hmac(data) {
-  return b64url(crypto.createHmac("sha256", getSecret()).update(data).digest());
+function hmac(data, secret) {
+  return b64url(crypto.createHmac("sha256", secret ?? getSecret()).update(data).digest());
 }
 
 // Sign a session payload (extra claims merged in). Returns the JWT string.
-export function signSession(payload) {
+// `maxAge` (seconds) shortens the lifetime, e.g. for lesson-account sessions;
+// `secret` overrides AUTH_SECRET (used to mint test launch tokens).
+export function signSession(payload, { maxAge = MAX_AGE_SECONDS, secret } = {}) {
   const now = Math.floor(Date.now() / 1000);
-  const body = { iat: now, exp: now + MAX_AGE_SECONDS, ...payload };
+  const body = { iat: now, exp: now + maxAge, ...payload };
   const head = b64urlJson({ alg: "HS256", typ: "JWT" });
   const data = `${head}.${b64urlJson(body)}`;
-  return `${data}.${hmac(data)}`;
+  return `${data}.${hmac(data, secret)}`;
 }
 
 // Verify a token; returns the payload object or null (bad signature / expired / malformed).
-export function verifySession(token) {
+// `secret` defaults to AUTH_SECRET; the launch endpoint passes the separate
+// NICUPICU_LAUNCH_SECRET to verify externally signed launch tokens.
+export function verifySession(token, secret) {
   if (!token || typeof token !== "string") return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [head, body, sig] = parts;
   // timing-safe signature check
-  const expected = hmac(`${head}.${body}`);
+  const expected = hmac(`${head}.${body}`, secret);
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
@@ -74,13 +78,13 @@ export function parseCookies(cookieHeader) {
 
 // Build the Set-Cookie value carrying the session token. `secure` adds the
 // Secure attribute (prod / https); omit in dev where the app is plain http.
-export function sessionCookie(token, { secure = false } = {}) {
+export function sessionCookie(token, { secure = false, maxAge = MAX_AGE_SECONDS } = {}) {
   const attrs = [
     `${COOKIE_NAME}=${token}`,
     "HttpOnly",
     "SameSite=Lax",
     "Path=/",
-    `Max-Age=${MAX_AGE_SECONDS}`,
+    `Max-Age=${maxAge}`,
   ];
   if (secure) attrs.push("Secure");
   return attrs.join("; ");

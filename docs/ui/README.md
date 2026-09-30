@@ -24,6 +24,7 @@ wiring → gotchas), adapted for Vue units. Cross-links into the engine docs use
 |---|---|
 | [UI_ARCHITECTURE](./UI_ARCHITECTURE.md) | Whole-UI overview: the two-plane split, `main.ts`/`App.vue` bootstrap, routing + auth gate, the `MainPage` three-column layout & tab map, directory map, toolchain versions, the doc template. |
 | [PagesAndAuth](./PagesAndAuth.md) | The three pages (`MainPage`/`LoginPage`/`RegisterPage`), the router + `beforeEach` guard, the `auth` store, and the server-side HttpOnly-cookie security boundary + dev auto-login. |
+| [NICUPICU_INTEGRATION](./NICUPICU_INTEGRATION.md) | nicupicu.nl lesson accounts: one account per congenital heart lesion, entered via `/api/auth/launch` links (static or signed), plus the `scripts/lesson-account.mjs` CLI and the doc to hand to nicupicu. |
 
 ## Engine bridge & state
 

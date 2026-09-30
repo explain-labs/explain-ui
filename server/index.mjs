@@ -11,6 +11,8 @@
 //   3. hosts /api/auth/{login,register,logout,me} — MongoDB + bcrypt credential
 //      check / account creation issuing a signed HttpOnly session cookie (shared
 //      logic in ./auth.mjs, reused verbatim by the dev proxy in vite.config.ts), and
+//   3b. hosts GET /api/auth/launch?t=… — one-click entry into a nicupicu.nl lesson
+//      account (see launch() in ./auth.mjs and docs/ui/NICUPICU_INTEGRATION.md), and
 //   4. hosts /api/states/{save,list,get,delete} — per-user save/load of model
 //      states in MongoDB (auth-scoped; shared logic in ./states.mjs).
 //
@@ -23,6 +25,9 @@
 //   EXPLAIN_BOT_API_KEY   the bot's X-API-Key
 //   MONGODB_URI           Mongo connection string (auth; db name in the path)
 //   AUTH_SECRET           secret used to sign session cookies
+//   NICUPICU_LAUNCH_SECRET  shared secret for signed nicupicu launch tokens (optional)
+//   LAUNCH_STATIC_KEYS    "off" rejects static lesson launch links (signed only)
+//   TRUST_PROXY           "1" to rate-limit launches by X-Forwarded-For (behind a proxy)
 //   PORT                  listen port (default 8080)
 //   DIST_DIR              static dir (default ./dist)
 //
@@ -32,7 +37,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { login, logout, me, register, listUsers, setModelDeveloper } from "./auth.mjs";
+import { login, logout, me, register, listUsers, setModelDeveloper, launch } from "./auth.mjs";
 import {
   saveState,
   listStates,
@@ -165,6 +170,31 @@ function handleAuth(req, res, route) {
   });
 }
 
+// GET /api/auth/launch?t=… — lesson launch: set the session cookie and redirect
+// into the app. no-store + no-referrer so the token isn't cached or leaked onward.
+function handleLaunch(req, res) {
+  if (req.method !== "GET") return res.writeHead(405, COI_HEADERS).end("method not allowed");
+  const token = new URL(req.url, "http://localhost").searchParams.get("t");
+  const fwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const ip = (process.env.TRUST_PROXY === "1" && fwd) || req.socket.remoteAddress || "";
+  const redirect = (r) => {
+    const headers = {
+      location: r.location,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    };
+    if (r.setCookie) headers["set-cookie"] = r.setCookie;
+    res.writeHead(r.status, headers);
+    res.end();
+  };
+  launch(token, { secure: true, ip })
+    .then(redirect)
+    .catch((e) => {
+      console.error("launch error:", String(e));
+      redirect({ status: 302, location: "/login?launch=error" });
+    });
+}
+
 // ---- /api/states/* : per-user save / list / get / delete of model states ----
 // Auth-scoped (session cookie); shares server/states.mjs with the dev proxy.
 function handleStates(req, res, route) {
@@ -241,6 +271,7 @@ const server = http.createServer((req, res) => {
   if (reqPath === "/api/auth/logout") return handleAuth(req, res, "logout");
   if (reqPath === "/api/auth/me") return handleAuth(req, res, "me");
   if (reqPath === "/api/auth/users") return handleAuth(req, res, "users");
+  if (reqPath === "/api/auth/launch") return handleLaunch(req, res);
   if (reqPath === "/api/auth/set-model-developer") return handleAuth(req, res, "set-model-developer");
   if (reqPath === "/api/states/save") return handleStates(req, res, "save");
   if (reqPath === "/api/states/list") return handleStates(req, res, "list");

@@ -22,6 +22,14 @@ const redirectTarget = () => {
   return typeof r === "string" && r.startsWith("/") ? r : "/";
 };
 
+// Set by /api/auth/launch when a nicupicu.nl lesson link didn't work.
+const launchMessage =
+  route.query.launch === "invalid"
+    ? "This lesson link is invalid or has expired. Please reopen it from nicupicu.nl."
+    : route.query.launch === "error"
+      ? "The lesson could not be opened right now. Please try again later."
+      : null;
+
 // If an existing cookie already authenticates us, skip the form.
 onMounted(async () => {
   if (!auth.ready) await auth.fetchMe();
@@ -78,6 +86,9 @@ async function submit() {
           />
         </div>
 
+        <p v-if="launchMessage && !auth.error" class="text-sm text-amber-400" role="alert">
+          {{ launchMessage }}
+        </p>
         <p v-if="auth.error" class="text-sm text-red-400" role="alert">
           {{ auth.error }}
         </p>

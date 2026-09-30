@@ -26,6 +26,11 @@ Then open `http://localhost:8080` (override with `PORT`).
 |-----|---------|
 | `EXPLAIN_BOT_URL` | bot base URL, e.g. `http://lucys-mac-mini.tail990503.ts.net:8091` (proxy hits `${EXPLAIN_BOT_URL}/v1/ask`) |
 | `EXPLAIN_BOT_API_KEY` | bot `X-API-Key` |
+| `MONGODB_URI` | MongoDB connection string incl. password; the database name comes from the path (`…/explain`). Backs `/api/auth/*` and `/api/states/*` |
+| `AUTH_SECRET` | secret that signs session cookies (`openssl rand -base64 32`) |
+| `TRUST_PROXY` | `1` behind a reverse proxy (Caddy in production), so the launch rate limit uses `X-Forwarded-For` |
+| `NICUPICU_LAUNCH_SECRET` | optional; verifies signed nicupicu.nl launch tokens |
+| `LAUNCH_STATIC_KEYS` | optional; `off` rejects static lesson launch links |
 | `PORT` | listen port (default `8080`) |
 | `HOST` | listen address (default: all interfaces; set `127.0.0.1` behind a reverse proxy) |
 | `DIST_DIR` | static dir (default `dist`) |
@@ -33,6 +38,10 @@ Then open `http://localhost:8080` (override with `PORT`).
 The same `.env.local` used by `npm run dev` works here via `--env-file`
 (`EXPLAIN_BOT_URL` / `EXPLAIN_BOT_API_KEY` are read with no `VITE_` prefix, so they
 stay server-side and never enter the client bundle).
+
+## Lesson launch
+
+`GET /api/auth/launch?t=…` logs a visitor into a nicupicu.nl lesson account and redirects to `/`. See [`docs/ui/NICUPICU_INTEGRATION.md`](../docs/ui/NICUPICU_INTEGRATION.md).
 
 ## Notes
 

@@ -151,10 +151,33 @@ watch(current, (name) => {
   }
 });
 
+// Load the scenario a nicupicu.nl lesson account starts from: its curated cloud
+// state if set, else its bundled scenario. Returns false if neither is available.
+async function loadLesson(): Promise<boolean> {
+  const l = auth.lesson;
+  if (!l) return false;
+  if (l.stateId) {
+    const file = await statesStore.loadState(l.stateId);
+    if (file) {
+      loadFromObject(file);
+      return true;
+    }
+  }
+  if (l.scenario && scenarios.value.includes(l.scenario)) {
+    // re-selecting the same name doesn't trigger the watcher, so load directly
+    if (current.value === l.scenario) load(l.scenario);
+    else current.value = l.scenario;
+    return true;
+  }
+  return false;
+}
+
 onMounted(async () => {
   await store.fetchScenarios();
   const u = auth.user;
   // Startup priority:
+  // 0. A lesson account (nicupicu.nl launch) always opens its own lesson.
+  if (u?.lesson && (await loadLesson())) return;
   // 1. A model developer's chosen LOCAL scenario (highest priority).
   if (u?.modelDeveloper && u.defaultLocalState && scenarios.value.includes(u.defaultLocalState)) {
     current.value = u.defaultLocalState; // watcher loads it (and clears cloud currentId)
@@ -258,7 +281,21 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <span class="ml-1 font-medium text-surface-100">{{ loadedName }}</span>
       </span>
       <div class="ml-auto flex items-center gap-3">
-        <span v-if="auth.user" class="text-sm opacity-70">{{ auth.user.email }}</span>
+        <template v-if="auth.lesson">
+          <span class="text-sm" v-tooltip.bottom="'nicupicu.nl lesson'">
+            <i class="pi pi-book mr-1 opacity-60"></i>
+            <span class="font-medium text-surface-100">{{ auth.lesson.title }}</span>
+          </span>
+          <Button
+            icon="pi pi-refresh"
+            label="Restart lesson"
+            size="small"
+            severity="secondary"
+            text
+            @click="loadLesson"
+          />
+        </template>
+        <span v-else-if="auth.user" class="text-sm opacity-70">{{ auth.user.email }}</span>
         <AdminUsersButton v-if="auth.user?.admin" />
         <Button
           icon="pi pi-sign-out"
@@ -645,7 +682,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             @click="current && deleteScenario(current)"
           />
         </template>
-        <SaveStatePanel v-if="modelReady" />
+        <template v-if="auth.lesson?.allowScenarioSwitch && !auth.user?.modelDeveloper">
+          <span class="opacity-70">scenario</span>
+          <Select v-model="current" :options="scenarios" size="small" class="w-56" />
+        </template>
+        <SaveStatePanel v-if="modelReady && !auth.lesson?.readonly" />
       </div>
     </div>
   </div>

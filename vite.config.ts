@@ -187,6 +187,9 @@ function authApi(env: Record<string, string>): Plugin {
   // server-side-only secrets across here without exposing them to the client.
   if (env.MONGODB_URI && !process.env.MONGODB_URI) process.env.MONGODB_URI = env.MONGODB_URI;
   if (env.AUTH_SECRET && !process.env.AUTH_SECRET) process.env.AUTH_SECRET = env.AUTH_SECRET;
+  for (const k of ["NICUPICU_LAUNCH_SECRET", "LAUNCH_STATIC_KEYS"]) {
+    if (env[k] && !process.env[k]) process.env[k] = env[k];
+  }
   return {
     name: "auth-api",
     configureServer(server) {
@@ -255,6 +258,27 @@ function authApi(env: Record<string, string>): Plugin {
             sendJson(res, 500, { error: `auth error: ${String(e)}` });
           }
         });
+      });
+
+      // GET /api/auth/launch?t=… — nicupicu lesson launch (see server/auth.mjs launch()).
+      server.middlewares.use("/api/auth/launch", (req: any, res: any, next: () => void) => {
+        if (req.method !== "GET") return next();
+        const token = new URL(req.url, "http://localhost").searchParams.get("t");
+        const redirect = (r: { status: number; location: string; setCookie?: string }) => {
+          res.statusCode = r.status;
+          res.setHeader("location", r.location);
+          res.setHeader("cache-control", "no-store");
+          res.setHeader("referrer-policy", "no-referrer");
+          if (r.setCookie) res.setHeader("set-cookie", r.setCookie);
+          res.end();
+        };
+        handlers()
+          .then(({ launch }) => launch(token, { secure: false, ip: req.socket.remoteAddress || "" }))
+          .then(redirect)
+          .catch((e) => {
+            console.error("launch error:", String(e));
+            redirect({ status: 302, location: "/login?launch=error" });
+          });
       });
 
       server.middlewares.use("/api/auth/users", (req: any, res: any, next: () => void) => {

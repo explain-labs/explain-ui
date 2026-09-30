@@ -14,6 +14,17 @@ export interface AuthUser {
   modelDeveloper: boolean;
   defaultState: string | null;
   defaultLocalState: string | null;
+  // Set only for a nicupicu.nl lesson account (entered via /api/auth/launch).
+  lesson?: LessonProfile | null;
+}
+
+export interface LessonProfile {
+  id: string;
+  title: string;
+  scenario: string | null; // bundled scenario to start from, or
+  stateId: string | null; // an admin-curated cloud state (takes precedence)
+  allowScenarioSwitch: boolean;
+  readonly: boolean;
 }
 
 type Status = "idle" | "loading" | "authed" | "error";
@@ -46,6 +57,7 @@ export const useAuthStore = defineStore("auth", () => {
   const ready = ref(false);
 
   const isAuthenticated = computed(() => user.value !== null);
+  const lesson = computed(() => user.value?.lesson ?? null);
 
   // Dev-only: persist the developer's chosen startup scenario to localStorage so this
   // device reloads it. Pass null to clear (falls back to the bundled term_neonate).
@@ -122,8 +134,22 @@ export const useAuthStore = defineStore("auth", () => {
   // Rehydrate the session from the HttpOnly cookie. Safe to call repeatedly;
   // the router guard calls it once before the first protected navigation.
   async function fetchMe(): Promise<boolean> {
-    // Dev bypass: auto-login as the local developer, never touch /api/auth or MongoDB.
+    // Dev bypass: auto-login as the local developer, never touch MongoDB — unless a
+    // lesson launch (/api/auth/launch) just set a real session, so launches can be
+    // tested under `npm run dev`. Any other real session is ignored in dev.
     if (DEV) {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        const data = res.ok ? await res.json() : null;
+        if (data?.user?.lesson) {
+          user.value = data.user as AuthUser;
+          status.value = "authed";
+          ready.value = true;
+          return true;
+        }
+      } catch {
+        /* no Mongo in dev — fall through to the local developer */
+      }
       user.value = makeDevUser();
       status.value = "authed";
       ready.value = true;
@@ -196,6 +222,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   return {
     user,
+    lesson,
     status,
     error,
     ready,

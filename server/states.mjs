@@ -32,11 +32,22 @@ async function requireUser(cookieHeader) {
   if (!payload) return null;
   const users = await getUsersCollection();
   const user = await users.findOne({ email: payload.email });
-  if (!user) return null;
-  return { email: user.email, name: user.name ?? "", modelDeveloper: !!user.modelDeveloper };
+  if (!user || user.disabled) return null;
+  return {
+    email: user.email,
+    name: user.name ?? "",
+    modelDeveloper: !!user.modelDeveloper,
+    lesson: user.lesson ?? null,
+  };
 }
 
 const unauth = { status: 401, body: { error: "not authenticated" } };
+
+// Lesson accounts (nicupicu.nl, see launch() in ./auth.mjs) are shared by many
+// learners, so by default they may not write: one learner must not overwrite the
+// lesson for everyone. The UI hides these controls too; this is the real gate.
+const readonlyLesson = (user) => !!user.lesson && user.lesson.readonly !== false;
+const lessonForbidden = { status: 403, body: { error: "read-only lesson account" } };
 
 function toObjectId(id) {
   try {
@@ -124,6 +135,7 @@ export async function seedDefaultState(user) {
 export async function saveState(cookieHeader, { name, description, file } = {}) {
   const user = await requireUser(cookieHeader);
   if (!user) return unauth;
+  if (readonlyLesson(user)) return lessonForbidden;
 
   const nm = typeof name === "string" ? name.trim() : "";
   if (!nm) return { status: 400, body: { error: "a name is required" } };
@@ -203,7 +215,13 @@ export async function getState(cookieHeader, id) {
   const oid = toObjectId(id);
   if (!oid) return { status: 400, body: { error: "invalid id" } };
   const states = await getStatesCollection();
-  const doc = await states.findOne({ _id: oid, owner_email: user.email });
+  // A lesson account may also read the one curated state its lesson starts from,
+  // which is owned by the admin who set the lesson up.
+  const filter =
+    user.lesson?.stateId && user.lesson.stateId === String(oid)
+      ? { _id: oid }
+      : { _id: oid, owner_email: user.email };
+  const doc = await states.findOne(filter);
   if (!doc) return { status: 404, body: { error: "state not found" } };
   // Hand back the shape useExplain.loadFromObject expects.
   const file = {
@@ -223,6 +241,7 @@ export async function getState(cookieHeader, id) {
 export async function deleteState(cookieHeader, { id } = {}) {
   const user = await requireUser(cookieHeader);
   if (!user) return unauth;
+  if (readonlyLesson(user)) return lessonForbidden;
   const oid = toObjectId(id);
   if (!oid) return { status: 400, body: { error: "invalid id" } };
   const states = await getStatesCollection();
@@ -243,6 +262,7 @@ export async function deleteState(cookieHeader, { id } = {}) {
 export async function setDefaultState(cookieHeader, { id } = {}) {
   const user = await requireUser(cookieHeader);
   if (!user) return unauth;
+  if (readonlyLesson(user)) return lessonForbidden;
   const users = await getUsersCollection();
   if (id === null || id === "") {
     await users.updateOne({ email: user.email }, { $set: { defaultState: null } });
@@ -264,6 +284,7 @@ export async function setDefaultState(cookieHeader, { id } = {}) {
 export async function setDefaultLocalState(cookieHeader, { name } = {}) {
   const user = await requireUser(cookieHeader);
   if (!user) return unauth;
+  if (readonlyLesson(user)) return lessonForbidden;
   if (!user.modelDeveloper) return { status: 403, body: { error: "model developers only" } };
   const users = await getUsersCollection();
   if (name === null || name === "") {
