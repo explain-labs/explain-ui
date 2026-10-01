@@ -111,9 +111,11 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 
 | Column | Tab values | Components | Doc |
 |---|---|---|---|
-| Left (`controlTab`) | `editor` `ventilator` `ecls` `resuscitation` `pregnancy` `scaler` `events` | `ModelEditor`, `VentilatorPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
+| Left (`controlTab`) | `editor` `ventilator` `ecls` `resuscitation`¹ `pregnancy`¹ `scaler`¹ `events` | `ModelEditor`, `VentilatorPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
 | Center (`vizTab`) | `diagram` `chart` `loop` `chat` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md) |
 | Right (`monitorTab`) | `monitoring` `monitor` `ventilator` | `NumericReadoutPanel` (×group), `Monitor`, `VentilatorScope` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
+
+¹ Unfinished: hidden in production builds, shown under `npm run dev` (`UNFINISHED_PANELS` in `MainPage.vue`).
 
 The bottom bar holds the run controls: a single ▶/■ toggle (also bound to **Spacebar**, suppressed
 while typing in inputs), a fast-forward `calculate(calcSecs)` button with a `CALC_OPTIONS`
