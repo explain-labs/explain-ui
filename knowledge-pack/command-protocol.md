@@ -173,6 +173,9 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
     "temp": 36.8, "pda": 0.4,                                        // structural
     "fio2": 0.3,          // inspired O2 fraction 0.21-1.0 (NOT a percentage); structural
     "hr": 165, "map": 33, "cvp": 4, "pap_m": 28,                     // iterated (mmHg, bpm)
+    "sys": 48, "dia": 27, // iterated AS A PAIR (mean + pulse pressure); one alone is ignored;
+                          //   without "map" the builder derives it as dia + (sys - dia)/3
+    "rr": 60,             // iterated: spontaneous respiratory rate (/min); breathing baselines only
     "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3 // iterated
   },
   "pathophysiology": { "rds": "mild|moderate|severe", "pvr_scale": 1.7 },
@@ -197,7 +200,8 @@ baby on oxygen much healthier lungs than it has. A value outside 0.21–1.0 fail
 The builder runs a closed loop: warm to steady state → measure vitals → nudge one lever
 per off-target vital → repeat. Lever map (one dominant lever each): MAP←systemic
 resistance, mean PAP←pulmonary resistance, CVP←venous unstressed volume, HR←heart-rate
-reference, PO2/SpO2←alveolar O₂ diffusion, **pCO2←spontaneous ventilatory drive** (so it
+reference, pulse pressure (sys − dia)←large-artery stiffness, RR←split between breath size
+and rate (minute volume unchanged), PO2/SpO2←alveolar O₂ diffusion, **pCO2←spontaneous ventilatory drive** (so it
 assumes the patient breathes spontaneously — for a ventilated patient set ventilator
 rate/Vt instead), BE/pH←Stewart unmeasured anions, CO←contractility. Targets it can't
 reach in `max_iters` are reported `INCOMPLETE`; don't claim a value the report didn't hit.
@@ -228,10 +232,10 @@ typed build request:
   "schema": 1,
   "request_id": "pb_3fa94c1e",          // use this, unchanged, as the SPEC "name"
   "targets": { "weight": 1.08, "gestational_age": 28, "hr": 158, "map": 34,
-               "spo2": 91, "pco2": 51, "be": -4.5, "fio2": 0.3 },   // measured; builder units
-  "checks":  { "sys": 48, "dia": 27, "ph": 7.28 },     // measured; NOT to be targeted
+               "sys": 48, "dia": 27, "spo2": 91, "pco2": 51, "be": -4.5, "fio2": 0.3 },   // measured; builder units
+  "checks":  { "ph": 7.28 },                           // measured; NOT to be targeted
   "context": { "gas_site": "capillary", "resp_support": "cpap", "postnatal_age": 3 },
-  "unknown": ["height", "hb", "temp", "cvp", "co", "po2"],  // not measured
+  "unknown": ["height", "hb", "temp", "cvp", "co", "rr", "po2"],  // not measured
   "units":   { "weight": "kg", "map": "mmHg", "postnatal_age": "days" }
 }
 ```
@@ -255,8 +259,8 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
    - `temp`: leave it out when unknown (the baseline's normal temperature applies).
    - If you cannot find a source, either leave the value out or fill it and mark it
      `assumed` — never present a guess as a reference value.
-4. **Do not invent calibration targets.** An unmeasured vital (`hr`, `map`, `cvp`, `co`,
-   `spo2`, `po2`, `pco2`, `ph`, `be`) is **not** set to a normal value: the targets are
+4. **Do not invent calibration targets.** An unmeasured vital (`hr`, `sys`, `dia`, `map`,
+   `rr`, `cvp`, `co`, `spo2`, `po2`, `pco2`, `ph`, `be`) is **not** set to a normal value: the targets are
    coupled, and calibrating to made-up numbers distorts the fit to the measured ones. Give
    it a provenance row with status `emergent` and the expected range, and leave it out of
    the SPEC.
@@ -307,11 +311,11 @@ One row for **every key in `unknown`** — nothing for measured values (the app 
 Building a 1.08 kg, 28-week baby on day 3 from the term baseline, calibrated to the measured heart rate, mean pressure, saturation, pCO2 and base excess.
 
 ```explain-provenance
-{"baseline":"term_neonate","baseline_reason":"Preterm built from the term baseline plus gestational age 28 wk.","fields":[{"key":"hb","value":9.0,"status":"reference","basis":"28 wk, day 3: first-week value for under 29 wk","source":{"title":"neonatal-reference.md (draft), table 2","url":null}},{"key":"height","value":0.355,"status":"reference","basis":"length at 28 wk","source":{"title":"neonatal-reference.md (draft), table 1","url":null}},{"key":"temp","value":null,"status":"emergent","basis":"baseline normal temperature","source":null},{"key":"cvp","value":null,"status":"emergent","basis":"left to the model; expected 0 to 7 mmHg","source":null},{"key":"co","value":null,"status":"emergent","basis":"left to the model","source":null},{"key":"po2","value":null,"status":"emergent","basis":"left to the model; expected 40 to 65 mmHg","source":null}],"warnings":["No cardiac output measured: output and resistance come from the baseline."]}
+{"baseline":"term_neonate","baseline_reason":"Preterm built from the term baseline plus gestational age 28 wk.","fields":[{"key":"hb","value":9.0,"status":"reference","basis":"28 wk, day 3: first-week value for under 29 wk","source":{"title":"neonatal-reference.md (draft), table 2","url":null}},{"key":"height","value":0.355,"status":"reference","basis":"length at 28 wk","source":{"title":"neonatal-reference.md (draft), table 1","url":null}},{"key":"temp","value":null,"status":"emergent","basis":"baseline normal temperature","source":null},{"key":"cvp","value":null,"status":"emergent","basis":"left to the model; expected 0 to 7 mmHg","source":null},{"key":"co","value":null,"status":"emergent","basis":"left to the model","source":null},{"key":"rr","value":null,"status":"emergent","basis":"left to the model; expected 40 to 75 /min","source":null},{"key":"po2","value":null,"status":"emergent","basis":"left to the model; expected 40 to 65 mmHg","source":null}],"warnings":["No cardiac output measured: output and resistance come from the baseline."]}
 ```
 
 ```explain-build
-{"baseline":"term_neonate","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5,"fio2":0.3,"hb":9.0,"height":0.355}}
+{"baseline":"term_neonate","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"sys":48,"dia":27,"spo2":91,"pco2":51,"be":-4.5,"fio2":0.3,"hb":9.0,"height":0.355}}
 ```
 ````
 
