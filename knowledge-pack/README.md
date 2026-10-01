@@ -12,6 +12,7 @@ and letting it read them on demand.
 | `explain-CLAUDE-section.md` | The `CLAUDE.md` pointer that orients an Agent-SDK bot to the pack (grep it, cite paths, handle the live patient-state block) and to the command files below. | hand-written |
 | `command-protocol.md` | **Bot-facing**: how to emit an action (the fenced `explain-command` JSON format + rules). The webapp parses these out of the reply and offers the user an Apply button. | hand-written |
 | `command-catalog.md` | **Bot-facing**: the exhaustive list of currently-allowed commands with value ranges. Generated from the webapp's allowlist + parameter schema so the bot can't propose something the app rejects. | `node scripts/build_command_catalog.mjs` |
+| `neonatal-reference.md` | **Bot-facing**: reference values the bot uses to fill what a Patient-builder form leaves empty (size by gestational age, haemoglobin, the engine's normal-range table). **Draft until a clinician signs it off.** | hand-written; tables 1 and 3 copied from `explain-engine/scripts/build_patient.mjs` (`PRETERM_SEED`) and `_probe.mjs` (`RANGES`) |
 | `system-prompt.md` | A role/instruction preamble — only needed for the **fallback** (non-Agent-SDK) wiring below. | build script |
 | `README.md` | This guide. | hand-written |
 

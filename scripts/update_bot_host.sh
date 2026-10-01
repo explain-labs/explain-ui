@@ -50,6 +50,7 @@ cp "$REPO_DIR/knowledge-pack/explain-knowledge-pack.md" "$WORKDIR/explain-knowle
 cp "$REPO_DIR/knowledge-pack/system-prompt.md"          "$WORKDIR/system-prompt.md"
 cp "$REPO_DIR/knowledge-pack/command-protocol.md"       "$WORKDIR/command-protocol.md"
 cp "$REPO_DIR/knowledge-pack/command-catalog.md"        "$WORKDIR/command-catalog.md"
+cp "$REPO_DIR/knowledge-pack/neonatal-reference.md"     "$WORKDIR/neonatal-reference.md"
 cp "$REPO_DIR/knowledge-pack/explain-CLAUDE-section.md" "$WORKDIR/explain-CLAUDE-section.md"
 # the agent loads workdir/CLAUDE.md via setting_sources=["project"]
 cp "$REPO_DIR/knowledge-pack/explain-CLAUDE-section.md" "$WORKDIR/CLAUDE.md"

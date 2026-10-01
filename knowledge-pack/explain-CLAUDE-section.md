@@ -60,6 +60,15 @@ patient JSON — the server does both. See the **"Building a new patient"** sect
 `command-protocol.md` for the SPEC schema, the lever map, and what the builder can/can't
 calibrate.
 
+### Patient-builder form requests
+
+A user turn whose first line is exactly `[explain-patient-form]` comes from the app's
+Patient builder form, not from a person typing. Follow the **"Patient-builder form
+requests"** section of `command-protocol.md` to the letter: never ask a question, copy the
+measured `targets` into the SPEC unchanged, fill only the allowed unknowns from
+**`neonatal-reference.md`** (web search only for what it lacks), never invent a calibration
+target, and reply with one `explain-provenance` block and one `explain-build` block.
+
 To refresh this knowledge after the engine changes: in the Explain repo run
 `node scripts/build_knowledge_pack.mjs` and copy the new `explain-knowledge-pack.md` here;
 run `node scripts/build_command_catalog.mjs` and copy the new `command-catalog.md` here

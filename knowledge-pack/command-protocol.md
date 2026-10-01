@@ -196,6 +196,115 @@ assumes the patient breathes spontaneously — for a ventilated patient set vent
 rate/Vt instead), BE/pH←Stewart unmeasured anions, CO←contractility. Targets it can't
 reach in `max_iters` are reported `INCOMPLETE`; don't claim a value the report didn't hit.
 
+## Patient-builder form requests (`explain-patient-form`)
+
+The app has a **Patient builder** form in which a clinician enters measurements from a
+real neonate. A form request is a user turn whose **first line is exactly
+`[explain-patient-form]`**, followed by one fenced `explain-patient-form` JSON block. It is
+sent by the app, not typed by a person, and the answer is read by a program and shown in a
+results panel — not in the chat. So for a form request the rules are stricter than for a
+typed build request:
+
+- **Never ask a question.** Nobody is there to answer. Decide, and say what you decided
+  in the provenance block.
+- Reply with **two or three sentences of prose at most**, then exactly **one
+  `explain-provenance` block** and exactly **one `explain-build` block**.
+- The data describes a real patient. It carries no identifiers; do not ask for any, and do
+  not speculate about who the patient is.
+
+### The form block
+
+```jsonc
+{
+  "schema": 1,
+  "request_id": "pb_3fa94c1e",          // use this, unchanged, as the SPEC "name"
+  "targets": { "weight": 1.08, "gestational_age": 28, "hr": 158, "map": 34,
+               "spo2": 91, "pco2": 51, "be": -4.5 },   // measured; builder units
+  "checks":  { "sys": 48, "dia": 27, "ph": 7.28 },     // measured; NOT to be targeted
+  "context": { "gas_site": "capillary", "resp_support": "cpap", "postnatal_age": 3 },
+  "unknown": ["height", "hb", "temp", "cvp", "co", "po2"],  // not measured
+  "units":   { "weight": "kg", "map": "mmHg", "postnatal_age": "days" }
+}
+```
+
+The app has already converted units, checked ranges and decided which measured values
+are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillary pO2).
+**Do not redo or second-guess that.**
+
+### What to do
+
+1. **Copy `targets` into the SPEC `targets` unchanged** — every key, every number, exactly
+   as given. Do not round, convert, "correct" or drop a measured value, even one that looks
+   implausible; say so under `warnings` instead. The app compares the SPEC that was built
+   with the form and shows the user any difference.
+2. **Leave `checks` out of the SPEC.** They are measured values the builder cannot or
+   should not calibrate to. The app compares them with the result itself.
+3. **Fill only these unknowns, and only from a source:** `weight`, `gestational_age`,
+   `height`, `hb`. Look in `neonatal-reference.md` first; use web search only for what it
+   does not cover. Add each filled value to the SPEC `targets` and give it a provenance row.
+   - `temp`: leave it out when unknown (the baseline's normal temperature applies).
+   - If you cannot find a source, either leave the value out or fill it and mark it
+     `assumed` — never present a guess as a reference value.
+4. **Do not invent calibration targets.** An unmeasured vital (`hr`, `map`, `cvp`, `co`,
+   `spo2`, `po2`, `pco2`, `ph`, `be`) is **not** set to a normal value: the targets are
+   coupled, and calibrating to made-up numbers distorts the fit to the measured ones. Give
+   it a provenance row with status `emergent` and the expected range, and leave it out of
+   the SPEC.
+5. **Baseline:** always `term_neonate`. Prematurity comes from `gestational_age` in the
+   targets (see the preterm rule under "Building a new patient"). Do not add
+   `pathophysiology`, `pda` or a `profile`, and do not pick a lesion baseline: form requests
+   build a structurally normal baby.
+6. **SPEC settings:** `"name"` = the `request_id`; `"max_iters": 10`; no `summary` text
+   beyond a plain description of size and gestation; no `tolerance` unless the form sends
+   one.
+
+### The provenance block
+
+One row for **every key in `unknown`** — nothing for measured values (the app has those).
+
+```jsonc
+{
+  "baseline": "term_neonate",
+  "baseline_reason": "Preterm built from the term baseline plus gestational age 28 wk.",
+  "fields": [
+    { "key": "hb", "value": 9.0, "status": "reference",
+      "basis": "28 wk, day 3: first-week value for under 29 wk",
+      "source": { "title": "neonatal-reference.md (draft), table 2", "url": null } },
+    { "key": "height", "value": 0.355, "status": "reference",
+      "basis": "length at 28 wk",
+      "source": { "title": "neonatal-reference.md (draft), table 1", "url": null } },
+    { "key": "cvp", "value": null, "status": "emergent",
+      "basis": "left to the model; expected 0 to 7 mmHg at 28 wk", "source": null }
+  ],
+  "warnings": ["No cardiac output measured: output and resistance come from the baseline."]
+}
+```
+
+- `key`: a key from the form's `unknown` list.
+- `value`: the number you put in the SPEC, in the unit given under `units`; `null` for
+  `emergent`.
+- `status`: `reference` (from a source you name), `assumed` (your judgement, no source),
+  or `emergent` (not set; the model produces it).
+- `source`: `{ "title", "url" }` — the file and table, or the web page with its `https`
+  URL. `null` for `assumed` and `emergent`.
+- `basis`: one short sentence. Plain text only.
+- `warnings`: at most a few short sentences about anything the user must know (a measured
+  value that looks implausible, an assumption that matters).
+
+### Example reply
+
+````
+Building a 1.08 kg, 28-week baby on day 3 from the term baseline, calibrated to the measured heart rate, mean pressure, saturation, pCO2 and base excess.
+
+```explain-provenance
+{"baseline":"term_neonate","baseline_reason":"Preterm built from the term baseline plus gestational age 28 wk.","fields":[{"key":"hb","value":9.0,"status":"reference","basis":"28 wk, day 3: first-week value for under 29 wk","source":{"title":"neonatal-reference.md (draft), table 2","url":null}},{"key":"height","value":0.355,"status":"reference","basis":"length at 28 wk","source":{"title":"neonatal-reference.md (draft), table 1","url":null}},{"key":"temp","value":null,"status":"emergent","basis":"baseline normal temperature","source":null},{"key":"cvp","value":null,"status":"emergent","basis":"left to the model; expected 0 to 7 mmHg","source":null},{"key":"co","value":null,"status":"emergent","basis":"left to the model","source":null},{"key":"po2","value":null,"status":"emergent","basis":"left to the model; expected 40 to 65 mmHg","source":null}],"warnings":["No cardiac output measured: output and resistance come from the baseline."]}
+```
+
+```explain-build
+{"baseline":"term_neonate","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5,"hb":9.0,"height":0.355}}
+```
+````
+
 ## Changing the running patient by physiological effect
 
 When the user asks to change a **physiological outcome** of the *current* patient
