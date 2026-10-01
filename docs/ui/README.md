@@ -33,7 +33,7 @@ wiring → gotchas), adapted for Vue units. Cross-links into the engine docs use
 | Doc | What it covers |
 |---|---|
 | [Composables](./Composables.md) | The six composables: `useExplain` (control-plane singleton over `@explain/Model`), `useRealtimeBus` (data-plane singleton over `RealtimeBus`), `useChartParams`, `useSlowHistory`, `useMonitorPrefs`, `useModelInterface`. |
-| [Stores](./Stores.md) | The Pinia stores: `auth`, `model` (scenarios), `states` (cloud saves), `monitors` (dashboards/groups), `events` (scheduled changes), `chat`, `diagram` (renderer bridge), plus `layout` (MainPage active tabs, see [MANUAL](./MANUAL.md)). |
+| [Stores](./Stores.md) | The Pinia stores: `auth`, `model` (scenarios), `states` (cloud saves), `monitors` (dashboards/groups), `events` (scheduled changes), `chat`, `patientBuilder` (see [PatientBuilder](./PatientBuilder.md)), `diagram` (renderer bridge), plus `layout` (MainPage active tabs, see [MANUAL](./MANUAL.md)). |
 
 ## Rendering & visualization
 
@@ -54,6 +54,7 @@ wiring → gotchas), adapted for Vue units. Cross-links into the engine docs use
 | Doc | What it covers |
 |---|---|
 | [ModelInterface](./ModelInterface.md) | `src/model-interface/`: the UI-owned `InterfaceField` schema, `groupByEditMode`, `MODEL_INTERFACES`/`getInterfaceForType`, why it was relocated out of the engine, and its dual editor + bot-validator consumers. |
+| [PatientBuilder](./PatientBuilder.md) | The "Patient builder" tab (unfinished, dev-only): the form schema and target rules (`patientSchema`), the bot request / provenance / build-report handling (`patientBuilder` service + store), and Apply / Save. |
 | [ChatAndBot](./ChatAndBot.md) | The "Explain AI Bot" tab: `ChatPanel`, the `chat` store + `/api/chat` proxy, and `src/services/` command pipeline (`botCommands` parse→validate→execute + `botCommandAllowlist`). |
 
 ---

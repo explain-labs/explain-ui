@@ -98,10 +98,10 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 │ controlTab    │ vizTab                                        │ monitorTab                   │
 │ (left ¼)      │ (center ½)                                    │ (right ¼)                    │
 │               │                                               │                              │
-│ editor        │ diagram | chart | loop | chat | docs          │ monitoring | monitor |       │
+│ editor        │ diagram | chart | loop | chat | builder | docs│ monitoring | monitor |       │
 │ ventilator    │                                               │   ventilator                 │
 │ ecls          │ Diagram · RealtimeChart · LoopChart ·         │ (NumericReadoutPanel ×N,     │
-│ resuscitation │ ChatPanel · DocViewer                         │  dashboard switcher,         │
+│ resuscitation │ ChatPanel · PatientBuilderPanel · DocViewer   │  dashboard switcher,         │
 │ pregnancy     │                                               │  compact/trend prefs,        │
 │ scaler        │                                               │  manage/export) ·            │
 │ events        │                                               │ Monitor · VentilatorScope    │
@@ -112,7 +112,7 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 | Column | Tab values | Components | Doc |
 |---|---|---|---|
 | Left (`controlTab`) | `editor` `ventilator` `ecls` `resuscitation`¹ `pregnancy`¹ `scaler`¹ `events` | `ModelEditor`, `VentilatorPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
-| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md) |
+| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `builder`¹ `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `PatientBuilderPanel`, `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md), [PatientBuilder](./PatientBuilder.md) |
 | Right (`monitorTab`) | `monitoring` `monitor` `ventilator` | `NumericReadoutPanel` (×group), `Monitor`, `VentilatorScope` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
 
 ¹ Unfinished: hidden in production builds, shown under `npm run dev` (`UNFINISHED_PANELS` in `MainPage.vue`).
