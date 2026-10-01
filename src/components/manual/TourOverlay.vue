@@ -33,6 +33,12 @@ function track() {
     return;
   }
   const r = el.getBoundingClientRect();
+  // hidden (display:none, collapsed) targets have no box: fall back to a centred card
+  if (r.width === 0 && r.height === 0) {
+    if (rect.value) rect.value = null;
+    centreCard();
+    return;
+  }
   const next = { x: r.left - PAD, y: r.top - PAD, w: r.width + 2 * PAD, h: r.height + 2 * PAD };
   const cur = rect.value;
   if (!cur || cur.x !== next.x || cur.y !== next.y || cur.w !== next.w || cur.h !== next.h) {

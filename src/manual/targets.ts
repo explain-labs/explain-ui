@@ -47,6 +47,12 @@ export const TOUR_TARGETS = [
   "diagram.connect",
   "diagram.view",
   "diagram.file",
+  // model editor
+  "modeleditor.panel",
+  "modeleditor.select",
+  "modeleditor.refresh",
+  "modeleditor.sections", // only once a model with an interface is selected
+  "modeleditor.factors", // the Factors accordion section
   // realtime chart + PV loop
   "chart.presets",
   "chart.series",

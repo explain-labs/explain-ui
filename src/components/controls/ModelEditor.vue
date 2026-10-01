@@ -177,9 +177,9 @@ function refresh() {
 </script>
 
 <template>
-  <Panel header="Model editor" toggleable>
+  <Panel header="Model editor" toggleable data-tour="modeleditor.panel">
     <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2" data-tour="modeleditor.select">
         <Select
           v-model="selected"
           :options="modelNames"
@@ -188,6 +188,7 @@ function refresh() {
           class="flex-1"
         />
         <Button
+          data-tour="modeleditor.refresh"
           v-tooltip.top="'Refresh values from engine'"
           icon="pi pi-refresh"
           severity="secondary"
@@ -197,9 +198,18 @@ function refresh() {
         />
       </div>
 
-      <div v-if="selected && groups.length" class="max-h-[32rem] overflow-auto pr-1">
+      <div
+        v-if="selected && groups.length"
+        data-tour="modeleditor.sections"
+        class="max-h-[32rem] overflow-auto pr-1"
+      >
         <Accordion :value="openSections" multiple>
-          <AccordionPanel v-for="g in groups" :key="g.mode" :value="g.mode">
+          <AccordionPanel
+            v-for="g in groups"
+            :key="g.mode"
+            :value="g.mode"
+            :data-tour="g.mode === 'factors' ? 'modeleditor.factors' : undefined"
+          >
             <AccordionHeader>{{ g.label }}</AccordionHeader>
             <AccordionContent>
               <div class="flex flex-col gap-3 pt-1">
