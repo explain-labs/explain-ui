@@ -59,6 +59,23 @@ const pumpType = ref<string | null>(null);
 const pumps = ref<Record<string, { type?: string; max_rpm?: number; prime?: number }>>({});
 const pumpOptions = computed(() => Object.keys(pumps.value));
 const selectedPump = computed(() => (pumpType.value ? pumps.value[pumpType.value] : undefined));
+// Oxygenator from the engine's library (Ecls.oxygenators). Selecting one sets
+// oxygenator_type; the engine copies its O2/CO2 transfer ceilings into the gas
+// exchanger. Rated flow and surface area are informational.
+const oxygenatorType = ref<string | null>(null);
+const oxygenators = ref<
+  Record<string, { rated_flow?: number; surface_area?: number; prime?: number }>
+>({});
+const oxygenatorOptions = computed(() => Object.keys(oxygenators.value));
+const selectedOxygenator = computed(() =>
+  oxygenatorType.value ? oxygenators.value[oxygenatorType.value] : undefined,
+);
+// circuit flow above the oxygenator's rating: transfer is capped, so warn
+const overRated = computed(() => {
+  const rated = selectedOxygenator.value?.rated_flow;
+  const flow = latest.value["Ecls.flow_avg"];
+  return rated != null && Number.isFinite(flow) && flow > rated;
+});
 function maxOf(f: Field): number {
   return f.p === "pump_rpm" ? (selectedPump.value?.max_rpm ?? f.max) : f.max;
 }
@@ -131,6 +148,8 @@ function syncLocal() {
   clamped.value = !!e.ecls_clamped;
   pumpType.value = e.pump_type ?? null;
   pumps.value = e.pumps && typeof e.pumps === "object" ? e.pumps : {};
+  oxygenatorType.value = e.oxygenator_type ?? null;
+  oxygenators.value = e.oxygenators && typeof e.oxygenators === "object" ? e.oxygenators : {};
   drainageCannula.value = e.drainage_cannula_type ?? null;
   returnCannula.value = e.return_cannula_type ?? null;
   drainageSite.value = e.drainage_site ?? null;
@@ -159,6 +178,11 @@ function onField(f: Field, v: number | null) {
   if (v == null) return;
   vals.value[f.p] = v;
   setProp(`Ecls.${f.p}`, v / (f.factor ?? 1), 0);
+}
+function onOxygenatorType(v: string) {
+  if (!v) return;
+  oxygenatorType.value = v;
+  setProp("Ecls.oxygenator_type", v, 0);
 }
 function onRunning(v: boolean) {
   running.value = v;
@@ -234,6 +258,25 @@ function onReturnSite(v: string) {
           />
           <span v-if="selectedPump" class="text-xs opacity-60">
             {{ selectedPump.type }}<template v-if="selectedPump.max_rpm"> · max {{ selectedPump.max_rpm }} RPM</template><template v-if="selectedPump.prime"> · prime {{ Math.round(selectedPump.prime * 1000) }} mL</template>
+          </span>
+        </div>
+      </div>
+      <div class="flex items-center justify-between gap-2">
+        <label class="text-sm opacity-80">Oxygenator</label>
+        <div class="flex min-w-0 flex-col items-end gap-0.5">
+          <Select
+            :model-value="oxygenatorType"
+            :options="oxygenatorOptions"
+            size="small"
+            class="w-52"
+            placeholder="Select oxygenator"
+            @update:model-value="onOxygenatorType"
+          />
+          <span v-if="selectedOxygenator" class="text-xs opacity-60">
+            <template v-if="selectedOxygenator.rated_flow">rated {{ selectedOxygenator.rated_flow }} L/min</template><template v-if="selectedOxygenator.surface_area"> · {{ selectedOxygenator.surface_area }} m²</template><template v-if="selectedOxygenator.prime"> · prime {{ Math.round(selectedOxygenator.prime * 1000) }} mL</template>
+          </span>
+          <span v-if="overRated" class="text-xs text-amber-400">
+            flow above the rated flow: gas transfer is capped
           </span>
         </div>
       </div>

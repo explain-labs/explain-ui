@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **421 settable params**, **28 functions**
-(+ 58 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **44 model_types**, **422 settable params**, **28 functions**
+(+ 59 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -72,6 +72,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ecls.ecls_running` — ECLS circuit on/off (boolean)
 - `setProp` `Ecls.ecls_clamped` — clamp/unclamp the ECLS blood path (boolean)
 - `setProp` `Ecls.pump_type` — pump device (list: Abbott PediMag, Abbott CentriMag, Getinge Rotaflow RF-32, Medtronic Bio-Pump BP-50, Generic roller pump); sets centrifugal/roller mode and the pump's H-Q curve. Keep pump_rpm within the pump's max (roller ~250)
+- `setProp` `Ecls.oxygenator_type` — oxygenator device (list: Getinge Quadrox-i Neonatal, Getinge Quadrox-i Pediatric, Getinge Quadrox-i Small Adult, Medtronic Nautilus (Adult)); sets the membrane's O2/CO2 transfer ceilings. Pick one rated for the circuit flow
 - `setProp` `Ecls.pump_rpm` — pump speed (rpm; max depends on the pump: 3000-5500 centrifugal, 250 roller)
 - `setProp` `Ecls.gas_flow` — sweep gas flow (L/min, 0-10)
 - `setProp` `Ecls.gas_fio2` — sweep gas O2 fraction (0.21-1.0)
@@ -278,6 +279,7 @@ _setProp_:
 - `ecls_running` — ECLS running (boolean)
 - `ecls_clamped` — ECLS clamped (boolean)
 - `pump_type` — pump (list, one of Abbott PediMag/Abbott CentriMag/Getinge Rotaflow RF-32/Medtronic Bio-Pump BP-50/Generic roller pump)
+- `oxygenator_type` — oxygenator (list, one of Getinge Quadrox-i Neonatal/Getinge Quadrox-i Pediatric/Getinge Quadrox-i Small Adult/Medtronic Nautilus (Adult))
 - `pump_rpm` — pump speed (rpm) (number, rpm, range 0–5500)
 - `gas_flow` — sweep gas flow (L/min) (number, L/min, range 0–10)
 - `gas_fio2` — sweep gas fio2 (fraction) (number, fraction, range 0.21–1)

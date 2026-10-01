@@ -185,6 +185,12 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     target: "pump_type",
     note: "pump device (list: Abbott PediMag, Abbott CentriMag, Getinge Rotaflow RF-32, Medtronic Bio-Pump BP-50, Generic roller pump); sets centrifugal/roller mode and the pump's H-Q curve. Keep pump_rpm within the pump's max (roller ~250)",
   },
+  {
+    op: "setProp",
+    model: "Ecls",
+    target: "oxygenator_type",
+    note: "oxygenator device (list: Getinge Quadrox-i Neonatal, Getinge Quadrox-i Pediatric, Getinge Quadrox-i Small Adult, Medtronic Nautilus (Adult)); sets the membrane's O2/CO2 transfer ceilings. Pick one rated for the circuit flow",
+  },
   { op: "setProp", model: "Ecls", target: "pump_rpm", note: "pump speed (rpm; max depends on the pump: 3000-5500 centrifugal, 250 roller)" },
   { op: "setProp", model: "Ecls", target: "gas_flow", note: "sweep gas flow (L/min, 0-10)" },
   { op: "setProp", model: "Ecls", target: "gas_fio2", note: "sweep gas O2 fraction (0.21-1.0)" },
