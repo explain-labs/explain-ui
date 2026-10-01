@@ -527,6 +527,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   </Popover>
                   <Button
                     v-if="editingMonitors"
+                    data-tour="monitoring.addgroup"
                     v-tooltip.top="'Add group'"
                     icon="pi pi-plus"
                     label="Group"
@@ -583,6 +584,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 <!-- dashboard management (manage mode) -->
                 <div
                   v-if="editingMonitors"
+                  data-tour="monitoring.dashboards"
                   class="flex flex-col gap-1.5 rounded border border-surface-700 p-2"
                 >
                   <div class="flex items-center gap-1.5">

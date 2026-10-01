@@ -59,6 +59,12 @@ export const TOUR_TARGETS = [
   "loop.controls",
   "monitoring.toolbar",
   "monitoring.manage",
+  "monitoring.addgroup",
+  "monitoring.dashboards", // dashboard management box (manage mode only)
+  "numerics.group", // first numeric group (read-only view)
+  "numerics.card", // first numeric card
+  "numerics.group-edit", // first group's edit pencil (manage mode only)
+  "numerics.editor", // a group in edit mode
   "monitor.canvas",
 ] as const;
 

@@ -59,4 +59,5 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 1. Getting started *(done)*: layout, scenario, run, diagram, monitors, fast-forward, panels, saving.
 2. Diagram editing *(done)*: edit mode, add, select/move, inspector, connect, view settings, export/import.
 3. Charts and PV loops *(done)*: series, view options, presets, CSV, reading a PV loop.
-4. Monitoring dashboards · 5. Model editor · 6. Common tasks · 7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.
+4. Monitoring dashboards *(done)*: reading cards, toolbar, dashboards, groups, the group editor.
+5. Model editor · 6. Common tasks · 7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.

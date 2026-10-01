@@ -1,0 +1,3 @@
+- **Export** copies all visible values to the clipboard (paste straight into a spreadsheet), or downloads them as CSV with the simulation time.
+- **Trend window** sets how far back the sparklines and min–max ranges look: 30 s, 1 min or 5 min.
+- **Compact view** hides the sparklines and fits more cards on screen.
