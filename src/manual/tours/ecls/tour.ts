@@ -22,7 +22,7 @@ export default defineTour({
       advanceOn: { appear: "ecls.on" },
     },
     { id: "clamp", title: "Clamped", target: "ecls.clamp", placement: "right", ui: [...onEcls] },
-    { id: "pump", title: "The pump", target: "ecls.pump", placement: "right", ui: [...onEcls] },
+    { id: "pump", title: "Pump and oxygenator", target: "ecls.pump", placement: "right", ui: [...onEcls] },
     { id: "settings", title: "Pump speed and sweep gas", target: "ecls.settings", placement: "right", ui: [...onEcls] },
     { id: "cannulas", title: "Cannulas and sites", target: "ecls.cannulas", placement: "right", ui: [...onEcls] },
     { id: "resistances", title: "Resistance factors", target: "ecls.resistances", placement: "right", ui: [...onEcls] },
