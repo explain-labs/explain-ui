@@ -65,6 +65,11 @@ const calcSecs = ref(10);
 const CALC_OPTIONS = [5, 10, 30, 60, 120, 300]; // seconds to calculate
 // active tab per column; in a store so the interactive manual can switch them
 const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
+// Control panels that aren't finished yet: hidden on the deployed site, still
+// shown under `npm run dev` so they can be worked on. Remove a name here to
+// release its panel.
+const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler"]);
+const showPanel = (name: string) => import.meta.env.DEV || !UNFINISHED_PANELS.has(name);
 const tour = useTour();
 // first visit (no manual progress stored yet): offer the getting-started tour
 const offerTour = ref(!auth.lesson && tour.isFirstVisit());
@@ -388,13 +393,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <Tab value="ecls" data-tour="tab.control.ecls" v-tooltip.top="'ECLS'" aria-label="ECLS">
               <i class="pi pi-sync"></i>
             </Tab>
-            <Tab value="resuscitation" data-tour="tab.control.resuscitation" v-tooltip.top="'Resuscitation'" aria-label="Resuscitation">
+            <Tab v-if="showPanel('resuscitation')" value="resuscitation" data-tour="tab.control.resuscitation" v-tooltip.top="'Resuscitation'" aria-label="Resuscitation">
               <i class="pi pi-heart"></i>
             </Tab>
-            <Tab value="pregnancy" data-tour="tab.control.pregnancy" v-tooltip.top="'Pregnancy / Labor'" aria-label="Pregnancy / Labor">
+            <Tab v-if="showPanel('pregnancy')" value="pregnancy" data-tour="tab.control.pregnancy" v-tooltip.top="'Pregnancy / Labor'" aria-label="Pregnancy / Labor">
               <i class="pi pi-venus"></i>
             </Tab>
-            <Tab value="scaler" data-tour="tab.control.scaler" v-tooltip.top="'Scaler'" aria-label="Scaler">
+            <Tab v-if="showPanel('scaler')" value="scaler" data-tour="tab.control.scaler" v-tooltip.top="'Scaler'" aria-label="Scaler">
               <i class="pi pi-expand"></i>
             </Tab>
             <Tab value="events" data-tour="tab.control.events" v-tooltip.top="'Event scheduler'" aria-label="Event scheduler">
@@ -422,17 +427,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 <EclsPanel />
               </div>
             </TabPanel>
-            <TabPanel value="resuscitation">
+            <TabPanel v-if="showPanel('resuscitation')" value="resuscitation">
               <div class="flex flex-col gap-3">
                 <ResuscitationPanel />
               </div>
             </TabPanel>
-            <TabPanel value="pregnancy">
+            <TabPanel v-if="showPanel('pregnancy')" value="pregnancy">
               <div class="flex flex-col gap-3">
                 <PregnancyPanel />
               </div>
             </TabPanel>
-            <TabPanel value="scaler">
+            <TabPanel v-if="showPanel('scaler')" value="scaler">
               <div class="flex flex-col gap-3">
                 <ScalerPanel />
               </div>
