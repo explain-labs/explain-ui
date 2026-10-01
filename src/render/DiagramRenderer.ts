@@ -829,9 +829,13 @@ export class DiagramRenderer implements RendererAdapter {
     const longDelta = delta > 0 ? delta - 2 * Math.PI : delta + 2 * Math.PI;
     const candidates = [arcPts(rDev, delta), arcPts(rBypass, delta), arcPts(rDev, longDelta)];
     const arc = candidates.find((c) => !hits(c)) ?? candidates[0];
-    // device → track → (arc) → track → ring node; reversed if the ring is `from`
+    // device → track → (arc) → track → ring node; reversed if the ring is `from`.
+    // A radial run always meets the concentric track at 90°, so round those
+    // elbows into smooth bends (`path.corner`, ring radii).
     const pts = [dev.x, dev.y, ...arc, ring.x, ring.y];
-    return fromIsRing ? reversePts(pts) : pts;
+    const corner = numberOr(Number(layout.path.corner), OUTER_CORNER_DEFAULT) * this.ringR;
+    const rounded = roundCorners(pts, corner);
+    return fromIsRing ? reversePts(rounded) : rounded;
   }
 
   private onConnDown(name: string, e: any) {
@@ -1691,6 +1695,69 @@ function dotCount(len: number, scaling: number): number {
 // default "outer" bypass track radius (ring radii) when a connector sets no
 // path.track — used only when the direct track would cross other device nodes
 const OUTER_TRACK_DEFAULT = 1.5;
+
+// default corner radius (ring radii) for the bends of an "outer" route
+const OUTER_CORNER_DEFAULT = 0.2;
+
+// Round the sharp corners of a flat [x,y,…] polyline: every interior vertex that
+// turns by more than `minTurnDeg` (so an arc's own small tessellation steps are
+// left alone) is replaced by a quadratic Bézier from the point `d` before it to
+// the point `d` after it, with the corner as control point, so the bend leaves
+// and joins the runs tangentially. `d` = `radius`, capped at 45% of the run on
+// either side (a run reaches to the next corner or end) so short stubs survive.
+function roundCorners(pts: number[], radius: number, minTurnDeg = 25): number[] {
+  // points, dropping zero-length steps (they would break the turn test)
+  const P: [number, number][] = [];
+  for (let i = 0; i < pts.length; i += 2) {
+    const last = P[P.length - 1];
+    if (!last || Math.hypot(pts[i] - last[0], pts[i + 1] - last[1]) > 1e-6) P.push([pts[i], pts[i + 1]]);
+  }
+  if (P.length < 3 || !(radius > 0)) return pts;
+  const s = [0];
+  for (let i = 1; i < P.length; i++) s.push(s[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+  const corners: number[] = [];
+  const minTurn = minTurnDeg * DEG;
+  for (let i = 1; i < P.length - 1; i++) {
+    const a1 = Math.atan2(P[i][1] - P[i - 1][1], P[i][0] - P[i - 1][0]);
+    const a2 = Math.atan2(P[i + 1][1] - P[i][1], P[i + 1][0] - P[i][0]);
+    let turn = Math.abs(a2 - a1);
+    if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    if (turn > minTurn) corners.push(i);
+  }
+  if (!corners.length) return pts;
+  const at = (d: number): [number, number] => {
+    let i = 1;
+    while (i < s.length - 1 && s[i] < d) i++;
+    const t = (d - s[i - 1]) / (s[i] - s[i - 1] || 1);
+    return [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * t, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * t];
+  };
+  const bounds = [0, ...corners, P.length - 1];
+  const spans = corners.map((ci, k) => {
+    const d = Math.min(radius, 0.45 * (s[ci] - s[bounds[k]]), 0.45 * (s[bounds[k + 2]] - s[ci]));
+    return { a: s[ci] - d, b: s[ci] + d, c: P[ci] };
+  });
+  const out: number[] = [P[0][0], P[0][1]];
+  let k = 0;
+  let skipTo = -1;
+  const STEPS = 8;
+  for (let i = 1; i < P.length; i++) {
+    while (k < spans.length && spans[k].a <= s[i]) {
+      const { a, b, c } = spans[k++];
+      const p0 = at(a);
+      const p2 = at(b);
+      out.push(p0[0], p0[1]);
+      for (let j = 1; j <= STEPS; j++) {
+        const t = j / STEPS;
+        const u = 1 - t;
+        out.push(u * u * p0[0] + 2 * u * t * c[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p2[1]);
+      }
+      skipTo = b;
+    }
+    if (s[i] <= skipTo + 1e-6) continue;
+    out.push(P[i][0], P[i][1]);
+  }
+  return out;
+}
 
 // polyline geometry with cumulative segment lengths, for "outer" routes
 function polyGeom(pts: number[]): any {
