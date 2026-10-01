@@ -1650,6 +1650,15 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "choices": ["Abbott PediMag", "Abbott CentriMag", "Getinge Rotaflow RF-32", "Medtronic Bio-Pump BP-50", "Generic roller pump"]
     },
     {
+      "caption": "oxygenator",
+      "target": "oxygenator_type",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "custom_options": true,
+      "choices": ["Getinge Quadrox-i Neonatal", "Getinge Quadrox-i Pediatric", "Getinge Quadrox-i Small Adult", "Medtronic Nautilus (Adult)"]
+    },
+    {
       "caption": "pump mode (0 = centrifugal, 1 = roller; set by the pump)",
       "target": "pump_mode",
       "type": "number",
