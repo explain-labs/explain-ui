@@ -171,6 +171,7 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
     "hb": 9.5,            // hemoglobin in mmol/L (the model's unit)
     "hb_gdl": 15.3,       // OR hemoglobin in g/dL — the builder converts to mmol/L (use ONE of hb / hb_gdl)
     "temp": 36.8, "pda": 0.4,                                        // structural
+    "fio2": 0.3,          // inspired O2 fraction 0.21-1.0 (NOT a percentage); structural
     "hr": 165, "map": 33, "cvp": 4, "pap_m": 28,                     // iterated (mmHg, bpm)
     "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3 // iterated
   },
@@ -186,6 +187,11 @@ model's unit, as used in NL labs) — put a mmol/L value in `hb`, or, if the use
 gives Hb in **g/dL**, put it in `hb_gdl` and the builder converts it. Never pass a g/dL
 number as `hb`.
 
+**FiO2 is a fraction** (`0.3`, not `30`). Always pass it when the patient is on oxygen:
+the builder applies it before calibrating, so the oxygen lever is fitted to the
+saturation *at that FiO2*. Without it the patient is fitted in room air, which gives a
+baby on oxygen much healthier lungs than it has. A value outside 0.21–1.0 fails the build.
+
 ### What the builder calibrates (and limits)
 
 The builder runs a closed loop: warm to steady state → measure vitals → nudge one lever
@@ -195,6 +201,9 @@ reference, PO2/SpO2←alveolar O₂ diffusion, **pCO2←spontaneous ventilatory 
 assumes the patient breathes spontaneously — for a ventilated patient set ventilator
 rate/Vt instead), BE/pH←Stewart unmeasured anions, CO←contractility. Targets it can't
 reach in `max_iters` are reported `INCOMPLETE`; don't claim a value the report didn't hit.
+A target reached with its lever at the edge of its range (for example oxygen uptake at its
+floor for a baby on high FiO2) is flagged to the user by the app; do not present such a fit
+as reliable.
 
 ## Patient-builder form requests (`explain-patient-form`)
 
@@ -219,7 +228,7 @@ typed build request:
   "schema": 1,
   "request_id": "pb_3fa94c1e",          // use this, unchanged, as the SPEC "name"
   "targets": { "weight": 1.08, "gestational_age": 28, "hr": 158, "map": 34,
-               "spo2": 91, "pco2": 51, "be": -4.5 },   // measured; builder units
+               "spo2": 91, "pco2": 51, "be": -4.5, "fio2": 0.3 },   // measured; builder units
   "checks":  { "sys": 48, "dia": 27, "ph": 7.28 },     // measured; NOT to be targeted
   "context": { "gas_site": "capillary", "resp_support": "cpap", "postnatal_age": 3 },
   "unknown": ["height", "hb", "temp", "cvp", "co", "po2"],  // not measured
@@ -236,7 +245,8 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
 1. **Copy `targets` into the SPEC `targets` unchanged** — every key, every number, exactly
    as given. Do not round, convert, "correct" or drop a measured value, even one that looks
    implausible; say so under `warnings` instead. The app compares the SPEC that was built
-   with the form and shows the user any difference.
+   with the form and shows the user any difference. This includes `fio2` (a fraction).
+   When the form has no `fio2`, the patient breathes room air: do not add one.
 2. **Leave `checks` out of the SPEC.** They are measured values the builder cannot or
    should not calibrate to. The app compares them with the result itself.
 3. **Fill only these unknowns, and only from a source:** `weight`, `gestational_age`,
@@ -301,7 +311,7 @@ Building a 1.08 kg, 28-week baby on day 3 from the term baseline, calibrated to 
 ```
 
 ```explain-build
-{"baseline":"term_neonate","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5,"hb":9.0,"height":0.355}}
+{"baseline":"term_neonate","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5,"fio2":0.3,"hb":9.0,"height":0.355}}
 ```
 ````
 
