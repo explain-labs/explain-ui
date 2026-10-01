@@ -43,7 +43,7 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 
 ## Behaviour
 
-- The page outside the spotlight is inert: four blockers surround the hole. The spotlit element itself stays clickable. The overlay sits at z 900–950, below PrimeVue overlays (z 1000+), so a Select or Popover opened from the target still shows on top.
+- The page outside the spotlight is inert: four blockers surround the hole. The spotlit element itself stays clickable. The dimming sits at z 900, below PrimeVue overlays (z 1000+), so a Select or Popover opened from the target still shows on top. The ring and card sit at z 1199–1200, above the modal mask (z 1100), so a step can point into a Dialog.
 - The target's position is re-read every animation frame while a tour runs, so tab switches, panel growth and scrolling are followed. The target is scrolled into view on step entry.
 - Keys: ←/→ step, Esc closes. They are ignored while typing in a field. Space still toggles the simulation.
 - Progress (finished tours, last step) is stored in localStorage under `explain.manual.progress`. Finished tours get a ✓ in the menu, and *Reset progress* clears it.
@@ -65,4 +65,4 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 6. Common tasks *(done)*: categories, −/+ and step size, reset, watching the effect, the bot.
 7. Ventilator *(done)*: switch, modes, settings, ET tube, synchronisation, measured values, graphs.
 8. ECLS *(done)*: running/clamping, pump type, sweep gas, cannulas and sites (VA/VV), resistance factors, measurements, the circuit in the diagram.
-9. Resuscitation and pregnancy *(on hold: the panels are not ready yet)* · 10. Event scheduler *(done; the scaler is on hold: not finished yet)* · 11. AI bot *(done)*: questions, action cards, what it can do, Guided/Full, auto-apply, attachments, revert · 12. Saving and loading states.
+9. Resuscitation and pregnancy *(on hold: the panels are not ready yet)* · 10. Event scheduler *(done; the scaler is on hold: not finished yet)* · 11. AI bot *(done)*: questions, action cards, what it can do, Guided/Full, auto-apply, attachments, revert · 12. Saving and loading states *(done)*: what a state holds, cloud saves, My saved states, default state, scenarios vs states, developer snapshots.

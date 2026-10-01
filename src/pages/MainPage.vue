@@ -294,7 +294,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         alt="Explain Labs"
         class="h-12 w-auto shrink-0"
       />
-      <span v-if="loadedName" class="min-w-0 truncate text-sm" v-tooltip.bottom="'Loaded state'">
+      <span
+        v-if="loadedName"
+        data-tour="header.state"
+        class="min-w-0 truncate text-sm"
+        v-tooltip.bottom="'Loaded state'"
+      >
         <span class="opacity-50">Active state:</span>
         <span class="ml-1 font-medium text-surface-100">{{ loadedName }}</span>
       </span>

@@ -184,6 +184,7 @@ function fmtDate(v: string | null): string {
   <span class="inline-flex items-center gap-2">
     <Button
       v-if="auth.user?.modelDeveloper"
+      data-tour="save.snapshot"
       v-tooltip.top="'Save snapshot (file)'"
       icon="pi pi-save"
       aria-label="Save snapshot"
@@ -200,6 +201,7 @@ function fmtDate(v: string | null): string {
       aria-hidden="true"
     ></span>
     <Button
+      data-tour="save.cloud"
       v-tooltip.top="'Save to cloud'"
       icon="pi pi-cloud-upload"
       aria-label="Save to cloud"
@@ -208,6 +210,7 @@ function fmtDate(v: string | null): string {
       @click="openSaveDialog('cloud')"
     />
     <Button
+      data-tour="save.default"
       v-tooltip.top="
         statesStore.currentId && statesStore.currentId === auth.user?.defaultState
           ? 'This is your default state'
@@ -225,6 +228,7 @@ function fmtDate(v: string | null): string {
       @click="setCurrentAsDefault"
     />
     <Button
+      data-tour="save.list"
       v-tooltip.top="'My saved states'"
       icon="pi pi-folder-open"
       aria-label="My saved states"
@@ -269,7 +273,7 @@ function fmtDate(v: string | null): string {
       header="My saved states"
       :style="{ width: '32rem' }"
     >
-      <div class="flex flex-col gap-2">
+      <div class="flex flex-col gap-2" data-tour="save.states">
         <div v-if="statesStore.loading" class="text-sm opacity-70 py-4 text-center">
           loading…
         </div>

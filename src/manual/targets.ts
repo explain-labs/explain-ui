@@ -35,9 +35,15 @@ export const TOUR_TARGETS = [
   "run.fastforward",
   "scenario.picker",
   "save.panel",
+  "save.snapshot", // model developers only
+  "save.cloud", // needs the database
+  "save.default",
+  "save.list",
+  "save.states", // inside the "My saved states" dialog
   // header
   "header.lessons",
   "header.help",
+  "header.state",
   // centre / right column content
   "diagram.canvas", // the whole Diagram component (toolbars + canvas)
   "diagram.stage", // just the Pixi canvas

@@ -8,8 +8,9 @@ import { useTour } from "@/composables/useTour";
 // it in the lessons' amber ring, and floats the step card beside it. The hole
 // in the dimming is made of four blockers around the target, so the target
 // itself stays clickable (gated steps need that) while the rest of the page is
-// inert. Sits below PrimeVue overlays (z 1000+) so a Select or Popover opened
-// from the spotlit element still shows on top.
+// inert. The blockers sit below PrimeVue overlays (z 1000+), so a Select or
+// Popover opened from the spotlit element still shows on top; the ring and card
+// sit above PrimeVue's modal mask (z 1100), so a step can point into a Dialog.
 
 const rt = useTour();
 const PAD = 6; // px around the target
@@ -206,7 +207,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 }
 .tour-ring {
   position: fixed;
-  z-index: 901;
+  z-index: 1199;
   pointer-events: none;
   border: 2px solid rgb(251 191 36);
   border-radius: 0.5rem;
@@ -223,7 +224,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 }
 .tour-card {
   position: fixed;
-  z-index: 950;
+  z-index: 1200;
   width: min(360px, calc(100vw - 16px));
 }
 
