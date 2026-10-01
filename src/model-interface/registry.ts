@@ -1641,11 +1641,21 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "ECLS clamped"
     },
     {
-      "caption": "pump mode (0 = centrifugal, 1 = roller)",
+      "caption": "pump",
+      "target": "pump_type",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "custom_options": true,
+      "choices": ["Abbott PediMag", "Abbott CentriMag", "Getinge Rotaflow RF-32", "Medtronic Bio-Pump BP-50", "Generic roller pump"]
+    },
+    {
+      "caption": "pump mode (0 = centrifugal, 1 = roller; set by the pump)",
       "target": "pump_mode",
       "type": "number",
       "build_prop": true,
       "edit_mode": "basic",
+      "readonly": true,
       "factor": 1,
       "delta": 1,
       "rounding": 0,
@@ -1662,7 +1672,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "delta": 50,
       "rounding": 0,
       "ll": 0,
-      "ul": 5000
+      "ul": 5500
     },
     {
       "caption": "sweep gas flow (L/min)",
