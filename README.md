@@ -66,3 +66,7 @@ needs `git submodule sync` once to pick up the change.
 - **Documentation** — [docs/README.md](docs/README.md) indexes both the UI docs
   (`docs/ui/`) and the engine's physiological model docs
   (`explain-engine/docs/`).
+- **Tests** — `npm test` runs the UI unit tests ([Vitest](https://vitest.dev);
+  files named `*.test.ts` beside the module they cover, under `src/`). The
+  engine is verified separately with its headless probe scripts — see
+  [explain-engine/docs/TESTING.md](explain-engine/docs/TESTING.md).
