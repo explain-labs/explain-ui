@@ -19,10 +19,14 @@ proxy talks to. It wraps the Claude Agent SDK (`query()`), and adds the
   response **`artifact`** — splicing the calibration report + a `loadDefinition` action
   card into the visible answer. The model needs **no shell/Write tools**: it only emits
   the SPEC; the wrapper does the build.
-- Alongside the `artifact` it returns **`build`**, the structured calibration report
-  parsed from the builder's stderr (`parse_build_report()`): `converged`, `iters`,
-  `unmet`, `residuals` (every reported vital with its value, target, Δ and normal-range
-  flag — targeted or not), the capped raw `log`, and the echoed `spec`. The one-line
+- Alongside the `artifact` it returns **`build`**, the structured calibration report:
+  `converged`, `iters`, `unmet`, `residuals` (every reported vital with its value,
+  target, Δ and normal-range flag — targeted or not), the capped raw `log`, the echoed
+  `spec`, and `source`. It is built from the `build_report` the engine's builder embeds
+  in the scenario (`detail_from_build_report()`), which adds `lever_limits` (targets
+  whose calibration lever ran into its bound), `ignored_targets`, `superseded_targets`
+  and `notes`. For an engine that predates `build_report` it falls back to parsing the
+  builder's stderr (`parse_build_report()`, `source: "stderr"`). The one-line
   verdict in the answer hides a target that is inside tolerance but out of range, and
   any untargeted vital that drifted; `build` carries both.
 - Rejects a SPEC that would **apply the prematurity adjustments twice**
