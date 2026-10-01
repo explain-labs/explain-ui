@@ -168,19 +168,26 @@ describe("resolveTargets", () => {
   });
 
   it("reports values the builder cannot use yet instead of sending them", () => {
-    const r = resolve({ ...W, rr: [62, "/min"], fio2: [35, "%"], lactate: [3.1, "mmol/L"], na: [138, "mmol/L"] });
-    expect(r.unsupported.sort()).toEqual(["fio2", "lactate", "na", "rr"]);
+    const r = resolve({ ...W, rr: [62, "/min"], lactate: [3.1, "mmol/L"], na: [138, "mmol/L"] });
+    expect(r.unsupported.sort()).toEqual(["lactate", "na", "rr"]);
     expect(r.targets).toEqual({ weight: 1.08, gestational_age: 28 });
   });
 
-  it("warns about ventilated patients, missing FiO2, raised FiO2 and missing cardiac output", () => {
+  it("sends FiO2 to the builder as a structural value", () => {
+    const r = resolve({ ...W, spo2: [91, "%"], fio2: [35, "%"] });
+    expect(r.targets).toMatchObject({ fio2: 0.35, spo2: 91 });
+    expect(r.unsupported).not.toContain("fio2");
+    expect(r.checks.fio2).toBeUndefined();
+  });
+
+  it("warns about ventilated patients, missing FiO2 and missing cardiac output", () => {
     const vent = resolve({ ...W, pco2: [51, "mmHg"] }, { gas_site: "arterial", resp_support: "invasive" });
     expect(vent.warnings.join(" ")).toMatch(/ventilated/);
     const spont = resolve({ ...W, pco2: [51, "mmHg"] }, { gas_site: "arterial", resp_support: "cpap" });
     expect(spont.warnings.join(" ")).not.toMatch(/ventilated/);
 
     expect(resolve({ ...W, spo2: [91, "%"] }).warnings.join(" ")).toMatch(/No FiO2/);
-    expect(resolve({ ...W, spo2: [91, "%"], fio2: [40, "%"] }).warnings.join(" ")).toMatch(/cannot apply an FiO2/);
+    expect(resolve({ ...W, spo2: [91, "%"], fio2: [40, "%"] }).warnings.join(" ")).not.toMatch(/FiO2/);
     expect(resolve({ ...W, spo2: [97, "%"], fio2: [21, "%"] }).warnings.join(" ")).not.toMatch(/FiO2/);
 
     expect(resolve({ ...W, map: [33, "mmHg"] }).warnings.join(" ")).toMatch(/cardiac output/);

@@ -39,7 +39,15 @@ describe("buildRequest", () => {
     expect(payload.checks).toEqual({ sys: 48, dia: 27, ph: 7.28 });
     expect(payload.context).toEqual({ gas_site: "capillary", resp_support: "cpap", postnatal_age: 3 });
     expect(payload.unknown).toEqual(expect.arrayContaining(["height", "hb", "temp", "cvp", "co"]));
+    expect(payload.unknown).not.toContain("fio2"); // empty FiO2 = room air, not a lookup
     expect(payload.units.pco2).toBe("mmHg");
+  });
+
+  it("passes a measured FiO2 to the builder as a fraction", () => {
+    const f: PatientForm = { ...FORM, numbers: { ...FORM.numbers, fio2: { value: 30, unit: "%" } } };
+    const r = buildRequest(f, "pb_f")!;
+    expect(r.payload.targets.fio2).toBe(0.3);
+    expect(r.payload.units.fio2).toBe("fraction");
   });
 
   it("generates a random request id that carries no user text", () => {

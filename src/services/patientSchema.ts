@@ -106,7 +106,7 @@ export const PATIENT_FIELDS: PatientField[] = [
 
   // ---- breathing and oxygen ----
   { kind: "choice", key: "resp_support", caption: "Respiratory support", category: "respiratory", role: "context", options: [{ value: "none", label: "None" }, { value: "low_flow", label: "Low-flow oxygen" }, { value: "high_flow", label: "High-flow cannula" }, { value: "cpap", label: "CPAP" }, { value: "niv", label: "Non-invasive ventilation" }, { value: "invasive", label: "Invasive ventilation" }, { value: "hfo", label: "High-frequency oscillation" }] },
-  { kind: "number", key: "fio2", caption: "FiO2", category: "respiratory", units: [scaled("%", 100, 1, 0)], specUnit: "fraction", range: [0.21, 1], role: "structural", specTarget: "fio2", since: "B" },
+  { kind: "number", key: "fio2", caption: "FiO2", category: "respiratory", units: [scaled("%", 100, 1, 0)], specUnit: "fraction", range: [0.21, 1], role: "structural", specTarget: "fio2", since: "A", hint: "Left empty, room air (21%) is assumed" },
   { kind: "number", key: "rr", caption: "Respiratory rate", category: "respiratory", units: [same("/min", 1, 0)], specUnit: "/min", range: [0, 150], role: "check", specTarget: "rr", since: "B" },
   { kind: "number", key: "spo2", caption: "SpO2", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "iterated", specTarget: "spo2", since: "A" },
   { kind: "choice", key: "spo2_site", caption: "SpO2 probe", category: "respiratory", role: "context", options: [{ value: "preductal", label: "Right hand (pre-ductal)" }, { value: "postductal", label: "Foot or left hand (post-ductal)" }] },
@@ -340,11 +340,6 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
   if ((has("spo2") || has("po2")) && !has("fio2")) {
     warnings.push("No FiO2 given: oxygenation is fitted as if the patient were breathing room air.");
   }
-  if (has("fio2") && values.fio2 > 0.21) {
-    warnings.push(
-      "The builder cannot apply an FiO2 yet: oxygenation is fitted in room air, which makes the built lungs healthier than the patient's.",
-    );
-  }
   if (targets.map != null && targets.co == null) {
     warnings.push("No cardiac output given: the split between cardiac output and vascular resistance comes from the baseline, not from this patient.");
   }
@@ -353,6 +348,8 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
     (f): f is NumberField => f.kind === "number" && f.since === "A" && (f.role === "structural" || f.role === "iterated"),
   )
     .filter((f) => !has(f.key) && !(f.key === "map" && targets.map != null))
+    // an unmeasured FiO2 means room air, not a value for the bot to look up
+    .filter((f) => f.key !== "fio2")
     .map((f) => f.key);
 
   return { targets, checks, derived, unsupported, unknown, warnings };
