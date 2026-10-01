@@ -69,6 +69,16 @@ export const TOUR_TARGETS = [
   "vent.trigger",
   "vent.measured",
   "vent.scope",
+  // ECLS panel
+  "ecls.panel",
+  "ecls.switch",
+  "ecls.on", // only present while ECLS is running
+  "ecls.clamp",
+  "ecls.pump",
+  "ecls.settings",
+  "ecls.cannulas",
+  "ecls.resistances",
+  "ecls.measured",
   // realtime chart + PV loop
   "chart.presets",
   "chart.series",

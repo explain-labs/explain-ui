@@ -187,11 +187,13 @@ function onReturnSite(v: string) {
 </script>
 
 <template>
-  <Panel toggleable>
+  <Panel toggleable data-tour="ecls.panel">
     <template #header>
       <div class="flex items-center gap-2 w-full">
         <span class="font-semibold">ECLS</span>
+        <!-- ecls.on only exists while running: the manual waits on it -->
         <span
+          :data-tour="running ? 'ecls.on' : undefined"
           class="text-xs px-1.5 py-0.5 rounded"
           :class="running ? 'bg-green-600/20 text-green-500' : 'bg-zinc-500/20 opacity-60'"
         >
@@ -199,6 +201,7 @@ function onReturnSite(v: string) {
         </span>
         <ToggleSwitch
           class="ml-auto"
+          data-tour="ecls.switch"
           :model-value="running"
           @update:model-value="onRunning"
         />
@@ -207,7 +210,7 @@ function onReturnSite(v: string) {
 
     <div class="flex flex-col gap-3" :class="{ 'opacity-40 pointer-events-none': !running }">
       <!-- pump mode + clamp -->
-      <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center justify-between gap-2" data-tour="ecls.pump">
         <label class="text-sm opacity-80">Pump</label>
         <SelectButton
           :model-value="pumpMode"
@@ -219,13 +222,13 @@ function onReturnSite(v: string) {
           @update:model-value="onPumpMode"
         />
       </div>
-      <label class="text-sm flex items-center justify-between gap-2">
+      <label class="text-sm flex items-center justify-between gap-2" data-tour="ecls.clamp">
         <span class="opacity-80">Clamped</span>
         <ToggleSwitch :model-value="clamped" @update:model-value="onClamp" />
       </label>
 
       <!-- pump + sweep-gas settings -->
-      <div class="grid grid-cols-2 gap-x-3 gap-y-2">
+      <div class="grid grid-cols-2 gap-x-3 gap-y-2" data-tour="ecls.settings">
         <div v-for="f in SETTINGS" :key="f.p" class="flex flex-col gap-0.5">
           <span class="text-xs opacity-70">{{ f.label }} <span class="opacity-50">{{ f.unit }}</span></span>
           <InputNumber
@@ -248,7 +251,7 @@ function onReturnSite(v: string) {
       </div>
 
       <!-- cannulas + sites -->
-      <div class="grid grid-cols-1 gap-2 border-t border-surface-700 pt-2">
+      <div class="grid grid-cols-1 gap-2 border-t border-surface-700 pt-2" data-tour="ecls.cannulas">
         <div class="flex flex-col gap-0.5">
           <span class="text-xs opacity-70">Drainage cannula</span>
           <Select
@@ -296,7 +299,7 @@ function onReturnSite(v: string) {
       </div>
 
       <!-- resistance-factor tuning -->
-      <div class="border-t border-surface-700 pt-2">
+      <div class="border-t border-surface-700 pt-2" data-tour="ecls.resistances">
         <div class="text-xs opacity-60 mb-1">resistance factors</div>
         <div class="grid grid-cols-2 gap-x-3 gap-y-2">
           <div v-for="f in RES_FACTORS" :key="f.p" class="flex flex-col gap-0.5">
@@ -322,7 +325,7 @@ function onReturnSite(v: string) {
       </div>
 
       <!-- measured read-outs (slow stream) -->
-      <div class="border-t border-surface-700 pt-2">
+      <div class="border-t border-surface-700 pt-2" data-tour="ecls.measured">
         <div class="text-xs opacity-60 mb-1">measured</div>
         <div class="grid grid-cols-3 gap-x-3 gap-y-2">
           <div v-for="m in measured" :key="m.label" class="flex flex-col">

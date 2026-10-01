@@ -1,0 +1,4 @@
+- **Pump speed** (RPM) is the main control of circuit blood flow.
+- **Sweep gas** flow through the oxygenator mainly controls **CO₂ removal**: more sweep means a lower pCO₂.
+- **Sweep FiO₂** mainly controls **oxygenation** of the blood leaving the oxygenator.
+- **Sweep FiCO₂**, **humidity** and **gas temperature** fine-tune the sweep gas.
