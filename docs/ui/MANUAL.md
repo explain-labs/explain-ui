@@ -39,7 +39,7 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 | `diagramHighlight`, `diagramLabels` | Diagram names to ring, with captions. Defaults come from `src/lessons/diagramLabels.ts` (English) |
 | `monitorHighlight` | Patient-monitor lanes to frame |
 | `numericHighlight` | Numeric card paths (`props[0]`) to ring on the monitoring dashboard |
-| `advanceOn` | A "Try it yourself" gate: `{ tab, value }`, `{ running: true\|false }` or `{ click: true }` (click on the target). Next becomes Skip, and the tour continues when the condition is met. A condition that already holds on arrival doesn't gate |
+| `advanceOn` | A "Try it yourself" gate: `{ tab, value }`, `{ running: true\|false }`, `{ click: true }` (click on the target) or `{ appear: key }` (a `data-tour` element shows up, e.g. the diagram inspector once something is selected). Next becomes Skip, and the tour continues when the condition is met. A condition that already holds on arrival doesn't gate |
 
 ## Behaviour
 
@@ -57,4 +57,5 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 ## Roadmap
 
 1. Getting started *(done)*: layout, scenario, run, diagram, monitors, fast-forward, panels, saving.
-2. Diagram editing · 3. Charts and PV loop · 4. Monitoring dashboards · 5. Model editor · 6. Common tasks · 7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.
+2. Diagram editing *(done)*: edit mode, add, select/move, inspector, connect, view settings, export/import.
+3. Charts and PV loop · 4. Monitoring dashboards · 5. Model editor · 6. Common tasks · 7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.

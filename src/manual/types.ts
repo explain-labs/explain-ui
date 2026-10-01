@@ -17,7 +17,8 @@ export type UiOp =
 export type AdvanceOn =
   | { tab: LayoutColumn; value: string } // learner switched to this tab
   | { running: boolean } // learner started / stopped the simulation
-  | { click: true }; // learner clicked the spotlit target
+  | { click: true } // learner clicked the spotlit target
+  | { appear: TourTarget }; // an element showed up (e.g. selecting opens an inspector)
 
 export interface TourStep {
   id: string; // also the markdown stem: steps/<id>.md

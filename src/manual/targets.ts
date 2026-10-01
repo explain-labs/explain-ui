@@ -39,7 +39,14 @@ export const TOUR_TARGETS = [
   "header.lessons",
   "header.help",
   // centre / right column content
-  "diagram.canvas",
+  "diagram.canvas", // the whole Diagram component (toolbars + canvas)
+  "diagram.stage", // just the Pixi canvas
+  "diagram.edit",
+  "diagram.add",
+  "diagram.inspector",
+  "diagram.connect",
+  "diagram.view",
+  "diagram.file",
   "monitoring.toolbar",
   "monitoring.manage",
   "monitor.canvas",

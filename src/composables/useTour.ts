@@ -45,6 +45,7 @@ const resolving = ref(false); // ui ops / target lookup in flight
 const progress = ref<Progress>(readProgress() ?? { completed: [] });
 let stepToken = 0; // guards async step entry against fast next/prev clicks
 let stopAdvance: (() => void) | null = null;
+const waitingFor = ref<string | null>(null); // `appear` gate still pending
 
 const step = computed<TourStep | null>(() => tour.value?.steps[stepIndex.value] ?? null);
 const active = computed(() => !!tour.value);
@@ -118,6 +119,20 @@ export function useTour() {
       stopAdvance = stop;
     } else if ("running" in cond) {
       stopAdvance = watch(explain.isRunning, (v) => v === cond.running && next());
+    } else if ("appear" in cond) {
+      if (findTarget(cond.appear)) return;
+      waitingFor.value = cond.appear;
+      const obs = new MutationObserver(() => {
+        if (!findTarget(cond.appear)) return;
+        obs.disconnect();
+        waitingFor.value = null;
+        next();
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+      stopAdvance = () => {
+        obs.disconnect();
+        waitingFor.value = null;
+      };
     } else if (el) {
       // after the target's own handler, so the click still does its thing
       const onClick = () => window.setTimeout(next, 0);
@@ -133,6 +148,7 @@ export function useTour() {
     if (!cond) return false;
     if ("tab" in cond) return layout.getTab(cond.tab) !== cond.value;
     if ("running" in cond) return explain.isRunning.value !== cond.running;
+    if ("appear" in cond) return waitingFor.value === cond.appear;
     return true;
   });
 
