@@ -7,6 +7,8 @@ import InputText from "primevue/inputtext";
 import ToggleSwitch from "primevue/toggleswitch";
 import Button from "primevue/button";
 import ProgressBar from "primevue/progressbar";
+import ConfirmDialog from "primevue/confirmdialog";
+import { useConfirm } from "primevue/useconfirm";
 import { useExplain } from "@/composables/useExplain";
 import { useModelInterface, type InterfaceField } from "@/composables/useModelInterface";
 import { useEventsStore, type EventChange, type ScheduledEvent } from "@/stores/events";
@@ -184,10 +186,25 @@ function editEvent(ev: ScheduledEvent) {
     };
   });
 }
-async function deleteEvent(ev: ScheduledEvent) {
-  store.remove(ev.id);
-  if (editingId.value === ev.id) resetBuilder();
-  await store.persist();
+// Deleting can't be undone, so ask first — same dialog as deleting a saved
+// state. Its own `group` keeps it from also opening SaveStatePanel's
+// ConfirmDialog (both are mounted on MainPage at once).
+const confirm = useConfirm();
+function deleteEvent(ev: ScheduledEvent) {
+  confirm.require({
+    group: "events",
+    message: `Delete event "${ev.name}"? This cannot be undone.`,
+    header: "Delete event",
+    icon: "pi pi-trash",
+    acceptLabel: "Delete",
+    rejectLabel: "Cancel",
+    acceptProps: { severity: "danger" },
+    accept: async () => {
+      store.remove(ev.id);
+      if (editingId.value === ev.id) resetBuilder();
+      await store.persist();
+    },
+  });
 }
 
 // dispatch every change of an event to the engine now (at=0). Missing models
@@ -511,5 +528,6 @@ onMounted(() => modelReady.value && store.syncFromScenario());
         </div>
       </div>
     </div>
+    <ConfirmDialog group="events" />
   </Panel>
 </template>
