@@ -79,6 +79,14 @@ export const TOUR_TARGETS = [
   "ecls.cannulas",
   "ecls.resistances",
   "ecls.measured",
+  // event scheduler
+  "events.panel",
+  "events.name",
+  "events.timing",
+  "events.add",
+  "events.change", // one per change row (none until "Add change")
+  "events.save",
+  "events.saved",
   // realtime chart + PV loop
   "chart.presets",
   "chart.series",
