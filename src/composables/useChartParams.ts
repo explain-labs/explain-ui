@@ -4,7 +4,7 @@ import { useExplain } from "./useExplain";
 // Shared model/parameter + preset logic for the realtime chart and the loop
 // chart. Each component supplies its own selectors and decides how a preset's
 // paths map onto them; this composable just provides the model/param catalog
-// and the preset store (scenario presets + session-saved ones).
+// and the preset store (configuration.presets of the loaded scenario).
 //
 // `presetKey` selects the configuration.presets sub-object:
 //   "RealTimeCharts" for the time chart, "LoopCharts" for the PV loop.
@@ -32,31 +32,49 @@ export function useChartParams(presetKey: string) {
     return dot < 0 ? [path, null] : [path.slice(0, dot), path.slice(dot + 1)];
   }
 
-  // presets saved this session (until the chart remounts on scenario reload),
-  // merged on top of the scenario's own presets.
-  const savedPresets = ref<Record<string, { paths: string[] }>>({});
+  // Presets live in the loaded scenario file under configuration.presets
+  // [presetKey] — the scenario's own and the ones the user saves, side by side.
+  // Writing user presets there (instead of component-local state) means they
+  // survive the chart remounting, a Revert, and are carried into a saved state
+  // (SaveStatePanel copies the loaded file's configuration), like monitor
+  // dashboards and events. loadedFileData isn't reactive, so `version` is
+  // bumped after each write to recompute.
+  const version = ref(0);
+  function scenarioPresets(create = false): Record<string, any> | null {
+    const file = (model as any).loadedFileData;
+    if (!file) return null;
+    if (!create) {
+      const scen = file.configuration?.presets?.[presetKey];
+      return scen && typeof scen === "object" ? scen : null;
+    }
+    file.configuration = file.configuration || {};
+    file.configuration.presets = file.configuration.presets || {};
+    const cur = file.configuration.presets[presetKey];
+    if (!cur || typeof cur !== "object") file.configuration.presets[presetKey] = {};
+    return file.configuration.presets[presetKey];
+  }
+
   const presets = computed<Record<string, any>>(() => {
     void modelState.value; // re-evaluate when a new scenario loads
-    const scen = (model as any).loadedFileData?.configuration?.presets?.[presetKey];
-    return { ...(scen && typeof scen === "object" ? scen : {}), ...savedPresets.value };
+    void version.value; // …and after a save/delete
+    return { ...(scenarioPresets() ?? {}) };
   });
   const presetNames = computed(() => Object.keys(presets.value));
 
   function savePreset(name: string, paths: string[]) {
     const n = name.trim();
     if (!n || !paths.length) return;
-    savedPresets.value = { ...savedPresets.value, [n]: { paths } };
+    const target = scenarioPresets(true);
+    if (!target) return; // nothing loaded yet
+    target[n] = { paths };
+    version.value++;
   }
 
   function deletePreset(name: string) {
-    if (name in savedPresets.value) {
-      const next = { ...savedPresets.value };
-      delete next[name];
-      savedPresets.value = next;
-    } else {
-      const scen = (model as any).loadedFileData?.configuration?.presets?.[presetKey];
-      if (scen && name in scen) delete scen[name];
-      savedPresets.value = { ...savedPresets.value }; // bump reactivity to recompute
+    const scen = scenarioPresets();
+    if (scen && name in scen) {
+      delete scen[name];
+      version.value++;
     }
   }
 
