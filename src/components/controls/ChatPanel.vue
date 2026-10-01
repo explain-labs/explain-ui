@@ -128,12 +128,13 @@ watch(
 </script>
 
 <template>
-  <Panel toggleable>
+  <Panel toggleable data-tour="chat.panel">
     <template #header>
       <div class="flex items-center justify-between w-full">
         <span class="font-semibold">Explain AI Bot</span>
         <div class="flex items-center gap-2">
           <SelectButton
+            data-tour="chat.scope"
             v-tooltip.top="'Command surface: Guided = curated safe set; Full = any settable model parameter'"
             :model-value="chat.commandScope"
             :options="SCOPES"
@@ -144,6 +145,7 @@ watch(
             @update:model-value="onScope"
           />
           <label
+            data-tour="chat.autoapply"
             v-tooltip.top="'When on, bot commands run immediately without an Apply click'"
             class="flex items-center gap-1 text-xs opacity-80 cursor-pointer"
           >
@@ -151,6 +153,7 @@ watch(
             <span :class="chat.autoApply ? 'text-amber-400' : ''">Auto-apply</span>
           </label>
           <Button
+            data-tour="chat.revert"
             v-tooltip.top="'Revert all live changes — reload the patient as it was loaded'"
             icon="pi pi-undo"
             text
@@ -174,7 +177,10 @@ watch(
 
     <div class="flex flex-col gap-2">
       <!-- conversation -->
-      <div class="h-[60vh] overflow-y-auto rounded border border-surface-700 p-2 flex flex-col gap-2">
+      <div
+        data-tour="chat.conversation"
+        class="h-[60vh] overflow-y-auto rounded border border-surface-700 p-2 flex flex-col gap-2"
+      >
         <p v-if="!chat.messages.length" class="text-xs opacity-50 m-auto text-center">
           Ask Explain Labs about the current patient.
         </p>
@@ -291,7 +297,7 @@ watch(
       </div>
 
       <!-- composer -->
-      <div class="flex items-end gap-2">
+      <div class="flex items-end gap-2" data-tour="chat.composer">
         <input
           ref="fileInput"
           type="file"
@@ -301,6 +307,7 @@ watch(
           @change="onFiles"
         />
         <Button
+          data-tour="chat.attach"
           v-tooltip.top="'Attach a PDF / CSV / image of target values for the bot to build a patient from'"
           icon="pi pi-paperclip"
           aria-label="Attach file"

@@ -301,11 +301,11 @@ onMounted(() => modelReady.value && store.syncFromScenario());
 </script>
 
 <template>
-  <Panel header="Event scheduler" toggleable>
+  <Panel header="Event scheduler" toggleable data-tour="events.panel">
     <div class="flex flex-col gap-4">
       <!-- ===== Builder ===== -->
       <div class="flex flex-col gap-3 border border-surface-700 rounded p-3">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2" data-tour="events.name">
           <InputText
             v-model="eventName"
             placeholder="Event name"
@@ -315,7 +315,7 @@ onMounted(() => modelReady.value && store.syncFromScenario());
           <span v-if="editingId" class="text-xs opacity-60">editing</span>
         </div>
 
-        <div class="flex items-center gap-3 text-sm">
+        <div class="flex items-center gap-3 text-sm" data-tour="events.timing">
           <label class="opacity-80">fire at (s)</label>
           <InputNumber
             v-model="fireAt"
@@ -334,6 +334,7 @@ onMounted(() => modelReady.value && store.syncFromScenario());
           <div
             v-for="(d, i) in drafts"
             :key="i"
+            data-tour="events.change"
             class="flex flex-col gap-1.5 rounded bg-surface-800/40 p-2"
           >
             <div class="flex items-start gap-2">
@@ -437,6 +438,7 @@ onMounted(() => modelReady.value && store.syncFromScenario());
 
         <div class="flex items-center gap-2">
           <Button
+            data-tour="events.add"
             label="Add change"
             icon="pi pi-plus"
             severity="secondary"
@@ -454,6 +456,7 @@ onMounted(() => modelReady.value && store.syncFromScenario());
             @click="resetBuilder"
           />
           <Button
+            data-tour="events.save"
             label="Save event"
             icon="pi pi-check"
             size="small"
@@ -465,7 +468,7 @@ onMounted(() => modelReady.value && store.syncFromScenario());
       </div>
 
       <!-- ===== Saved events ===== -->
-      <div class="flex flex-col gap-2">
+      <div class="flex flex-col gap-2" data-tour="events.saved">
         <span class="text-sm opacity-70">Saved events</span>
         <p v-if="!store.events.length" class="text-sm opacity-50">
           No saved events yet.

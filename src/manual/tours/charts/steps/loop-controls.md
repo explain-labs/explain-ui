@@ -1,0 +1,3 @@
+- **window** sets how many seconds of trail are drawn. A short window shows the current beat, and a longer one shows how the loop drifts after a change.
+- **Download** saves the trail as CSV.
+- **Presets** at the top work exactly like the chart's presets.

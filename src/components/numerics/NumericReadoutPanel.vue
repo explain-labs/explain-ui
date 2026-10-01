@@ -244,6 +244,7 @@ function removeSecondProp(param: MonitorParam) {
   <!-- same section header + chevron folding as the Common Tasks categories -->
   <div
     v-if="!editing"
+    data-tour="numerics.group"
     class="rounded border border-surface-700"
     :class="editable && !group.enabled ? 'opacity-60' : ''"
   >
@@ -263,6 +264,7 @@ function removeSecondProp(param: MonitorParam) {
       <!-- sibling of the header button: a button can't nest inside a button -->
       <Button
         v-if="editable"
+        data-tour="numerics.group-edit"
         v-tooltip.top="'Edit this group'"
         icon="pi pi-pencil"
         severity="secondary"
@@ -279,6 +281,7 @@ function removeSecondProp(param: MonitorParam) {
       <div
         v-for="(p, i) in parameters"
         :key="i"
+        data-tour="numerics.card"
         class="border bg-surface-800/40 rounded flex flex-col gap-0.5 cursor-help transition-colors"
         :class="[
           compact ? 'px-1 py-0.5' : 'px-1.5 py-1',
@@ -334,7 +337,7 @@ function removeSecondProp(param: MonitorParam) {
   </div>
 
   <!-- ===== editing ===== -->
-  <div v-else class="rounded border border-surface-700 p-2 flex flex-col gap-2">
+  <div v-else data-tour="numerics.editor" class="rounded border border-surface-700 p-2 flex flex-col gap-2">
     <!-- group header controls -->
     <div class="flex items-center gap-1.5">
       <InputText

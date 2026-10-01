@@ -144,7 +144,7 @@ function resetScale(task: CommonTask) {
 </script>
 
 <template>
-  <Panel toggleable>
+  <Panel toggleable data-tour="commontasks.panel">
     <template #header>
       <span class="font-semibold">Common tasks</span>
     </template>
@@ -162,6 +162,7 @@ function resetScale(task: CommonTask) {
       >
         <button
           type="button"
+          data-tour="commontasks.category"
           class="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-surface-800"
           @click="toggle(cat.category)"
         >
@@ -177,6 +178,7 @@ function resetScale(task: CommonTask) {
           <div
             v-for="task in cat.tasks"
             :key="task.id"
+            data-tour="commontasks.task"
             class="flex items-center gap-2"
             v-tooltip.left="task.help"
           >
@@ -203,6 +205,7 @@ function resetScale(task: CommonTask) {
           />
           <InputNumber
             v-model="stepSel[task.id]"
+            data-tour="commontasks.step"
             v-tooltip.top="'Step size'"
             :suffix="stepSuffix(task)"
             :min="0"
@@ -214,6 +217,7 @@ function resetScale(task: CommonTask) {
           />
           <Button
             v-if="task.lever.kind === 'scale'"
+            data-tour="commontasks.reset"
             v-tooltip.top="'Reset to baseline'"
             icon="pi pi-refresh"
             size="small"

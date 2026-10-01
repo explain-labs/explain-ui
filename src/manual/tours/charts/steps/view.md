@@ -1,0 +1,5 @@
+- **Split** draws A and B in two separate charts, one above the other.
+- **Shared Y** puts both series on one y-axis. Use it to compare values with the same unit (e.g. two pressures).
+- **Fill** shades the area under each trace.
+- **Auto Y / Lock Y**: Auto Y rescales continuously. Lock Y freezes the current scale and shows min/max fields per axis, so you can set it yourself.
+- **window**: how many seconds the x-axis shows.

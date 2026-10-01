@@ -289,6 +289,9 @@ async function onImport(e: Event) {
   try {
     const parsed = JSON.parse(await f.text());
     const dd = parsed.diagram_definition || parsed; // accept diagram or scenario JSON
+    // the renderer edits this object in place; store it on the loaded file so
+    // saving a state keeps the imported layout
+    if ((model as any).loadedFileData) (model as any).loadedFileData.diagram_definition = dd;
     teardown();
     await mountRenderer(dd);
   } catch (err) {
@@ -311,6 +314,7 @@ function download(text: string, name: string) {
     <div v-if="toolbar" class="flex items-center gap-2 flex-wrap">
       <ToggleButton
         v-model="editMode"
+        data-tour="diagram.edit"
         on-label="Editing"
         off-label="Edit"
         size="small"
@@ -327,7 +331,7 @@ function download(text: string, name: string) {
           severity="danger"
           @click="deleteSelected"
         />
-        <template v-if="!selectedName">
+        <span v-if="!selectedName" class="flex items-center gap-2" data-tour="diagram.add">
           <Button label="Add" size="small" :disabled="!addModel" @click="addCompartment" />
           <Select v-model="addPicto" :options="PICTOS" class="addsel w-32" />
           <Select
@@ -337,12 +341,13 @@ function download(text: string, name: string) {
             placeholder="model"
             class="addsel w-40"
           />
-        </template>
+        </span>
       </template>
     </div>
 
     <div
       v-if="editMode && selectedName"
+      data-tour="diagram.inspector"
       class="inspector flex items-center gap-x-2 gap-y-1 flex-wrap border border-surface-700 rounded px-2 py-1"
     >
       <!-- common to compartments and connectors -->
@@ -507,29 +512,34 @@ function download(text: string, name: string) {
 
     <div
       ref="el"
+      data-tour="diagram.stage"
       class="diagram"
       :style="{ width: '100%', height: props.height, minHeight: props.minHeight, position: 'relative' }"
     ></div>
 
     <div v-if="editMode" class="flex items-center gap-2 flex-wrap">
-      <Button label="Export JSON" size="small" severity="secondary" @click="exportJson" />
-      <Button label="Import JSON" size="small" severity="secondary" @click="fileInput?.click()" />
-      <input
-        ref="fileInput"
-        type="file"
-        accept="application/json"
-        class="hidden"
-        @change="onImport"
-      />
+      <span class="flex items-center gap-2" data-tour="diagram.file">
+        <Button label="Export JSON" size="small" severity="secondary" @click="exportJson" />
+        <Button label="Import JSON" size="small" severity="secondary" @click="fileInput?.click()" />
+        <input
+          ref="fileInput"
+          type="file"
+          accept="application/json"
+          class="hidden"
+          @change="onImport"
+        />
+      </span>
       <span class="mx-1 opacity-40">|</span>
       <ToggleButton
         v-model="connectMode"
+        data-tour="diagram.connect"
         on-label="Connecting"
         off-label="Connect"
         size="small"
         @update:model-value="toggleConnect"
       />
       <span class="mx-1 opacity-40">|</span>
+      <span class="flex items-center gap-2 flex-wrap" data-tour="diagram.view">
       <ToggleButton
         v-model="gridOn"
         on-label="Grid on"
@@ -594,6 +604,7 @@ function download(text: string, name: string) {
           @update:model-value="changeTo2Range"
         />
       </label>
+      </span>
     </div>
   </div>
 </template>

@@ -1,0 +1,1 @@
+While ECLS is on, the **circuit** appears in the diagram: drainage line, pump, oxygenator and return line. The pump spins with its speed, and the flow dots show blood moving through the circuit. A clamped circuit is drawn without flow.

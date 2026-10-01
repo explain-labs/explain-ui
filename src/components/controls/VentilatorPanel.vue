@@ -165,11 +165,13 @@ function manualBreath() {
 </script>
 
 <template>
-  <Panel toggleable>
+  <Panel toggleable data-tour="vent.panel">
     <template #header>
       <div class="flex items-center gap-2 w-full">
         <span class="font-semibold">Ventilator</span>
+        <!-- vent.on only exists while enabled: the manual waits on it -->
         <span
+          :data-tour="enabled ? 'vent.on' : undefined"
           class="text-xs px-1.5 py-0.5 rounded"
           :class="enabled ? 'bg-green-600/20 text-green-500' : 'bg-zinc-500/20 opacity-60'"
         >
@@ -177,6 +179,7 @@ function manualBreath() {
         </span>
         <ToggleSwitch
           class="ml-auto"
+          data-tour="vent.switch"
           :model-value="enabled"
           @update:model-value="onEnable"
         />
@@ -185,7 +188,7 @@ function manualBreath() {
 
     <div class="flex flex-col gap-3" :class="{ 'opacity-40 pointer-events-none': !enabled }">
       <!-- mode -->
-      <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center justify-between gap-2" data-tour="vent.mode">
         <label class="text-sm opacity-80">Mode</label>
         <SelectButton
           :model-value="mode"
@@ -197,7 +200,7 @@ function manualBreath() {
       </div>
 
       <!-- mode-aware settings grid -->
-      <div class="grid grid-cols-2 gap-x-3 gap-y-2">
+      <div class="grid grid-cols-2 gap-x-3 gap-y-2" data-tour="vent.settings">
         <div
           v-for="f in activeFields"
           :key="f.p"
@@ -224,7 +227,7 @@ function manualBreath() {
       </div>
 
       <!-- ET tube -->
-      <div class="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-surface-700 pt-2">
+      <div class="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-surface-700 pt-2" data-tour="vent.tube">
         <div v-for="f in TUBE" :key="f.p" class="flex flex-col gap-0.5">
           <span class="text-xs opacity-70">{{ f.label }} <span class="opacity-50">{{ f.unit }}</span></span>
           <InputNumber
@@ -247,7 +250,7 @@ function manualBreath() {
       </div>
 
       <!-- patient trigger + manual breath -->
-      <div class="flex items-center justify-between gap-2 border-t border-surface-700 pt-2">
+      <div class="flex items-center justify-between gap-2 border-t border-surface-700 pt-2" data-tour="vent.trigger">
         <label class="text-sm opacity-80 flex items-center gap-2">
           Synchronized
           <ToggleSwitch :model-value="synchronized" @update:model-value="onSync" />
@@ -262,7 +265,7 @@ function manualBreath() {
       </div>
 
       <!-- measured read-outs (slow stream) -->
-      <div class="border-t border-surface-700 pt-2">
+      <div class="border-t border-surface-700 pt-2" data-tour="vent.measured">
         <div class="text-xs opacity-60 mb-1">measured</div>
         <div class="grid grid-cols-3 gap-x-3 gap-y-2">
           <div v-for="m in measured" :key="m.label" class="flex flex-col">
