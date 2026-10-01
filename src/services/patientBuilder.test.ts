@@ -265,6 +265,19 @@ describe("result tables", () => {
     expect(rows[3]).toMatchObject({ caption: "Pulse pressure", unit: "mmHg", measured: 21, calibrated: true, met: true });
   });
 
+  it("lists the solutes set in the model with their read-back after the vitals", () => {
+    const report = parseBuildReport({
+      ...raw,
+      residuals: [{ key: "hr", value: 156, target: 158, delta: -2, flag: "ok" }],
+      solutes: { lactate: { set: 4.5, value: 4.503 }, na: { set: 134, value: 134.19 }, bogus: { set: 1, value: 1 }, k: { set: "x", value: 4 } },
+    })!;
+    expect(report.solutes.map((x) => x.key)).toEqual(["lactate", "na"]);
+    const rows = buildResultRows(request(), report);
+    expect(rows.map((r) => r.key)).toEqual(["hr", "lactate", "na"]);
+    expect(rows[2]).toMatchObject({ caption: "Sodium", unit: "mmol/L", model: 134.19, measured: 134, delta: 0.19, set: true, calibrated: false, met: null });
+    expect(parseBuildReport(raw)!.solutes).toEqual([]); // an older bot host sends none
+  });
+
   it("marks systolic and diastolic as missed when the pulse pressure was missed", () => {
     const report = parseBuildReport({
       ...raw,
