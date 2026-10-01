@@ -40,6 +40,10 @@ import VentilatorScope from "@/components/host/VentilatorScope.vue";
 import DocViewer from "@/components/host/DocViewer.vue";
 import { listLessons } from "@/lessons/index";
 import { t as tl } from "@/lessons/i18n";
+import { useLayoutStore } from "@/stores/layout";
+import { useTour } from "@/composables/useTour";
+import TourOverlay from "@/components/manual/TourOverlay.vue";
+import ManualMenu from "@/components/manual/ManualMenu.vue";
 
 const store = useModelStore();
 const auth = useAuthStore();
@@ -59,9 +63,16 @@ const monitorsStore = useMonitorsStore();
 const isolated = globalThis.crossOriginIsolated === true;
 const calcSecs = ref(10);
 const CALC_OPTIONS = [5, 10, 30, 60, 120, 300]; // seconds to calculate
-const vizTab = ref("diagram"); // active visualization tab: diagram | chart | loop | chat | docs
-const monitorTab = ref("monitoring"); // active right-column tab: monitoring | monitor | ventilator
-const controlTab = ref("editor"); // active left-column tab (more to come)
+// active tab per column; in a store so the interactive manual can switch them
+const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
+const tour = useTour();
+// first visit (no manual progress stored yet): offer the getting-started tour
+const offerTour = ref(!auth.lesson && tour.isFirstVisit());
+function dismissTourOffer(take: boolean) {
+  offerTour.value = false;
+  tour.markSeen();
+  if (take) tour.start("getting-started");
+}
 const editingMonitors = ref(false); // inline edit mode for the monitoring panel
 const monitorPrefs = useMonitorPrefs(); // compact / unitSystem / sparkWindowSec (persisted)
 const TREND_WINDOWS = [
@@ -275,6 +286,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   <div class="p-4 flex flex-col gap-4 min-h-screen">
     <!-- Title + status, pinned to the top of the screen -->
     <div
+      data-tour="layout.header"
       class="sticky top-0 z-20 -mx-4 -mt-4 mb-2 flex items-center gap-3 flex-wrap border-b border-surface-700 bg-surface-900 px-4 py-2"
     >
       <img
@@ -287,6 +299,22 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <span class="ml-1 font-medium text-surface-100">{{ loadedName }}</span>
       </span>
       <div class="ml-auto flex items-center gap-3">
+        <span
+          v-if="offerTour && modelReady"
+          class="flex items-center gap-1 rounded border border-amber-400/40 bg-amber-400/10 py-0.5 pl-2 text-sm"
+        >
+          New here?
+          <Button label="Take the tour" size="small" text @click="dismissTourOffer(true)" />
+          <Button
+            icon="pi pi-times"
+            size="small"
+            severity="secondary"
+            text
+            aria-label="Dismiss"
+            @click="dismissTourOffer(false)"
+          />
+        </span>
+        <ManualMenu v-if="!auth.lesson" />
         <template v-if="auth.lesson">
           <span class="text-sm" v-tooltip.bottom="'nicupicu.nl lesson'">
             <i class="pi pi-book mr-1 opacity-60"></i>
@@ -303,6 +331,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         </template>
         <template v-else-if="lessons.length">
           <Button
+            data-tour="header.lessons"
             icon="pi pi-book"
             label="Lessons"
             size="small"
@@ -339,31 +368,31 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
     <!-- Parameters (left 1/4) · Diagram/Chart/PV-loop tabs (center 1/2) · Numerics/patient monitor/ventilator graphs (right 1/4) -->
     <div v-if="modelReady" class="flex flex-col lg:flex-row gap-3 items-start">
-      <div class="w-full lg:w-1/4 min-w-0">
+      <div class="w-full lg:w-1/4 min-w-0" data-tour="layout.controls">
         <Tabs v-model:value="controlTab">
-          <TabList>
-            <Tab value="editor" v-tooltip.top="'Model editor'" aria-label="Model editor">
+          <TabList data-tour="tabs.control">
+            <Tab value="editor" data-tour="tab.control.editor" v-tooltip.top="'Model editor'" aria-label="Model editor">
               <i class="pi pi-sliders-h"></i>
             </Tab>
-            <Tab value="tasks" v-tooltip.top="'Common tasks'" aria-label="Common tasks">
+            <Tab value="tasks" data-tour="tab.control.tasks" v-tooltip.top="'Common tasks'" aria-label="Common tasks">
               <i class="pi pi-bolt"></i>
             </Tab>
-            <Tab value="ventilator" v-tooltip.top="'Ventilator'" aria-label="Ventilator">
+            <Tab value="ventilator" data-tour="tab.control.ventilator" v-tooltip.top="'Ventilator'" aria-label="Ventilator">
               <i class="pi pi-cloud"></i>
             </Tab>
-            <Tab value="ecls" v-tooltip.top="'ECLS'" aria-label="ECLS">
+            <Tab value="ecls" data-tour="tab.control.ecls" v-tooltip.top="'ECLS'" aria-label="ECLS">
               <i class="pi pi-sync"></i>
             </Tab>
-            <Tab value="resuscitation" v-tooltip.top="'Resuscitation'" aria-label="Resuscitation">
+            <Tab value="resuscitation" data-tour="tab.control.resuscitation" v-tooltip.top="'Resuscitation'" aria-label="Resuscitation">
               <i class="pi pi-heart"></i>
             </Tab>
-            <Tab value="pregnancy" v-tooltip.top="'Pregnancy / Labor'" aria-label="Pregnancy / Labor">
+            <Tab value="pregnancy" data-tour="tab.control.pregnancy" v-tooltip.top="'Pregnancy / Labor'" aria-label="Pregnancy / Labor">
               <i class="pi pi-venus"></i>
             </Tab>
-            <Tab value="scaler" v-tooltip.top="'Scaler'" aria-label="Scaler">
+            <Tab value="scaler" data-tour="tab.control.scaler" v-tooltip.top="'Scaler'" aria-label="Scaler">
               <i class="pi pi-expand"></i>
             </Tab>
-            <Tab value="events" v-tooltip.top="'Event scheduler'" aria-label="Event scheduler">
+            <Tab value="events" data-tour="tab.control.events" v-tooltip.top="'Event scheduler'" aria-label="Event scheduler">
               <i class="pi pi-clock"></i>
             </Tab>
           </TabList>
@@ -411,28 +440,28 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           </TabPanels>
         </Tabs>
       </div>
-      <div class="w-full lg:w-1/2 min-w-0">
+      <div class="w-full lg:w-1/2 min-w-0" data-tour="layout.viz">
         <Tabs v-model:value="vizTab">
-          <TabList>
-            <Tab value="diagram" v-tooltip.top="'Diagram'" aria-label="Diagram">
+          <TabList data-tour="tabs.viz">
+            <Tab value="diagram" data-tour="tab.viz.diagram" v-tooltip.top="'Diagram'" aria-label="Diagram">
               <i class="pi pi-sitemap"></i>
             </Tab>
-            <Tab value="chart" v-tooltip.top="'Chart'" aria-label="Chart">
+            <Tab value="chart" data-tour="tab.viz.chart" v-tooltip.top="'Chart'" aria-label="Chart">
               <i class="pi pi-chart-line"></i>
             </Tab>
-            <Tab value="loop" v-tooltip.top="'PV-loop'" aria-label="PV-loop">
+            <Tab value="loop" data-tour="tab.viz.loop" v-tooltip.top="'PV-loop'" aria-label="PV-loop">
               <i class="pi pi-chart-scatter"></i>
             </Tab>
-            <Tab value="chat" v-tooltip.top="'Explain AI Bot'" aria-label="Explain AI Bot">
+            <Tab value="chat" data-tour="tab.viz.chat" v-tooltip.top="'Explain AI Bot'" aria-label="Explain AI Bot">
               <i class="pi pi-comments"></i>
             </Tab>
-            <Tab value="docs" v-tooltip.top="'Documentation'" aria-label="Documentation">
+            <Tab value="docs" data-tour="tab.viz.docs" v-tooltip.top="'Documentation'" aria-label="Documentation">
               <i class="pi pi-book"></i>
             </Tab>
           </TabList>
           <TabPanels>
             <TabPanel value="diagram">
-              <Diagram />
+              <Diagram data-tour="diagram.canvas" :highlight="tour.diagramHighlight.value" />
             </TabPanel>
             <TabPanel value="chart">
               <RealtimeChart />
@@ -449,23 +478,23 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           </TabPanels>
         </Tabs>
       </div>
-      <div class="w-full lg:w-1/4 min-w-0">
+      <div class="w-full lg:w-1/4 min-w-0" data-tour="layout.monitors">
         <Tabs v-model:value="monitorTab">
-          <TabList>
-            <Tab value="monitoring" v-tooltip.top="'Monitoring'" aria-label="Monitoring">
+          <TabList data-tour="tabs.monitor">
+            <Tab value="monitoring" data-tour="tab.monitor.monitoring" v-tooltip.top="'Monitoring'" aria-label="Monitoring">
               <i class="pi pi-gauge"></i>
             </Tab>
-            <Tab value="monitor" v-tooltip.top="'Patient monitor'" aria-label="Patient monitor">
+            <Tab value="monitor" data-tour="tab.monitor.monitor" v-tooltip.top="'Patient monitor'" aria-label="Patient monitor">
               <i class="pi pi-desktop"></i>
             </Tab>
-            <Tab value="ventilator" v-tooltip.top="'Ventilator graphs'" aria-label="Ventilator graphs">
+            <Tab value="ventilator" data-tour="tab.monitor.ventilator" v-tooltip.top="'Ventilator graphs'" aria-label="Ventilator graphs">
               <i class="pi pi-cloud"></i>
             </Tab>
           </TabList>
           <TabPanels>
             <TabPanel value="monitoring">
               <div class="flex flex-col gap-3">
-                <div class="flex items-center justify-end gap-1.5">
+                <div class="flex items-center justify-end gap-1.5" data-tour="monitoring.toolbar">
                   <Button
                     v-if="!editingMonitors"
                     v-tooltip.top="'Export readout'"
@@ -527,6 +556,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                     @click="monitorPrefs.compact = !monitorPrefs.compact"
                   />
                   <Button
+                    data-tour="monitoring.manage"
                     v-tooltip.top="editingMonitors ? 'Done managing' : 'Manage monitors'"
                     :icon="editingMonitors ? 'pi pi-check' : 'pi pi-pencil'"
                     :severity="editingMonitors ? 'primary' : 'secondary'"
@@ -606,6 +636,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   :group="g"
                   :editable="editingMonitors"
                   :compact="monitorPrefs.compact"
+                  :highlight="tour.numericHighlight.value"
                 />
                 <p
                   v-if="editingMonitors && !monitorGroups.length"
@@ -617,7 +648,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </TabPanel>
             <TabPanel value="monitor">
               <!-- shorter than the component default to suit the narrow column -->
-              <Monitor height="35vh" min-height="260px" />
+              <Monitor
+                data-tour="monitor.canvas"
+                height="35vh"
+                min-height="260px"
+                :highlight="tour.monitorHighlight.value"
+              />
             </TabPanel>
             <TabPanel value="ventilator">
               <VentilatorScope height="35vh" min-height="260px" />
@@ -629,10 +665,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
     <!-- Status (left) · run/calculate controls (center) · model loading (right) -->
     <div
+      data-tour="layout.bottombar"
       class="compact-bar sticky bottom-0 z-20 -mx-4 -mb-4 mt-auto grid grid-cols-3 items-center gap-1.5 border-t border-surface-700 bg-surface-900 px-3 py-1 text-sm"
     >
       <!-- left: COI / ready indicators + status -->
-      <div class="flex items-center gap-3 flex-wrap justify-self-start">
+      <div class="flex items-center gap-3 flex-wrap justify-self-start" data-tour="run.status">
         <span class="flex items-center gap-3 flex-wrap opacity-70">
           <span>COI: <b>{{ isolated }}</b></span>
           <span>MODEL LOADED: <b>{{ modelReady }}</b></span>
@@ -644,6 +681,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       <!-- center: play / stop / calculate -->
       <div class="flex items-center gap-1.5 justify-self-center">
         <Button
+          data-tour="run.start"
           v-tooltip.top="isRunning ? 'Stop (Space)' : 'Start (Space)'"
           :icon="isRunning ? 'pi pi-stop' : 'pi pi-play'"
           :aria-label="isRunning ? 'Stop' : 'Start'"
@@ -652,7 +690,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           :disabled="!modelReady"
           @click="toggleRun"
         />
-        <InputGroup style="width: auto">
+        <InputGroup style="width: auto" data-tour="run.fastforward">
           <Button
             v-tooltip.top="'Fast forward'"
             icon="pi pi-forward"
@@ -675,6 +713,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
       <!-- right: scenario picker (full for model developers, read-only for everyone else) + state save/load -->
       <div class="flex items-center gap-1.5 justify-self-end">
+        <span class="flex items-center gap-1.5" data-tour="scenario.picker">
         <template v-if="auth.user?.modelDeveloper">
           <span class="opacity-70">local models</span>
           <Select
@@ -718,9 +757,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           <span class="opacity-70">scenario</span>
           <Select v-model="current" :options="scenarios" size="small" class="w-56" />
         </template>
-        <SaveStatePanel v-if="modelReady && !auth.lesson?.readonly" />
+        </span>
+        <SaveStatePanel v-if="modelReady && !auth.lesson?.readonly" data-tour="save.panel" />
       </div>
     </div>
+    <TourOverlay />
   </div>
 </template>
 

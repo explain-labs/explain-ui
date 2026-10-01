@@ -25,6 +25,7 @@ wiring → gotchas), adapted for Vue units. Cross-links into the engine docs use
 | [UI_ARCHITECTURE](./UI_ARCHITECTURE.md) | Whole-UI overview: the two-plane split, `main.ts`/`App.vue` bootstrap, routing + auth gate, the `MainPage` three-column layout & tab map, directory map, toolchain versions, the doc template. |
 | [PagesAndAuth](./PagesAndAuth.md) | The three pages (`MainPage`/`LoginPage`/`RegisterPage`), the router + `beforeEach` guard, the `auth` store, and the server-side HttpOnly-cookie security boundary + dev auto-login. |
 | [LESSONS](./LESSONS.md) | Guided, bilingual lesson pages (`/lesson/:id`): the lesson file format, step markdown, the intervention registry, ops, and how lesson accounts land on them. |
+| [MANUAL](./MANUAL.md) | The interactive manual: guided tours on the simulator (spotlight + step card), the tour file format, `data-tour` targets, ui ops, "try it yourself" gates, and progress. |
 | [NICUPICU_INTEGRATION](./NICUPICU_INTEGRATION.md) | nicupicu.nl lesson accounts: one account per congenital heart lesion, entered via `/api/auth/launch` links (static or signed), plus the `scripts/lesson-account.mjs` CLI and the doc to hand to nicupicu. |
 
 ## Engine bridge & state
@@ -32,7 +33,7 @@ wiring → gotchas), adapted for Vue units. Cross-links into the engine docs use
 | Doc | What it covers |
 |---|---|
 | [Composables](./Composables.md) | The six composables: `useExplain` (control-plane singleton over `@explain/Model`), `useRealtimeBus` (data-plane singleton over `RealtimeBus`), `useChartParams`, `useSlowHistory`, `useMonitorPrefs`, `useModelInterface`. |
-| [Stores](./Stores.md) | The seven Pinia stores: `auth`, `model` (scenarios), `states` (cloud saves), `monitors` (dashboards/groups), `events` (scheduled changes), `chat`, `diagram` (renderer bridge). |
+| [Stores](./Stores.md) | The Pinia stores: `auth`, `model` (scenarios), `states` (cloud saves), `monitors` (dashboards/groups), `events` (scheduled changes), `chat`, `diagram` (renderer bridge), plus `layout` (MainPage active tabs, see [MANUAL](./MANUAL.md)). |
 
 ## Rendering & visualization
 

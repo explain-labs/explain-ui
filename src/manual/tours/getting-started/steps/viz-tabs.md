@@ -1,0 +1,4 @@
+- **Chart**: plot any two model values in real time.
+- **PV-loop**: pressure–volume loops of a heart chamber or vessel.
+- **Explain AI Bot**: describe what you want in words and the bot proposes the changes for you to apply.
+- **Documentation**: background on the models and their physiology.
