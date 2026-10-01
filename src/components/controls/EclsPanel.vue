@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
-import SelectButton from "primevue/selectbutton";
 import Select from "primevue/select";
 import InputNumber from "primevue/inputnumber";
 import ToggleSwitch from "primevue/toggleswitch";
@@ -31,7 +30,8 @@ interface Field {
   factor?: number; // display = raw × factor (e.g. fio2 fraction → %)
 }
 
-// Primary pump + sweep-gas settings.
+// Primary pump + sweep-gas settings. Pump speed's upper bound follows the
+// selected pump (see maxOf).
 const SETTINGS: Field[] = [
   { p: "pump_rpm", label: "Pump speed", unit: "RPM", min: 0, max: 5000, step: 50, rounding: 0 },
   { p: "gas_flow", label: "Sweep gas", unit: "L/min", min: 0, max: 10, step: 0.1, rounding: 1 },
@@ -50,14 +50,18 @@ const RES_FACTORS: Field[] = [
   { p: "tubing_res_factor", label: "Tubing R×", unit: "", min: 0, max: 1000, step: 0.1, rounding: 1 },
 ];
 
-const PUMP_MODES = [
-  { label: "Centrifugal", value: 0 },
-  { label: "Roller", value: 1 },
-];
-
 const running = ref(false);
 const clamped = ref(false);
-const pumpMode = ref(0);
+// Pump device from the engine's library (Ecls.pumps). Selecting one sets
+// pump_type; the engine then copies its H-Q / roller coefficients and sets
+// pump_mode from its type, so the mode is not set separately here.
+const pumpType = ref<string | null>(null);
+const pumps = ref<Record<string, { type?: string; max_rpm?: number; prime?: number }>>({});
+const pumpOptions = computed(() => Object.keys(pumps.value));
+const selectedPump = computed(() => (pumpType.value ? pumps.value[pumpType.value] : undefined));
+function maxOf(f: Field): number {
+  return f.p === "pump_rpm" ? (selectedPump.value?.max_rpm ?? f.max) : f.max;
+}
 const drainageCannula = ref<string | null>(null);
 const returnCannula = ref<string | null>(null);
 const drainageOptions = ref<string[]>([]);
@@ -125,7 +129,8 @@ function syncLocal() {
   if (!e) return;
   running.value = !!e.ecls_running;
   clamped.value = !!e.ecls_clamped;
-  pumpMode.value = e.pump_mode ?? 0;
+  pumpType.value = e.pump_type ?? null;
+  pumps.value = e.pumps && typeof e.pumps === "object" ? e.pumps : {};
   drainageCannula.value = e.drainage_cannula_type ?? null;
   returnCannula.value = e.return_cannula_type ?? null;
   drainageSite.value = e.drainage_site ?? null;
@@ -163,10 +168,19 @@ function onClamp(v: boolean) {
   clamped.value = v;
   setProp("Ecls.ecls_clamped", v, 0);
 }
-function onPumpMode(v: number) {
-  if (v == null) return; // SelectButton can emit null on re-click; ignore
-  pumpMode.value = v;
-  setProp("Ecls.pump_mode", v, 0);
+function onPumpType(v: string) {
+  if (!v) return;
+  pumpType.value = v;
+  setProp("Ecls.pump_type", v, 0);
+  // The engine doesn't clamp speed to the pump's range: a roller pump (max
+  // ~250 rpm) left at a centrifugal 1500 rpm would run far too fast. Bring the
+  // speed down to the new pump's maximum when it is above it.
+  const max = pumps.value[v]?.max_rpm;
+  const rpm = vals.value.pump_rpm;
+  if (max != null && rpm != null && rpm > max) {
+    vals.value.pump_rpm = max;
+    setProp("Ecls.pump_rpm", max, 0);
+  }
 }
 function onDrainageCannula(v: string) {
   drainageCannula.value = v;
@@ -209,15 +223,19 @@ function onReturnSite(v: string) {
       <!-- pump mode + clamp -->
       <div class="flex items-center justify-between gap-2">
         <label class="text-sm opacity-80">Pump</label>
-        <SelectButton
-          :model-value="pumpMode"
-          :options="PUMP_MODES"
-          option-label="label"
-          option-value="value"
-          :allow-empty="false"
-          size="small"
-          @update:model-value="onPumpMode"
-        />
+        <div class="flex min-w-0 flex-col items-end gap-0.5">
+          <Select
+            :model-value="pumpType"
+            :options="pumpOptions"
+            size="small"
+            class="w-52"
+            placeholder="Select pump"
+            @update:model-value="onPumpType"
+          />
+          <span v-if="selectedPump" class="text-xs opacity-60">
+            {{ selectedPump.type }}<template v-if="selectedPump.max_rpm"> · max {{ selectedPump.max_rpm }} RPM</template><template v-if="selectedPump.prime"> · prime {{ Math.round(selectedPump.prime * 1000) }} mL</template>
+          </span>
+        </div>
       </div>
       <label class="text-sm flex items-center justify-between gap-2">
         <span class="opacity-80">Clamped</span>
@@ -231,7 +249,7 @@ function onReturnSite(v: string) {
           <InputNumber
             :model-value="vals[f.p]"
             :min="f.min"
-            :max="f.max"
+            :max="maxOf(f)"
             :step="f.step"
             :max-fraction-digits="f.rounding"
             show-buttons
