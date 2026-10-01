@@ -735,6 +735,10 @@ export class DiagramRenderer implements RendererAdapter {
     if (pathType === "straight") {
       g.moveTo(from.x, from.y).lineTo(to.x, to.y);
       geom = { type: "straight", x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+    } else if (pathType === "outer") {
+      geom = polyGeom(this.outerRoute(from, to, layout));
+      g.moveTo(geom.pts[0], geom.pts[1]);
+      for (let i = 2; i < geom.pts.length; i += 2) g.lineTo(geom.pts[i], geom.pts[i + 1]);
     } else if (from.posType === "arc" && to.posType === "arc") {
       // arc along the main layout circle between the two angular positions
       const c = from.dgs > to.dgs ? 360 : 0;
@@ -773,6 +777,61 @@ export class DiagramRenderer implements RendererAdapter {
     // click in the editor (stroke-only Graphics aren't hit-tested by default).
     g.hitArea = new PolylineHitArea(samplePath(geom), Math.max(width, 12));
     return geom;
+  }
+
+  /** "outer" route between a ring node and an off-ring (device) node: radially
+   *  out from the ring node to a concentric track outside the ring, along it,
+   *  and onto the device node. The track normally runs through the device node
+   *  itself (so the line lands on it directly); if that arc would run through
+   *  another node of the device group (e.g. a VV return line crossing the ECLS
+   *  row) it switches to the bypass track `path.track` (ring radii, beyond the
+   *  row), and as a last resort goes the long way round. Returns a flat [x,y,…]
+   *  point list from → to. */
+  private outerRoute(from: CompNode, to: CompNode, layout: any): number[] {
+    const cx = this.xCenter + this.xOffset;
+    const cy = this.yCenter + this.yOffset;
+    const dist = (n: CompNode) => Math.hypot(n.x - cx, n.y - cy);
+    // B = the endpoint nearer the ring centre (the patient side), A = the device
+    const fromIsRing = dist(from) <= dist(to);
+    const ring = fromIsRing ? from : to;
+    const dev = fromIsRing ? to : from;
+    const rDev = dist(dev);
+    const rBypass = numberOr(Number(layout.path.track), OUTER_TRACK_DEFAULT) * this.ringR;
+    const aA = Math.atan2(dev.y - cy, dev.x - cx);
+    const aB = Math.atan2(ring.y - cy, ring.x - cx);
+    let delta = aB - aA;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta <= -Math.PI) delta += 2 * Math.PI;
+
+    const arcPts = (r: number, d: number): number[] => {
+      const steps = Math.max(2, Math.ceil(Math.abs(d) / (4 * DEG)));
+      const pts: number[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const a = aA + (d * i) / steps;
+        pts.push(cx + r * Math.cos(a), cy + r * Math.sin(a));
+      }
+      return pts;
+    };
+    // other device-group nodes the track must not run through
+    const blockers = Object.values(this.comps).filter(
+      (n) => n !== dev && n !== ring && n.group && n.group === dev.group,
+    );
+    const pad = 8 * this.scaling;
+    const hits = (pts: number[]) =>
+      blockers.some((n) => {
+        const rad = Math.max(n.sprite.width, n.sprite.height) / 2 + pad;
+        for (let i = 0; i < pts.length; i += 2) {
+          if (Math.hypot(pts[i] - n.x, pts[i + 1] - n.y) < rad) return true;
+        }
+        return false;
+      });
+    // candidates in order of preference; the first that clears the group wins
+    const longDelta = delta > 0 ? delta - 2 * Math.PI : delta + 2 * Math.PI;
+    const candidates = [arcPts(rDev, delta), arcPts(rBypass, delta), arcPts(rDev, longDelta)];
+    const arc = candidates.find((c) => !hits(c)) ?? candidates[0];
+    // device → track → (arc) → track → ring node; reversed if the ring is `from`
+    const pts = [dev.x, dev.y, ...arc, ring.x, ring.y];
+    return fromIsRing ? reversePts(pts) : pts;
   }
 
   private onConnDown(name: string, e: any) {
@@ -898,6 +957,9 @@ export class DiagramRenderer implements RendererAdapter {
     // advance the phase (keep the per-geometry calibration of the old arrow)
     if (g.type === "straight") {
       conn.pos = wrap01(conn.pos + flow * DOT_SPEED * this.speed);
+    } else if (g.type === "poly") {
+      // same px speed as an arc on the ring (arc phase is per radian of ringR)
+      conn.pos = wrap01(conn.pos + (flow * DOT_SPEED * this.speed * this.ringR) / (g.len || 1));
     } else {
       const range = g.to - g.from || 1e-6;
       conn.pos = wrap01(conn.pos + (flow * DOT_SPEED * this.speed) / Math.abs(range));
@@ -1626,10 +1688,31 @@ function dotCount(len: number, scaling: number): number {
   return n < DOT_MIN ? DOT_MIN : n > DOT_MAX ? DOT_MAX : n;
 }
 
+// default "outer" bypass track radius (ring radii) when a connector sets no
+// path.track — used only when the direct track would cross other device nodes
+const OUTER_TRACK_DEFAULT = 1.5;
+
+// polyline geometry with cumulative segment lengths, for "outer" routes
+function polyGeom(pts: number[]): any {
+  const cum = [0];
+  for (let i = 2; i < pts.length; i += 2) {
+    cum.push(cum[cum.length - 1] + Math.hypot(pts[i] - pts[i - 2], pts[i + 1] - pts[i - 1]));
+  }
+  return { type: "poly", pts, cum, len: cum[cum.length - 1] };
+}
+
+// reverse a flat [x0,y0,x1,y1,…] point list
+function reversePts(pts: number[]): number[] {
+  const out: number[] = [];
+  for (let i = pts.length - 2; i >= 0; i -= 2) out.push(pts[i], pts[i + 1]);
+  return out;
+}
+
 // length of a connector path geometry in px (straight chord or arc length)
 function pathLength(g: any): number {
   if (!g) return 0;
   if (g.type === "straight") return Math.hypot(g.x2 - g.x1, g.y2 - g.y1);
+  if (g.type === "poly") return g.len;
   return Math.abs(g.to - g.from) * g.r;
 }
 
@@ -1637,6 +1720,15 @@ function pathLength(g: any): number {
 function pointOnPath(g: any, frac: number): { x: number; y: number } {
   if (g.type === "straight") {
     return { x: g.x1 + (g.x2 - g.x1) * frac, y: g.y1 + (g.y2 - g.y1) * frac };
+  }
+  if (g.type === "poly") {
+    const d = frac * g.len;
+    let i = 1;
+    while (i < g.cum.length - 1 && g.cum[i] < d) i++;
+    const seg = g.cum[i] - g.cum[i - 1] || 1;
+    const t = (d - g.cum[i - 1]) / seg;
+    const p = g.pts;
+    return { x: p[2 * i - 2] + (p[2 * i] - p[2 * i - 2]) * t, y: p[2 * i - 1] + (p[2 * i + 1] - p[2 * i - 1]) * t };
   }
   const ang = g.from + (g.to - g.from) * frac;
   return { x: g.cx + g.r * Math.cos(ang), y: g.cy + g.r * Math.sin(ang) };
@@ -1675,6 +1767,7 @@ function angleOnCircle(cx: number, cy: number, x: number, y: number): number {
 function samplePath(geom: any): number[] {
   if (!geom) return [];
   if (geom.type === "straight") return [geom.x1, geom.y1, geom.x2, geom.y2];
+  if (geom.type === "poly") return geom.pts;
   const steps = 24;
   const pts: number[] = [];
   for (let i = 0; i <= steps; i++) {

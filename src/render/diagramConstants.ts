@@ -21,8 +21,10 @@ export const PICTOS = [
 
 // Connector path shapes. "arc"/"arc_r" run clockwise/anticlockwise along the ring
 // between two ring nodes; with an off-ring endpoint both draw the same chord-arc,
-// and "arc_flip" draws that chord-arc bending the other way.
-export const PATH_TYPES = ["straight", "arc", "arc_r", "arc_flip"] as const;
+// and "arc_flip" draws that chord-arc bending the other way. "outer" routes a
+// device line (e.g. an ECLS cannula) around the outside of the ring on its own
+// concentric track (`path.track`, in ring radii).
+export const PATH_TYPES = ["straight", "arc", "arc_r", "arc_flip", "outer"] as const;
 
 // Cosmetic layout-patch whitelist for the bot `setLayout` action. A patch may
 // only touch these dotted paths into `component.layout` — never structural
