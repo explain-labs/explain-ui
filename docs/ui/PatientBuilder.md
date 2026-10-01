@@ -5,9 +5,8 @@ structured form; the AI bot fills in the structural values that were not measure
 host calibrates a baseline scenario to the measured targets; the app shows what the patient
 was built from and how close it came, and the user loads it.
 
-> **Status: unfinished.** The tab is listed in `UNFINISHED_PANELS` (`src/pages/MainPage.vue`),
-> so it shows under `npm run dev` only. It is waiting for the engine's builder to apply an
-> FiO2 — until then a patient on oxygen is fitted as if breathing room air.
+FiO2 is applied: the builder sets the patient's inspired oxygen before calibrating, so the
+oxygen lever is fitted to the measured saturation at that FiO2. An empty FiO2 means room air.
 
 It extends the existing build-a-patient path (see [ChatAndBot](./ChatAndBot.md) and
 `knowledge-pack/command-protocol.md`): the same `explain-build` SPEC, the same builder
@@ -40,8 +39,8 @@ tables. A number field has:
   - `iterated`: a calibration target the builder tunes a lever to reach;
   - `check`: not targeted, reported next to the model's value;
   - `context`: never reaches the builder (postnatal age, birth weight).
-- `since` — `"A"` if the current builder can use it, `"B"` if it cannot yet (FiO2,
-  respiratory rate, systolic/diastolic as targets, lactate, electrolytes, glucose, albumin,
+- `since` — `"A"` if the current builder can use it, `"B"` if it cannot yet (respiratory
+  rate, systolic/diastolic as targets, lactate, electrolytes, glucose, albumin,
   post-ductal SpO2). A `"B"` value is still collected and shown as "not used yet". When the
   engine gains a target, flip its `since` to `"A"` and, if needed, its `role`.
 
@@ -69,8 +68,10 @@ the bot:
 | A gas with no sample site is treated as capillary | conservative default, with a warning |
 
 It also produces the warnings shown under the form: ventilated patient (the builder reaches
-a pCO2 through spontaneous breathing drive), no FiO2, an FiO2 above 21% that cannot be
-applied yet, and no cardiac output (output and resistance then come from the baseline).
+a pCO2 through spontaneous breathing drive), no FiO2 (oxygenation fitted in room air), and
+no cardiac output (output and resistance then come from the baseline).
+
+An empty FiO2 is not sent to the bot as an unknown: it means room air, not a value to look up.
 
 ## Request and response
 
@@ -101,7 +102,11 @@ it ran). The store then:
    statuses are dropped, values are range-checked against the schema, text is capped, a
    source URL is kept only when it is http(s), and the panel renders it as text.
 2. `parseBuildReport(body.build)` — convergence, and for every reported vital its value,
-   target, difference and normal-range flag.
+   target, difference and normal-range flag. The bot host builds `build` from the
+   `build_report` the engine's builder embeds in the scenario, which adds
+   `lever_limits` (targets whose calibration lever ended on its bound), `ignored_targets`
+   and `notes`; an older bot host or engine sends only the first part, and the panel
+   shows what it gets.
 3. `checkSpec(build.spec, request, provenance)` — compares the SPEC that was actually built
    with the form. A measured value that was changed or dropped, a vital added as a target
    although it was not measured, and a structural value filled in without a provenance row
@@ -116,7 +121,14 @@ give up at 300 s.
 
 - **Built patient at steady state** — model value, measured value and difference for every
   vital the builder reports; "target" rows were calibrated to, "compared only" rows were
-  measured but not targeted (the app computes that difference itself).
+  measured but not targeted (the app computes that difference itself). Includes
+  systolic/diastolic, respiratory rate, post-ductal SpO2, temperature and cardiac output.
+  A post-ductal SpO2 is compared with the model's post-ductal value.
+- **Lever limits** — above the table, a warning for each target whose lever ended on its
+  bound, in clinical words ("lung oxygen uptake", "breathing drive"): "not reached" means
+  the patient is beyond what that lever can represent; "reached only at the limit" means
+  the fit needed the extreme of the lever. Typical case: a baby on high FiO2, where oxygen
+  uptake hits its floor.
 - **What the patient was built from** — every value with its status (Measured, Derived,
   Reference, Assumed, Left to the model), what the builder did with it, and the source.
 - **Load this patient** — `useExplain().loadFromObject()` with the built scenario, after

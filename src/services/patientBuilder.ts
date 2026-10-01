@@ -330,6 +330,13 @@ export interface BuildResidual {
   delta: number | null;
   flag: string;
 }
+// a calibration target whose lever ended on one of its bounds: the builder could
+// not push further, so the value is out of (or at the edge of) what that lever can do
+export interface LeverLimit {
+  key: string; // the SPEC target key (spo2, pco2, map, ...)
+  lever: string;
+  value: number | null;
+}
 export interface BuildReport {
   converged: boolean | null;
   iters: number | null;
@@ -337,6 +344,10 @@ export interface BuildReport {
   residuals: BuildResidual[];
   log: string;
   spec: unknown;
+  // only from an engine that emits build_report (explain-engine #7 and later)
+  leverLimits: LeverLimit[];
+  ignoredTargets: string[];
+  notes: string[];
 }
 
 export function parseBuildReport(raw: unknown): BuildReport | null {
@@ -351,13 +362,28 @@ export function parseBuildReport(raw: unknown): BuildReport | null {
     if (typeof x.key !== "string" || value == null) continue;
     residuals.push({ key: text(x.key, 40), value, target: num(x.target), delta: num(x.delta), flag: text(x.flag, 20) });
   }
+  const strings = (v: unknown, max: number, limit = 20) =>
+    (Array.isArray(v) ? v : [])
+      .slice(0, limit)
+      .map((k: unknown) => text(k, max))
+      .filter(Boolean);
+  const leverLimits: LeverLimit[] = [];
+  for (const row of Array.isArray(r.lever_limits) ? r.lever_limits.slice(0, 20) : []) {
+    if (!row || typeof row !== "object") continue;
+    const x = row as Record<string, unknown>;
+    if (typeof x.key !== "string") continue;
+    leverLimits.push({ key: text(x.key, 40), lever: text(x.lever, 80), value: num(x.value) });
+  }
   return {
     converged: typeof r.converged === "boolean" ? r.converged : null,
     iters: num(r.iters),
-    unmet: (Array.isArray(r.unmet) ? r.unmet : []).map((k: unknown) => text(k, 40)).filter(Boolean),
+    unmet: strings(r.unmet, 40, 60),
     residuals,
     log: typeof r.log === "string" ? r.log.slice(-8000) : "",
     spec: r.spec ?? null,
+    leverLimits,
+    ignoredTargets: strings(r.ignored_targets, 40),
+    notes: strings(r.notes, 300, 10),
   };
 }
 
@@ -375,17 +401,32 @@ export interface ResultRow {
   flag: string; // the builder's normal-range flag ("ok", "LOW", "HIGH", "")
 }
 
-// the builder reports pre-ductal saturation as spo2_pre and mean PAP as pap_m
-const REPORT_TO_FORM: Record<string, string> = { spo2_pre: "spo2" };
+// report vital -> form field. The form's SpO2 is whatever probe the user named, so
+// it maps to the pre-ductal model value unless the probe was post-ductal.
+function reportToForm(key: string, request: PatientBuildRequest): string {
+  const postductal = request.validated.choices.spo2_site === "postductal";
+  if (key === "lvo") return "co";
+  if (key === "spo2_pre") return postductal ? "spo2_pre" : "spo2";
+  if (key === "spo2_post") return postductal ? "spo2" : "spo2_post";
+  return key;
+}
 const REPORT_CAPTIONS: Record<string, { caption: string; unit: string }> = {
   pap_m: { caption: "Mean pulmonary artery pressure", unit: "mmHg" },
+  spo2_pre: { caption: "SpO2 pre-ductal", unit: "%" },
 };
+
+// caption for a SPEC target key, for messages about the calibration
+export function targetCaption(key: string): string {
+  const field = PATIENT_FIELDS.find((f) => f.kind === "number" && f.specTarget === key);
+  return field?.caption ?? REPORT_CAPTIONS[key]?.caption ?? key;
+}
 
 export function buildResultRows(request: PatientBuildRequest, report: BuildReport): ResultRow[] {
   const { validated, resolved } = request;
-  const unmet = new Set(report.unmet.map((k) => REPORT_TO_FORM[k] ?? k));
+  // unmet holds SPEC target keys, which are also the form keys
+  const unmet = new Set(report.unmet);
   return report.residuals.map((r) => {
-    const key = REPORT_TO_FORM[r.key] ?? r.key;
+    const key = reportToForm(r.key, request);
     const field = numberField(key);
     const label = field ? { caption: field.caption, unit: field.specUnit } : (REPORT_CAPTIONS[key] ?? { caption: key, unit: "" });
     const target = field?.specTarget != null ? resolved.targets[field.specTarget] : undefined;

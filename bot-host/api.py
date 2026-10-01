@@ -242,6 +242,56 @@ def parse_build_report(stderr: str) -> dict:
     }
 
 
+# Vitals passed to the app from the engine's build_report, in display order: the ones the
+# stderr report shows, plus those the form can measure (sys/dia, rr, post-ductal SpO2,
+# temperature, cardiac output) so the app can compare them with what was entered.
+_REPORT_VITALS = (
+    "hr", "sys", "dia", "map", "cvp", "pap_m", "lvo", "rr", "spo2_pre", "spo2_post",
+    "po2", "pco2", "ph", "be", "hco3", "temp",
+)
+# controller key -> the measured vital it reads (scripts/build_patient.mjs READKEY)
+_TARGET_READ_KEY = {"spo2": "spo2_pre", "co": "lvo"}
+
+
+def detail_from_build_report(report: dict, stderr: str) -> dict:
+    """Same shape as parse_build_report(), built from the machine-readable build_report
+    the engine's builder embeds in the scenario (explain-engine #7), plus what only that
+    report carries: levers that ran into their bound, ignored and superseded targets,
+    and notes."""
+    measured = report.get("measured") if isinstance(report.get("measured"), dict) else {}
+    targets = [t for t in report.get("targets") or [] if isinstance(t, dict) and isinstance(t.get("key"), str)]
+    by_read_key = {_TARGET_READ_KEY.get(t["key"], t["key"]): t for t in targets}
+
+    residuals: list[dict] = []
+    for key in _REPORT_VITALS:
+        m = measured.get(key)
+        if not isinstance(m, dict) or not isinstance(m.get("value"), (int, float)):
+            continue
+        t = by_read_key.get(key)
+        residuals.append({
+            "key": key,
+            "value": m["value"],
+            "target": t.get("target") if t else None,
+            "delta": t.get("delta") if t else None,
+            "flag": m.get("flag") or "",
+        })
+    return {
+        "converged": report.get("converged") if isinstance(report.get("converged"), bool) else None,
+        "iters": report.get("iters") if isinstance(report.get("iters"), int) else None,
+        "unmet": [t["key"] for t in targets if t.get("within") is False],
+        "residuals": residuals,
+        "lever_limits": [
+            {"key": t["key"], "lever": t.get("lever"), "value": t.get("lever_value"), "bounds": t.get("lever_bounds")}
+            for t in targets if t.get("lever_at_bound")
+        ],
+        "ignored_targets": [k for k in report.get("ignored_targets") or [] if isinstance(k, str)],
+        "superseded_targets": [s for s in report.get("superseded_targets") or [] if isinstance(s, dict)],
+        "notes": [n for n in report.get("notes") or [] if isinstance(n, str)],
+        "source": "build_report",
+        "log": (stderr or "")[-BUILD_LOG_MAX_CHARS:],
+    }
+
+
 def double_seed_error(spec: dict, baseline: str) -> str | None:
     """The builder applies its gestational-age seed (stiff lungs, reduced diffusion,
     venous trim — all multiplicative) whenever targets.gestational_age < 37, whatever
@@ -316,7 +366,14 @@ def run_build(spec: dict) -> tuple[dict | None, str, dict | None]:
         (PATIENTS_DIR / f"{name}.json").write_text(proc.stdout)
     except OSError:
         pass
-    detail = parse_build_report(proc.stderr or "")
+    # prefer the builder's own machine-readable report; parse the stderr text only for an
+    # engine that predates it
+    report = artifact.get("build_report") if isinstance(artifact, dict) else None
+    if isinstance(report, dict):
+        detail = detail_from_build_report(report, proc.stderr or "")
+    else:
+        detail = parse_build_report(proc.stderr or "")
+        detail["source"] = "stderr"
     detail["spec"] = spec  # echoed so the app can check what was actually built
     return artifact, summary or "patient built", detail
 
@@ -449,7 +506,8 @@ class AskResponse(BaseModel):
     conversation_id: str
     files: list[FileOutput] = Field(default_factory=list)
     artifact: dict | None = None  # a bot-built patient definition (op:"loadDefinition")
-    # calibration report for `artifact`: converged, iters, unmet, residuals, log, spec
+    # calibration report for `artifact`: converged, iters, unmet, residuals, log, spec, source;
+    # with a current engine also lever_limits, ignored_targets, superseded_targets, notes
     build: dict | None = None
 
 
