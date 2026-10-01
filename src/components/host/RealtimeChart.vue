@@ -243,7 +243,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex flex-col gap-2">
-    <div class="flex flex-col gap-0.5 text-xs">
+    <div class="flex flex-col gap-0.5 text-xs" data-tour="chart.presets">
       <span class="opacity-60">preset</span>
       <div class="flex items-center gap-1.5">
         <Select
@@ -283,7 +283,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="flex items-center gap-1.5 flex-wrap text-xs">
+    <div class="flex items-center gap-1.5 flex-wrap text-xs" data-tour="chart.series">
       <Select v-model="modelA" :options="modelNames" filter show-clear placeholder="model" size="small" class="w-44" />
       <Select
         v-model="propA"
@@ -322,6 +322,7 @@ onBeforeUnmount(() => {
     </div>
     <div
       ref="elTop"
+      data-tour="chart.plot"
       class="rt-chart"
       :style="{ width: '100%', height: split ? '150px' : '240px' }"
     ></div>
@@ -334,7 +335,7 @@ onBeforeUnmount(() => {
     </div>
     <div v-show="split" ref="elBottom" class="rt-chart" style="width: 100%; height: 150px"></div>
 
-    <div class="flex items-center justify-end gap-1.5 flex-wrap text-xs">
+    <div class="flex items-center justify-end gap-1.5 flex-wrap text-xs" data-tour="chart.view">
       <ToggleButton
         v-model="split"
         on-label="Split"
@@ -404,6 +405,7 @@ onBeforeUnmount(() => {
         class="w-24"
       />
       <Button
+        data-tour="chart.download"
         v-tooltip.top="'Download data (CSV)'"
         icon="pi pi-download"
         size="small"

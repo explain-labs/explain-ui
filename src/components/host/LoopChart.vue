@@ -116,7 +116,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex flex-col gap-2">
-    <div class="flex flex-col gap-0.5 text-xs">
+    <div class="flex flex-col gap-0.5 text-xs" data-tour="loop.presets">
       <span class="opacity-60">preset</span>
       <div class="flex items-center gap-1.5">
         <Select
@@ -156,7 +156,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="flex items-center gap-1.5 flex-wrap text-xs">
+    <div class="flex items-center gap-1.5 flex-wrap text-xs" data-tour="loop.axes">
       <span class="opacity-60 w-4">x</span>
       <Select v-model="modelX" :options="modelNames" filter placeholder="model" size="small" class="w-32" />
       <Select
@@ -181,9 +181,9 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div ref="el" style="width: 100%; height: 240px"></div>
+    <div ref="el" data-tour="loop.plot" style="width: 100%; height: 240px"></div>
 
-    <div class="flex items-center justify-end gap-1.5 flex-wrap text-xs">
+    <div class="flex items-center justify-end gap-1.5 flex-wrap text-xs" data-tour="loop.controls">
       <span class="opacity-60">window</span>
       <Select
         v-model="windowS"
