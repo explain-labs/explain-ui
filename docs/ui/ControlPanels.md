@@ -73,7 +73,7 @@ Bespoke ventilator console. Targets the `Ventilator` model. A `SelectButton` pic
 | Manual breath | `call("Ventilator.trigger_breath", [], 0)` | |
 | All other settings | `setProp("Ventilator.<p>", v/(factor??1), 0)` | plain props |
 
-Mode (`vent_mode`) and `synchronized` are plain `setProp`. Display scaling: `tidal_volume` carries `factor: 1000` (L → mL); FiO₂ is shown ×100.
+Mode (`vent_mode`) and `synchronized` are plain `setProp`. In `PS` the Synchronized switch shows on and is disabled: the engine always runs patient triggering in PS (explain-engine #6), so `synchronized` only matters for PC/PRVC. Display scaling: `tidal_volume` carries `factor: 1000` (L → mL); FiO₂ is shown ×100.
 
 Measured read-outs (`exp_tidal_volume`, `minute_volume`, `compliance`, `pip_cmh2o`, `etco2`) come off the slow stream via `watchSlow(SLOW_PATHS)`, **re-registered on every `modelReady`** because `build()` resets the DataCollector watchlist.
 
