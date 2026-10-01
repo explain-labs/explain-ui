@@ -87,6 +87,14 @@ export const TOUR_TARGETS = [
   "events.change", // one per change row (none until "Add change")
   "events.save",
   "events.saved",
+  // AI bot
+  "chat.panel",
+  "chat.scope",
+  "chat.autoapply",
+  "chat.revert",
+  "chat.conversation",
+  "chat.attach",
+  "chat.composer",
   // realtime chart + PV loop
   "chart.presets",
   "chart.series",
