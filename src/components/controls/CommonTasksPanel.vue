@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import Panel from "primevue/panel";
 import Button from "primevue/button";
 import InputNumber from "primevue/inputnumber";
@@ -7,6 +7,7 @@ import { useExplain } from "@/composables/useExplain";
 import {
   COMMON_TASKS,
   TASK_CATEGORY_LABELS,
+  currentScaleFactor,
   nextAbsoluteValue,
   nextScaleFactor,
   nextSetPropValue,
@@ -18,12 +19,32 @@ import {
 // Quick-action directional nudges ("raise PVR 30%", "halve contractility").
 // Human surface like ScalerPanel — routes straight through useExplain (not the
 // bot validate gate). The catalog (COMMON_TASKS) is shared with the bot.
-const { scale, setProp, modelState, refreshState } = useExplain();
+const { scale, setProp, modelState, refreshState, modelReady } = useExplain();
 
-// Client-side tracking for SCALE levers (ModelScaler factors aren't in the state
-// snapshot, so we remember them here; baseline 1.0). Re-zeroes automatically on
-// reload/revert because the panel unmounts with the modelReady v-if in MainPage.
+// Current factor of each SCALE lever. ModelScaler writes most groups as an
+// absolute `*_factor_scaling_ps` on every component, which IS in the state
+// snapshot, so read it from there (currentScaleFactor) — that keeps a loaded
+// state's earlier change (e.g. ×1.30) instead of restarting at ×1.00.
+// `factors` holds what this panel just sent, until a fresh snapshot catches up
+// (so quick repeated clicks build on each other); it is the only source for
+// volume groups, which the engine re-baselines to 1.0 on every build.
 const factors = reactive<Record<string, number>>({});
+function scaleFactor(task: CommonTask): number {
+  return factors[task.id] ?? currentScaleFactor(task.lever, modelState.value) ?? 1;
+}
+// a (re)build — load, revert, saved state — starts from the new snapshot
+watch(modelReady, (ready) => {
+  if (!ready) for (const k of Object.keys(factors)) delete factors[k];
+});
+// once a snapshot shows what we sent, let the snapshot lead again (so a later
+// change from elsewhere — the bot, the model editor — shows up here)
+watch(modelState, (st) => {
+  for (const task of COMMON_TASKS) {
+    if (!(task.id in factors)) continue;
+    const f = currentScaleFactor(task.lever, st);
+    if (f != null && Math.abs(f - factors[task.id]) < 1e-9) delete factors[task.id];
+  }
+});
 // Per-task step, in the field the user types into: a PERCENT for factor tasks
 // (30 = ±30%), or the raw increment for absolute tasks (e.g. 0.1 / 1 mm).
 const stepSel = reactive<Record<string, number>>(
@@ -83,7 +104,7 @@ const categories = computed<{ category: TaskCategory; label: string; tasks: Comm
 
 // Live readout: tracked factor for scale tasks, current prop value for setProp.
 function readout(task: CommonTask): string {
-  if (task.lever.kind === "scale") return `×${(factors[task.id] ?? 1).toFixed(2)}`;
+  if (task.lever.kind === "scale") return `×${scaleFactor(task).toFixed(2)}`;
   const inst = resolveInstances(task)[0];
   if (!inst) return "";
   const v = Number(models()[inst]?.[task.lever.target]);
@@ -95,7 +116,7 @@ function readout(task: CommonTask): string {
 function nudge(task: CommonTask, dir: NudgeDirection) {
   const eff: CommonTask = { ...task, step: rawStep(task) };
   if (task.lever.kind === "scale") {
-    const next = nextScaleFactor(factors[task.id] ?? 1, eff, dir);
+    const next = nextScaleFactor(scaleFactor(task), eff, dir);
     const groups = Array.isArray(task.lever.group) ? task.lever.group : [task.lever.group];
     for (const g of groups) scale(g, next);
     factors[task.id] = next;

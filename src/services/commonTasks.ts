@@ -15,9 +15,11 @@
 //     reversible via `revert`, composes with drugs/hormones/ANS. PREFERRED.
 //   - scale lever — the quantity is a bundle of many components with no single
 //     prop (contractility, lung elastances, …) handled by ModelScaler. Scale
-//     groups are ABSOLUTE (1.0 = baseline) AND the current factor is NOT in the
-//     state snapshot (explain-engine/Model.js strips ModelScaler), so the UI tracks the
-//     factor client-side per task id and the bot treats `factor` as absolute.
+//     groups are ABSOLUTE (1.0 = baseline). ModelScaler itself is stripped from
+//     the state snapshot, but most groups land as `*_factor_scaling_ps` on their
+//     components, so the UI reads the current factor back from there
+//     (currentScaleFactor) and only tracks volume groups client-side. The bot
+//     treats `factor` as absolute.
 
 export type TaskCategory =
   | "vascular_tone"
@@ -37,8 +39,8 @@ export type NudgeDirection = "up" | "down";
 //   `resolveByType` is set, in which case it's a model_type resolved to the
 //   actual instance(s) at runtime (and not Guided-allowlisted, since the
 //   instance name isn't fixed).
-// scale lever: one or more ModelScaler group(s); current factor tracked
-//   client-side (UI) / absolute-from-1.0 (bot).
+// scale lever: one or more ModelScaler group(s); current factor read from the
+//   state snapshot where possible (UI) / absolute-from-1.0 (bot).
 export type Lever =
   | {
       kind: "setProp";
@@ -325,11 +327,66 @@ export function nextAbsoluteValue(cur: number, t: CommonTask, dir: NudgeDirectio
   return clamp(v, t.min ?? -Infinity, t.max ?? Infinity);
 }
 
-// Next absolute factor for a scale lever, given the client-tracked current factor
-// (baseline 1.0).
+// Next absolute factor for a scale lever, given its current factor (baseline
+// 1.0; see currentScaleFactor).
 export function nextScaleFactor(curFactor: number, t: CommonTask, dir: NudgeDirection): number {
   const v = curFactor * nudgeMultiplier(t.step, dir, t.invert);
   return clamp(v, t.min ?? 0.05, t.max ?? 20);
+}
+
+// Where ModelScaler writes each factor-style scale group: the scaler_config list
+// of components and the `*_factor_scaling_ps` prop it sets ABSOLUTELY on each
+// (explain-engine/helpers/ModelScaler.js). Those props ride in the state
+// snapshot, so the current factor survives a save/load even though ModelScaler
+// itself is stripped. Volume groups (blood_volume, …) are absent on purpose:
+// they scale `vol` by a delta and the engine re-baselines them to 1.0 on every
+// build, so the client-tracked 1.0 is already right for them.
+const SCALE_GROUP_FIELDS: Record<string, { config: [string, string]; prop: string }> = {
+  systemic_resistances: { config: ["blood_systemic", "resistance"], prop: "r_factor_scaling_ps" },
+  systemic_elastances: { config: ["blood_systemic", "el_base"], prop: "el_base_factor_scaling_ps" },
+  systemic_u_vol: { config: ["blood_systemic", "el_base"], prop: "u_vol_factor_scaling_ps" },
+  pulmonary_resistances: { config: ["blood_pulmonary", "resistance"], prop: "r_factor_scaling_ps" },
+  pulmonary_elastances: { config: ["blood_pulmonary", "el_base"], prop: "el_base_factor_scaling_ps" },
+  pulmonary_u_vol: { config: ["blood_pulmonary", "el_base"], prop: "u_vol_factor_scaling_ps" },
+  heart_el_min: { config: ["heart", "el_min"], prop: "el_min_factor_scaling_ps" },
+  heart_el_max: { config: ["heart", "el_max"], prop: "el_max_factor_scaling_ps" },
+  left_lung_elastances: { config: ["left_lung", "el_base"], prop: "el_base_factor_scaling_ps" },
+  right_lung_elastances: { config: ["right_lung", "el_base"], prop: "el_base_factor_scaling_ps" },
+  airway_upper_resistances: { config: ["airway", "resistance_upper"], prop: "r_factor_scaling_ps" },
+  airway_lower_resistances: { config: ["airway", "resistance_lower"], prop: "r_factor_scaling_ps" },
+};
+
+// A model instance from a state snapshot. The snapshot moves composite
+// sub-models out of `models` into their parent's `components` map (e.g.
+// Circulation.components.AA), possibly several levels deep, so search those too.
+function findInstance(models: Record<string, any>, name: string): any {
+  if (models[name] && typeof models[name] === "object") return models[name];
+  for (const m of Object.values(models)) {
+    const comps = m?.components;
+    if (comps && typeof comps === "object") {
+      const hit = findInstance(comps, name);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+// Current absolute factor of a scale lever, read from a state snapshot (the
+// first group of a multi-group lever, from the first component that carries
+// the prop). null when it can't be read — a volume group, or a scenario without
+// that group — so the caller falls back to its own tracking.
+export function currentScaleFactor(lever: Lever, modelState: any): number | null {
+  if (lever.kind !== "scale") return null;
+  const group = Array.isArray(lever.group) ? lever.group[0] : lever.group;
+  const field = SCALE_GROUP_FIELDS[group];
+  const names: unknown = modelState?.scaler_config?.[field?.config[0] ?? ""]?.[field?.config[1] ?? ""];
+  const models = modelState?.models;
+  if (!field || !Array.isArray(names) || !models) return null;
+  for (const name of names) {
+    const v = findInstance(models, String(name))?.[field.prop];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return null;
 }
 
 // Derive bot allowlist entries (op:"setProp") for the singleton setProp levers so
