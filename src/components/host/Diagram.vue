@@ -11,7 +11,7 @@ import MultiSelect from "primevue/multiselect";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { useExplain } from "@/composables/useExplain";
 import { useDiagramStore } from "@/stores/diagram";
-import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS } from "@/render/diagramConstants";
+import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS, ECLS_DIAGRAM, pumpSpinRate } from "@/render/diagramConstants";
 // type-only import is erased at build; the renderer (and PixiJS) is loaded
 // lazily below so Pixi lands in its own async chunk, not the main bundle.
 import type { DiagramRenderer as DiagramRendererT } from "@/render/DiagramRenderer";
@@ -37,7 +37,7 @@ watch(() => props.highlight, applyHighlight, { deep: true });
 const el = ref<HTMLDivElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const { addRenderer, removeRenderer } = useRealtimeBus();
-const { model, modelState, isRunning } = useExplain();
+const { model, modelState, isRunning, slowValues, modelReady, watchSlow } = useExplain();
 // Publishes the live renderer so the chat/bot pipeline can drive diagram edits.
 const diagramStore = useDiagramStore();
 let adapter: DiagramRendererT | null = null;
@@ -87,6 +87,61 @@ watch(modelState, (s) => {
   if (!isRunning.value) adapter?.seedFromModels((s as any)?.models);
 });
 
+// ECLS circuit: shown while ECLS is on (ecls_running; scenarios ship it off),
+// clamped or not — a clamped circuit just shows no flow dots — with
+// the drainage/return lines routed to the live cannulation sites and the pump
+// sprite spinning with the pump speed (pumpSpinRate). State comes
+// off the ~1 Hz slow stream while running, and off each state snapshot while
+// paused (after a build, fast-forward or load). A rebuild resets the slow
+// watchlist, so re-subscribe on every model_ready.
+interface EclsView {
+  shown: boolean;
+  drainage: string;
+  ret: string;
+  spin: number; // pump sprite rev/s
+}
+let eclsView: EclsView | null = null;
+
+watch(modelReady, (ready) => {
+  if (ready) watchSlow([...ECLS_DIAGRAM.watch]);
+}, { immediate: true });
+watch(slowValues, (arr) => {
+  const l = Array.isArray(arr) && arr.length ? arr[arr.length - 1] : null;
+  if (!l || !("Ecls.ecls_running" in l)) return;
+  setEclsView({
+    shown: !!l["Ecls.ecls_running"],
+    drainage: String(l["Ecls.drainage_site"] ?? ""),
+    ret: String(l["Ecls.return_site"] ?? ""),
+    spin: pumpSpinRate(Number(l["Ecls.pump_rpm"]), Number(l["Ecls.pump_mode"])),
+  });
+});
+watch(modelState, (s) => {
+  const e = (s as any)?.models?.Ecls;
+  setEclsView(
+    e
+      ? {
+          shown: !!e.ecls_running,
+          drainage: e.drainage_site ?? "",
+          ret: e.return_site ?? "",
+          spin: pumpSpinRate(Number(e.pump_rpm), Number(e.pump_mode)),
+        }
+      : { shown: false, drainage: "", ret: "", spin: 0 },
+  );
+});
+
+function setEclsView(v: EclsView) {
+  eclsView = v;
+  applyEclsView();
+}
+function applyEclsView() {
+  if (!adapter || !eclsView) return;
+  const d = ECLS_DIAGRAM;
+  adapter.setConnectorEnds(d.drainageConnector, adapter.componentForModel(eclsView.drainage), null);
+  adapter.setConnectorEnds(d.returnConnector, null, adapter.componentForModel(eclsView.ret));
+  adapter.setSpin(d.pumpNode, eclsView.spin);
+  adapter.setGroupVisible(d.group, eclsView.shown);
+}
+
 async function mountRenderer(diagram: any) {
   if (!diagram || !el.value) return;
   const { DiagramRenderer } = await import("@/render/DiagramRenderer");
@@ -131,6 +186,7 @@ async function mountRenderer(diagram: any) {
   if (diagram?.settings?.to2_hi > 0) to2Hi.value = diagram.settings.to2_hi;
   if (props.highlight) applyHighlight();
   adapter.seedFromModels((modelState.value as any)?.models);
+  applyEclsView();
   addRenderer(adapter);
   // publish to the chat/bot pipeline so it can drive diagram edits while mounted
   diagramStore.register(adapter);

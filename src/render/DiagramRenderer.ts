@@ -1,6 +1,6 @@
 import { Application, Assets, Sprite, Graphics, Text, Texture } from "pixi.js";
 import { ANIM_TIME_SLOT, animMagOffset, animTintOffset } from "@explain/helpers/RealtimeChannels";
-import { DEOX_RGB, TO2_HI, TO2_LO, rgbFromTo2 } from "./diagramConstants";
+import { DEOX_RGB, DEVICE_BAND_DEFAULT, TO2_HI, TO2_LO, rgbFromTo2 } from "./diagramConstants";
 import type {
   AnimFrame,
   ChartFrame,
@@ -36,10 +36,14 @@ interface CompNode {
   lastR: number; // last volume-derived disc radius (so a live rescale can
   // re-apply sprite size immediately, even with the sim paused)
   lastTo2: number; // last raw to2 (so a live tint-window change re-colours now)
+  group: string | null; // device group (shown/hidden at runtime), null = always
+  spin: number; // live spin rate (rev/s, e.g. a pump), 0 = static
+  spinAngle: number; // accumulated spin (rad), added on top of layout rotation
 }
 
 interface ConnNode {
   name: string;
+  group: string | null;
   graphics: Graphics;
   layout: any;
   from: string;
@@ -133,6 +137,17 @@ export class DiagramRenderer implements RendererAdapter {
   private to2Lo = TO2_LO;
   private to2Hi = TO2_HI;
   private ro: ResizeObserver | null = null;
+  // device groups (e.g. the ECLS circuit): built hidden, shown via
+  // setGroupVisible. While any grouped node is visible the ring shrinks up to
+  // open a band of `deviceBand` × ring radius below it.
+  private shownGroups = new Set<string>();
+  private deviceBand = DEVICE_BAND_DEFAULT;
+  // edge margin (px at scaling 1) reserved for sprites sitting on the ring;
+  // settings.ringMargin overrides it for diagrams whose sprites are large for
+  // their scaling (adult volumes are ~15x a neonate's at scaling 0.4)
+  private ringMargin = RING_MARGIN;
+  private bandOn = false;
+  private lastFrameMs = 0; // wall clock of the previous frame (drives spin)
 
   // editor state (Phase E)
   private editMode = false;
@@ -197,6 +212,8 @@ export class DiagramRenderer implements RendererAdapter {
     this.to2Hi = numberOr(settings.to2_hi, TO2_HI);
     this.gridOn = settings.grid === true;
     this.gridSize = settings.gridSize > 0 ? settings.gridSize : GRID_SIZE_DEFAULT;
+    this.deviceBand = settings.deviceBand >= 0 ? settings.deviceBand : DEVICE_BAND_DEFAULT;
+    this.ringMargin = settings.ringMargin > 0 ? settings.ringMargin : RING_MARGIN;
     this.recomputeGeometry();
 
     await this.preloadTextures();
@@ -206,6 +223,7 @@ export class DiagramRenderer implements RendererAdapter {
     this.buildCompartments();
     this.buildConnectors();
     this.ready = true;
+    this.applyGroupVisibility(); // grouped (device) components start hidden
 
     // recompute layout when the canvas resizes
     this.ro = new ResizeObserver(() => this.onResize());
@@ -224,13 +242,41 @@ export class DiagramRenderer implements RendererAdapter {
    *  panel exactly: based on the SMALLER half-dimension (so the circle fits even
    *  when the panel is much wider than it is tall) minus a margin that reserves
    *  room for the sprites/labels sitting on the ring. The scenario `radius`
-   *  setting is intentionally NOT applied here — it would shrink the diagram. */
+   *  setting is intentionally NOT applied here — it would shrink the diagram.
+   *  With the device band on, the ring + band (b × ringR) together fit the
+   *  height: ringR = (H − 2·margin) / (2 + b), and the centre moves up by
+   *  b·ringR/2 so the band opens below the ring. */
+  private canvasHeight(): number {
+    return this.app?.screen.height || this.el.clientHeight;
+  }
+
   private recomputeGeometry() {
     if (!this.app) return;
-    this.xCenter = (this.app.screen.width || this.el.clientWidth) / 2;
-    this.yCenter = (this.app.screen.height || this.el.clientHeight) / 2;
-    const fill = Math.min(this.xCenter, this.yCenter) - RING_MARGIN * this.scaling;
+    const w = this.app.screen.width || this.el.clientWidth;
+    const h = this.app.screen.height || this.el.clientHeight;
+    const margin = this.ringMargin * this.scaling;
+    const b = this.bandOn ? this.deviceBand : 0;
+    // bottom-pinned captions (the title) need their strip kept clear of the ring
+    const bottom = Math.max(margin, this.footerHeight() + margin / 2);
+    this.xCenter = w / 2;
+    const fill = Math.min(w / 2 - margin, (h - margin - bottom) / (2 + b));
     this.ringR = Math.max(20, fill);
+    // centre the ring (+ band) between the top margin and the bottom strip
+    this.yCenter = (margin + h - bottom - b * this.ringR) / 2;
+  }
+
+  /** Height (px) of the strip that "bottom"-pinned components occupy: their
+   *  distance from the edge plus half their caption, plus a small gap. */
+  private footerHeight(): number {
+    let need = 0;
+    for (const comp of Object.values<any>(this.diagram?.components ?? {})) {
+      if (comp.type === "Connector" || comp.enabled === false || !comp.layout) continue;
+      const pos = this.activePos(comp.layout);
+      if (pos?.type !== "bottom") continue;
+      const text = comp.label ? ((numberOr(comp.layout.label?.size, 10) || 10) * this.scaling) / 2 : 0;
+      need = Math.max(need, numberOr(pos.y, 0) + text + 6);
+    }
+    return need;
   }
 
   /** Generate the procedural radial textures used for depth: the soft compartment
@@ -450,8 +496,8 @@ export class DiagramRenderer implements RendererAdapter {
     const node: CompNode = {
       x,
       y,
-      posType: layout.sprite.pos.type,
-      dgs: layout.sprite.pos.dgs,
+      posType: this.activePos(layout).type,
+      dgs: this.activePos(layout).dgs,
       sprite,
       glow,
       rim,
@@ -460,8 +506,11 @@ export class DiagramRenderer implements RendererAdapter {
       cb: baseRgb[2],
       label,
       layout,
-      lastR: radiusFromVolume(0.15),
+      lastR: fixedSize(layout) ?? radiusFromVolume(0.15),
       lastTo2: this.to2Lo, // venous end until the first frame arrives
+      group: comp.group || null,
+      spin: 0,
+      spinAngle: 0,
     };
     this.comps[name] = node;
     // initial visible scale/position before the first frame arrives
@@ -573,12 +622,27 @@ export class DiagramRenderer implements RendererAdapter {
     node.sprite.texture = Texture.from(path);
   }
 
+  // the position in effect: `sprite.band_pos` (when authored) while the device
+  // band is open, so e.g. a caption below the ring can step clear of the band
+  private activePos(layout: any): any {
+    return this.bandOn && layout.sprite.band_pos ? layout.sprite.band_pos : layout.sprite.pos;
+  }
+
   private placeAt(layout: any): { x: number; y: number } {
-    const pos = layout.sprite.pos;
+    const pos = this.activePos(layout);
     if (pos.type === "arc") {
       return {
         x: this.xCenter + this.xOffset + Math.cos(pos.dgs * DEG) * this.ringR,
         y: this.yCenter + this.yOffset + Math.sin(pos.dgs * DEG) * this.ringR,
+      };
+    }
+    if (pos.type === "bottom") {
+      // pinned to the canvas bottom edge: x relative to the ring like "rel",
+      // y = pixels up from the bottom — e.g. the scenario title, which then sits
+      // at the foot of the diagram whatever the panel height or device band.
+      return {
+        x: this.xCenter + this.xOffset + pos.x * this.ringR,
+        y: this.canvasHeight() - pos.y,
       };
     }
     // "rel"
@@ -611,28 +675,14 @@ export class DiagramRenderer implements RendererAdapter {
     g.on("pointerdown", (e: any) => this.onConnDown(name, e));
     this.app!.stage.addChildAt(g, 0); // paths under sprites
 
-    // a train of dots whose count tracks the path length (one per ~spacing px),
-    // sitting just above the path but below the compartments they flow between.
-    const count = dotCount(pathLength(geom), this.scaling);
-    const dots: Sprite[] = [];
-    for (let i = 0; i < count; i++) {
-      const d = Sprite.from(DOT_PICTO);
-      d.anchor.set(0.5, 0.5);
-      d.scale.set(DOT_SCALE * this.scaling);
-      d.zIndex = comp.layout.general.z_index + 0.5;
-      d.alpha = 0; // raised once flow arrives
-      d.eventMode = "none";
-      this.app!.stage.addChild(d);
-      dots.push(d);
-    }
-
-    this.conns.push({
+    const conn: ConnNode = {
       name,
+      group: comp.group || null,
       graphics: g,
       layout: comp.layout,
       from: comp.dbcFrom,
       to: comp.dbcTo,
-      dots,
+      dots: [],
       smFlow: 0,
       cr: DEOX_RGB[0],
       cg: DEOX_RGB[1],
@@ -640,7 +690,40 @@ export class DiagramRenderer implements RendererAdapter {
       pos: 0,
       geom,
       lastTo2: this.to2Lo,
-    });
+    };
+    this.syncDotCount(conn);
+    this.conns.push(conn);
+  }
+
+  /** Match a connector's dot train to its path length (one dot per ~spacing px),
+   *  sitting just above the path but below the compartments it flows between.
+   *  Re-run when the path changes length (e.g. a re-routed endpoint). */
+  private syncDotCount(conn: ConnNode) {
+    const count = dotCount(pathLength(conn.geom), this.scaling);
+    while (conn.dots.length > count) this.app!.stage.removeChild(conn.dots.pop()!);
+    while (conn.dots.length < count) {
+      const d = Sprite.from(DOT_PICTO);
+      d.anchor.set(0.5, 0.5);
+      d.scale.set(DOT_SCALE * this.scaling);
+      d.zIndex = conn.layout.general.z_index + 0.5;
+      d.alpha = 0; // raised once flow arrives
+      d.eventMode = "none";
+      d.visible = conn.graphics.visible;
+      this.app!.stage.addChild(d);
+      conn.dots.push(d);
+    }
+  }
+
+  /** Put a connector's dots back on its (possibly moved) path at the current
+   *  phase, without touching size/opacity — for relayouts while paused. */
+  private placeDots(conn: ConnNode) {
+    const n = conn.dots.length;
+    if (!conn.geom || !n) return;
+    for (let k = 0; k < n; k++) {
+      const p = pointOnPath(conn.geom, wrap01(conn.pos + k / n));
+      conn.dots[k].x = p.x;
+      conn.dots[k].y = p.y;
+    }
   }
 
   private drawPath(g: Graphics, layout: any, from: CompNode, to: CompNode): any {
@@ -719,11 +802,27 @@ export class DiagramRenderer implements RendererAdapter {
     // empty one would reset every disc to the placeholder volume.
     if (!(frame[ANIM_TIME_SLOT] > 0)) return;
 
+    // spinning sprites (e.g. the ECLS pump) turn by wall-clock time between
+    // frames — frames only flow while the sim runs, so a paused sim stops them.
+    // dt is clamped so the first frame after a pause doesn't jump.
+    const now = performance.now();
+    const dt = this.lastFrameMs ? Math.min((now - this.lastFrameMs) / 1000, 0.1) : 0;
+    this.lastFrameMs = now;
+    if (dt > 0) {
+      for (const name in this.comps) {
+        const node = this.comps[name];
+        if (!node.spin || !node.sprite.visible) continue;
+        node.spinAngle = (node.spinAngle + node.spin * dt * 2 * Math.PI) % (2 * Math.PI);
+        this.applyRotation(node);
+      }
+    }
+
     // compartments: scale by volume, tint by to2 (smoothed), glow by fill
     for (const name in this.comps) {
       const idx = this.animIndex[name];
       if (idx === undefined) continue;
       const node = this.comps[name];
+      if (!node.sprite.visible) continue; // hidden device group
       this.applyCompartment(node, frame[animMagOffset(idx)], frame[animTintOffset(idx)], TINT_LERP);
     }
 
@@ -731,7 +830,7 @@ export class DiagramRenderer implements RendererAdapter {
     // along it, coloured from the upstream component (tint = dbcFrom's to2).
     for (const conn of this.conns) {
       const idx = this.animIndex[conn.name];
-      if (idx === undefined) continue;
+      if (idx === undefined || !conn.graphics.visible) continue;
       const flow = frame[animMagOffset(idx)];
       const tint = frame[animTintOffset(idx)];
       this.advanceDots(conn, flow, tint);
@@ -741,7 +840,7 @@ export class DiagramRenderer implements RendererAdapter {
   /** Size a compartment by volume and ease its tint toward to2 by `lerp`
    *  (1 = snap). Shared by the realtime frames and the state-snapshot seed. */
   private applyCompartment(node: CompNode, vol: number, to2: number, lerp: number) {
-    const r = radiusFromVolume(vol > 0 ? vol : 0.15);
+    const r = fixedSize(node.layout) ?? radiusFromVolume(vol > 0 ? vol : 0.15);
     node.lastR = r;
     this.setCompartmentScale(node, r);
     if (!node.layout.general.tinting) return;
@@ -839,6 +938,8 @@ export class DiagramRenderer implements RendererAdapter {
       const p = this.placeAt(node.layout);
       node.x = p.x;
       node.y = p.y;
+      node.posType = this.activePos(node.layout).type;
+      node.dgs = this.activePos(node.layout).dgs;
       this.syncCompartmentPos(node);
       this.positionLabel(node);
     }
@@ -846,6 +947,7 @@ export class DiagramRenderer implements RendererAdapter {
       const f = this.comps[conn.from];
       const t = this.comps[conn.to];
       if (f && t) conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+      this.placeDots(conn);
     }
     this.drawSelection();
   }
@@ -858,6 +960,7 @@ export class DiagramRenderer implements RendererAdapter {
       this.dragging = null;
       this.clearSelection();
     }
+    this.applyGroupVisibility(); // edit mode reveals every device group
   }
 
   setSelectCallback(fn: (name: string | null, comp: any, kind: "comp" | "conn" | null) => void) {
@@ -873,6 +976,114 @@ export class DiagramRenderer implements RendererAdapter {
   /** Return the (mutated) diagram definition for serialization/export. */
   getDiagram() {
     return this.diagram;
+  }
+
+  // ---- Device groups ----
+
+  /** Show or hide a device group (the components carrying `group: name`) at
+   *  runtime. The first visible grouped node opens the device band below the
+   *  ring (the ring shrinks up); the last one hidden closes it. Edit mode shows
+   *  every group regardless, so the nodes can be positioned. */
+  setGroupVisible(group: string, on: boolean) {
+    if (on === this.shownGroups.has(group)) return;
+    if (on) this.shownGroups.add(group);
+    else this.shownGroups.delete(group);
+    this.applyGroupVisibility();
+  }
+
+  private isGroupShown(group: string | null): boolean {
+    return !group || this.editMode || this.shownGroups.has(group);
+  }
+
+  // a connector shows only with its group AND both endpoints, so a line into a
+  // hidden device never dangles (e.g. an ungrouped connector to an ECLS node)
+  private isConnShown(conn: ConnNode): boolean {
+    const f = this.comps[conn.from];
+    const t = this.comps[conn.to];
+    return this.isGroupShown(conn.group) && !!f && !!t && this.isGroupShown(f.group) && this.isGroupShown(t.group);
+  }
+
+  private applyGroupVisibility() {
+    if (!this.ready) return;
+    let band = false;
+    for (const name in this.comps) {
+      const node = this.comps[name];
+      const vis = this.isGroupShown(node.group);
+      if (node.group && vis) band = true;
+      node.sprite.visible = vis;
+      if (node.glow) node.glow.visible = vis;
+      if (node.rim) node.rim.visible = vis;
+      if (node.label) node.label.visible = vis;
+    }
+    for (const conn of this.conns) {
+      const vis = this.isConnShown(conn);
+      conn.graphics.visible = vis;
+      for (const d of conn.dots) d.visible = vis;
+      if (!vis) {
+        // hidden connectors skip frames, so drop their flow state now — otherwise
+        // a re-shown circuit flashes its last (stale) dot train before fading
+        conn.smFlow = 0;
+        for (const d of conn.dots) d.alpha = 0;
+      }
+    }
+    if (band !== this.bandOn) {
+      this.bandOn = band;
+      this.onResize(); // re-fit the ring around (or without) the band
+    }
+    if (this.selected && !this.isVisibleName(this.selected)) this.clearSelection();
+    else this.drawSelection();
+  }
+
+  private isVisibleName(name: string): boolean {
+    const conn = this.conns.find((c) => c.name === name);
+    if (conn) return conn.graphics.visible;
+    return this.comps[name]?.sprite.visible ?? false;
+  }
+
+  /** The drawn (ungrouped) diagram component that represents an engine model,
+   *  e.g. "RASVC" → "RA" (whose `models` include it). Null when none does. */
+  componentForModel(modelName: string): string | null {
+    if (!modelName) return null;
+    for (const [name, comp] of Object.entries<any>(this.diagram?.components ?? {})) {
+      if (comp.type === "Connector" || comp.group || !this.comps[name]) continue;
+      if (Array.isArray(comp.models) && comp.models.includes(modelName)) return name;
+    }
+    return null;
+  }
+
+  /** Spin a component's sprite at `revPerSec` (sign = direction; 0 stops it
+   *  where it is). Runtime only — layout.sprite.rotation stays the authored
+   *  base angle, so the export is unaffected. */
+  setSpin(name: string, revPerSec: number) {
+    const node = this.comps[name];
+    if (node) node.spin = Number.isFinite(revPerSec) ? revPerSec : 0;
+  }
+
+  // sprite (and its rim copy) at the authored rotation plus any live spin
+  private applyRotation(node: CompNode) {
+    const r = numberOr(node.layout.sprite.rotation, 0) + node.spinAngle;
+    node.sprite.rotation = r;
+    if (node.rim) node.rim.rotation = r;
+  }
+
+  /** Re-route a connector's live endpoints (diagram component names; omit one
+   *  to keep it). A runtime override only: the definition's dbcFrom/dbcTo — and
+   *  so the export — keep their authored values. Unknown names are ignored. */
+  setConnectorEnds(name: string, from?: string | null, to?: string | null) {
+    const conn = this.conns.find((c) => c.name === name);
+    if (!conn) return;
+    const f = from && this.comps[from] ? from : conn.from;
+    const t = to && this.comps[to] ? to : conn.to;
+    if (f === conn.from && t === conn.to) return;
+    conn.from = f;
+    conn.to = t;
+    conn.geom = this.drawPath(conn.graphics, conn.layout, this.comps[f], this.comps[t]);
+    this.syncDotCount(conn);
+    this.placeDots(conn);
+    const vis = this.isConnShown(conn);
+    conn.graphics.visible = vis;
+    for (const d of conn.dots) d.visible = vis;
+    this.drawSelection();
   }
 
   /** Apply a layout patch to a component or connector and re-render it live. */
@@ -901,7 +1112,7 @@ export class DiagramRenderer implements RendererAdapter {
       const l = node.layout;
       node.sprite.alpha = l.general.alpha;
       node.sprite.zIndex = l.general.z_index;
-      node.sprite.rotation = l.sprite.rotation;
+      this.applyRotation(node);
       if (node.glow) node.glow.zIndex = l.general.z_index - 2;
       if (node.rim) node.rim.zIndex = l.general.z_index - 1;
       if (!l.general.tinting) {
@@ -918,8 +1129,8 @@ export class DiagramRenderer implements RendererAdapter {
       node.x = p.x;
       node.y = p.y;
       this.syncCompartmentPos(node);
-      node.posType = l.sprite.pos.type;
-      node.dgs = l.sprite.pos.dgs;
+      node.posType = this.activePos(l).type;
+      node.dgs = this.activePos(l).dgs;
       if (node.label) {
         node.label.text = String(comp.label ?? "");
         node.label.style.fontSize = (numberOr(l.label?.size, 10) || 10) * this.scaling;
@@ -992,14 +1203,17 @@ export class DiagramRenderer implements RendererAdapter {
     const dist = Math.abs(Math.hypot(node.sprite.x - cx, node.sprite.y - cy) - r);
     if (!this.gridOn && dist < 15) {
       const dgs = (Math.atan2(node.sprite.y - cy, node.sprite.x - cx) * 180) / Math.PI;
-      node.layout.sprite.pos = { type: "arc", x: 0, y: 0, dgs };
+      this.commitPos(node, { type: "arc", x: 0, y: 0, dgs });
       node.posType = "arc";
       node.dgs = dgs;
       const p = this.placeAt(node.layout);
       node.x = p.x;
       node.y = p.y;
+    } else if (node.posType === "bottom") {
+      // stay pinned to the bottom edge; keep the dragged distance from it
+      this.commitPos(node, { type: "bottom", x: (node.x - cx) / r, y: this.canvasHeight() - node.y, dgs: 0 });
     } else {
-      node.layout.sprite.pos = { type: "rel", x: (node.x - cx) / r, y: (node.y - cy) / r, dgs: 0 };
+      this.commitPos(node, { type: "rel", x: (node.x - cx) / r, y: (node.y - cy) / r, dgs: 0 });
       node.posType = "rel";
     }
     this.syncCompartmentPos(node); // settle disc + glow/rim at the final position
@@ -1008,6 +1222,12 @@ export class DiagramRenderer implements RendererAdapter {
     this.drawSelection();
     this.dragging = null;
     this.onSelectCb?.(name, this.diagram.components[name], "comp");
+  }
+
+  // store a dragged position into whichever of pos / band_pos is in effect
+  private commitPos(node: CompNode, pos: any) {
+    if (this.bandOn && node.layout.sprite.band_pos) node.layout.sprite.band_pos = pos;
+    else node.layout.sprite.pos = pos;
   }
 
   private select(name: string, kind: "comp" | "conn" = "comp") {
@@ -1161,7 +1381,9 @@ export class DiagramRenderer implements RendererAdapter {
     const pulse = 0.55 + 0.35 * Math.sin(performance.now() / 280);
     for (const name of this.highlightNames) {
       const text = this.highlightTexts.get(name);
+      if (text) text.visible = this.isVisibleName(name);
       const conn = this.conns.find((c) => c.name === name);
+      if (conn && !conn.graphics.visible) continue; // hidden device group
       if (conn?.geom) {
         const pts = samplePath(conn.geom);
         if (pts.length < 4) continue;
@@ -1177,7 +1399,7 @@ export class DiagramRenderer implements RendererAdapter {
         continue;
       }
       const node = this.comps[name];
-      if (!node) continue;
+      if (!node || !node.sprite.visible) continue;
       const b = node.sprite.getBounds();
       const cx = b.x + b.width / 2;
       const cy = b.y + b.height / 2;
@@ -1342,6 +1564,14 @@ function deepMerge(target: any, patch: any) {
       target[k] = v;
     }
   }
+}
+
+// `sprite.fixed_size`: a constant disc radius (radiusFromVolume units) for nodes
+// whose volume would mislead as a size cue — e.g. an ECLS oxygenator's priming
+// volume dwarfing the neonatal heart. Null = size by volume.
+function fixedSize(layout: any): number | null {
+  const v = layout?.sprite?.fixed_size;
+  return typeof v === "number" && v > 0 ? v : null;
 }
 
 function radiusFromVolume(vol: number): number {

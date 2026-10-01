@@ -92,6 +92,8 @@ function pushDiagram() {
 
 **Toolbar.** Edit / Connect toggles; `addCompartment(model, picto)`; Delete + keyboard shortcuts (Delete/Backspace removes selection, Escape clears — ignored while typing in a field); Grid on/off + size (`setGrid`/`setGridSize`); global **scale** (`setScaling` — sprites, labels, path widths, dots, persisted to `settings.scaling`); **O₂ tint window** lo/hi (`setTo2Range`, persisted to `settings.to2_lo`/`to2_hi`); Export/Import JSON (import accepts a diagram or a full scenario, tearing down and remounting).
 
+**ECLS circuit.** The ECLS diagram components are in the `"ecls"` device group (see [RenderLayer](./RenderLayer.md)). `Diagram.vue` watches `Ecls.ecls_running`/`drainage_site`/`return_site`/`pump_rpm`/`pump_mode` (`ECLS_DIAGRAM.watch` in `diagramConstants.ts`) — off the slow stream while running (re-subscribed on every `model_ready`, since a build resets the watchlist) and off each state snapshot while paused — and shows the group while ECLS is on (`ecls_running`, the ECLS panel's Running toggle; every scenario ships it off). Clamped or not: a clamped circuit is drawn static, since its flow is forced to 0 and the dots fade out. The drainage/return connectors are re-routed via `setConnectorEnds` to `componentForModel(site)`, so a VA→VV site change in the ECLS panel moves the line. The pump sprite spins with `Ecls.pump_rpm`/`pump_mode` via `pumpSpinRate` (roller pumps at their true rate; centrifugal speeds compressed to a readable 0–1.5 rev/s, since 25–65 rev/s would only strobe). The view is re-applied after every (re)mount.
+
 ## useChartParams.ts
 
 Shared catalog + preset logic for `RealtimeChart.vue` and `LoopChart.vue`, parameterized by `presetKey` (`"RealTimeCharts"` / `"LoopCharts"`):
