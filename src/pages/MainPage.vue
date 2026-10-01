@@ -34,6 +34,7 @@ import SaveStatePanel from "@/components/controls/SaveStatePanel.vue";
 import AdminUsersButton from "@/components/controls/AdminUsersButton.vue";
 import NumericReadoutPanel from "@/components/numerics/NumericReadoutPanel.vue";
 import ChatPanel from "@/components/controls/ChatPanel.vue";
+import PatientBuilderPanel from "@/components/controls/PatientBuilderPanel.vue";
 import LoopChart from "@/components/host/LoopChart.vue";
 import Monitor from "@/components/host/Monitor.vue";
 import VentilatorScope from "@/components/host/VentilatorScope.vue";
@@ -65,10 +66,11 @@ const calcSecs = ref(10);
 const CALC_OPTIONS = [5, 10, 30, 60, 120, 300]; // seconds to calculate
 // active tab per column; in a store so the interactive manual can switch them
 const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
-// Control panels that aren't finished yet: hidden on the deployed site, still
-// shown under `npm run dev` so they can be worked on. Remove a name here to
-// release its panel.
-const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler"]);
+// Panels that aren't finished yet: hidden on the deployed site, still shown
+// under `npm run dev` so they can be worked on. Remove a name here to release
+// its panel. ("builder" waits for the engine to apply an FiO2: until then a
+// patient on oxygen is fitted as if in room air.)
+const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler", "builder"]);
 const showPanel = (name: string) => import.meta.env.DEV || !UNFINISHED_PANELS.has(name);
 const tour = useTour();
 // first visit (no manual progress stored yet): offer the getting-started tour
@@ -465,6 +467,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <Tab value="chat" data-tour="tab.viz.chat" v-tooltip.top="'Explain AI Bot'" aria-label="Explain AI Bot">
               <i class="pi pi-comments"></i>
             </Tab>
+            <Tab v-if="showPanel('builder')" value="builder" data-tour="tab.viz.builder" v-tooltip.top="'Patient builder'" aria-label="Patient builder">
+              <i class="pi pi-user-plus"></i>
+            </Tab>
             <Tab value="docs" data-tour="tab.viz.docs" v-tooltip.top="'Documentation'" aria-label="Documentation">
               <i class="pi pi-book"></i>
             </Tab>
@@ -481,6 +486,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </TabPanel>
             <TabPanel value="chat">
               <ChatPanel />
+            </TabPanel>
+            <TabPanel v-if="showPanel('builder')" value="builder">
+              <PatientBuilderPanel />
             </TabPanel>
             <TabPanel value="docs">
               <DocViewer />

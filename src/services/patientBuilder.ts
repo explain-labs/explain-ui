@@ -261,3 +261,147 @@ export function checkSpec(spec: unknown, request: PatientBuildRequest, provenanc
   }
   return problems;
 }
+
+// ---- result tables ----
+
+// One row of "what the patient was built from": every value the form or the bot
+// supplied, in schema order.
+export type ValueStatus = "measured" | "derived" | ProvenanceStatus;
+export interface ValueRow {
+  key: string;
+  caption: string;
+  value: number | null; // SPEC units
+  unit: string;
+  status: ValueStatus;
+  use: "target" | "check" | "context" | "none"; // what the builder did with it
+  note: string; // why it is only a check, the derivation, or the bot's basis
+  source: ProvenanceSource | null;
+}
+
+export function buildValueRows(request: PatientBuildRequest, provenance: Provenance | null): ValueRow[] {
+  const { validated, resolved } = request;
+  const derived = new Map(resolved.derived.map((d) => [d.key, d]));
+  const filled = new Map((provenance?.fields ?? []).map((f) => [f.key, f]));
+  const rows: ValueRow[] = [];
+
+  for (const field of PATIENT_FIELDS) {
+    if (field.kind !== "number") continue;
+    const base = { key: field.key, caption: field.caption, unit: field.specUnit };
+    const measured = validated.values[field.key];
+    if (measured != null) {
+      const isTarget = field.specTarget != null && resolved.targets[field.specTarget] === measured;
+      const check = resolved.checks[field.key];
+      rows.push({
+        ...base,
+        value: measured,
+        status: "measured",
+        use: isTarget ? "target" : check ? "check" : "context",
+        note: check ?? "",
+        source: null,
+      });
+      continue;
+    }
+    const d = derived.get(field.key);
+    if (d) {
+      rows.push({ ...base, value: d.value, status: "derived", use: "target", note: d.basis, source: null });
+      continue;
+    }
+    const f = filled.get(field.key);
+    if (f) {
+      rows.push({
+        ...base,
+        value: f.value,
+        status: f.status,
+        use: f.status === "emergent" ? "none" : "target",
+        note: f.basis,
+        source: f.source,
+      });
+    }
+  }
+  return rows;
+}
+
+// The structured calibration report the bot host returns as `build`
+// (bot-host/api.py parse_build_report).
+export interface BuildResidual {
+  key: string;
+  value: number;
+  target: number | null;
+  delta: number | null;
+  flag: string;
+}
+export interface BuildReport {
+  converged: boolean | null;
+  iters: number | null;
+  unmet: string[];
+  residuals: BuildResidual[];
+  log: string;
+  spec: unknown;
+}
+
+export function parseBuildReport(raw: unknown): BuildReport | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const residuals: BuildResidual[] = [];
+  for (const row of Array.isArray(r.residuals) ? r.residuals.slice(0, 60) : []) {
+    if (!row || typeof row !== "object") continue;
+    const x = row as Record<string, unknown>;
+    const value = num(x.value);
+    if (typeof x.key !== "string" || value == null) continue;
+    residuals.push({ key: text(x.key, 40), value, target: num(x.target), delta: num(x.delta), flag: text(x.flag, 20) });
+  }
+  return {
+    converged: typeof r.converged === "boolean" ? r.converged : null,
+    iters: num(r.iters),
+    unmet: (Array.isArray(r.unmet) ? r.unmet : []).map((k: unknown) => text(k, 40)).filter(Boolean),
+    residuals,
+    log: typeof r.log === "string" ? r.log.slice(-8000) : "",
+    spec: r.spec ?? null,
+  };
+}
+
+// One row of "how close the built patient is": the model's steady-state value
+// next to what was measured, for calibrated targets and for checks alike.
+export interface ResultRow {
+  key: string; // form key
+  caption: string;
+  unit: string;
+  model: number;
+  measured: number | null;
+  delta: number | null; // model − measured
+  calibrated: boolean; // true: the builder tuned to it; false: comparison only
+  met: boolean | null; // calibrated targets only: within tolerance
+  flag: string; // the builder's normal-range flag ("ok", "LOW", "HIGH", "")
+}
+
+// the builder reports pre-ductal saturation as spo2_pre and mean PAP as pap_m
+const REPORT_TO_FORM: Record<string, string> = { spo2_pre: "spo2" };
+const REPORT_CAPTIONS: Record<string, { caption: string; unit: string }> = {
+  pap_m: { caption: "Mean pulmonary artery pressure", unit: "mmHg" },
+};
+
+export function buildResultRows(request: PatientBuildRequest, report: BuildReport): ResultRow[] {
+  const { validated, resolved } = request;
+  const unmet = new Set(report.unmet.map((k) => REPORT_TO_FORM[k] ?? k));
+  return report.residuals.map((r) => {
+    const key = REPORT_TO_FORM[r.key] ?? r.key;
+    const field = numberField(key);
+    const label = field ? { caption: field.caption, unit: field.specUnit } : (REPORT_CAPTIONS[key] ?? { caption: key, unit: "" });
+    const target = field?.specTarget != null ? resolved.targets[field.specTarget] : undefined;
+    const calibrated = target != null;
+    const measured = calibrated ? target : (validated.values[key] ?? null);
+    const delta = measured != null ? Number((r.value - measured).toPrecision(4)) : null;
+    return {
+      key,
+      caption: label.caption,
+      unit: label.unit,
+      model: r.value,
+      measured,
+      delta,
+      calibrated,
+      met: calibrated ? !unmet.has(key) : null,
+      flag: r.flag,
+    };
+  });
+}

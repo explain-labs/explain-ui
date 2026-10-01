@@ -12,6 +12,7 @@ The Pinia stores in `src/stores/` hold the app's **control-plane** state: the au
 | `src/stores/monitors.ts` | Monitor dashboards/groups/params editor, mirrored to scenario JSON |
 | `src/stores/events.ts` | Named scheduled-event bundles, mirrored to scenario JSON |
 | `src/stores/chat.ts` | Explain-Labs bot chat + bot-proposed model/diagram commands |
+| `src/stores/patientBuilder.ts` | Patient-builder form, its bot request and result — see [PatientBuilder](./PatientBuilder.md) |
 | `src/stores/diagram.ts` | Bridge publishing the live `DiagramRenderer` to the chat pipeline |
 
 ## `auth`

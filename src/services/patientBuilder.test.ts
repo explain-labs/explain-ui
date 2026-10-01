@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FORM_MARKER, buildRequest, checkSpec, parseProvenance, type PatientBuildRequest } from "./patientBuilder";
+import { FORM_MARKER, buildRequest, buildResultRows, buildValueRows, checkSpec, parseBuildReport, parseProvenance, type PatientBuildRequest } from "./patientBuilder";
 import type { PatientForm } from "./patientSchema";
 
 const FORM: PatientForm = {
@@ -167,5 +167,74 @@ describe("checkSpec", () => {
   it("reports a spec with no target list", () => {
     expect(checkSpec({ baseline: "term_neonate" }, request(), null)).toHaveLength(1);
     expect(checkSpec(null, request(), null)).toHaveLength(1);
+  });
+});
+
+describe("result tables", () => {
+  const prov = parseProvenance(
+    block({
+      fields: [
+        { key: "hb", value: 9, status: "reference", basis: "first week, under 29 wk", source: { title: "neonatal-reference.md (draft), table 2", url: null } },
+        { key: "cvp", value: null, status: "emergent", basis: "left to the model" },
+      ],
+    }),
+  ).provenance;
+
+  it("lists measured, derived and filled values in schema order with what the builder did with each", () => {
+    const rows = buildValueRows(request(), prov);
+    const row = (k: string) => rows.find((r) => r.key === k)!;
+    expect(row("weight")).toMatchObject({ value: 1.08, status: "measured", use: "target" });
+    expect(row("postnatal_age")).toMatchObject({ value: 3, status: "measured", use: "context" });
+    expect(row("sys")).toMatchObject({ status: "measured", use: "check" });
+    expect(row("ph")).toMatchObject({ status: "measured", use: "check" });
+    expect(row("map")).toMatchObject({ value: 34, status: "derived", use: "target" });
+    expect(row("hb")).toMatchObject({ value: 9, status: "reference", use: "target" });
+    expect(row("cvp")).toMatchObject({ value: null, status: "emergent", use: "none" });
+    expect(rows.find((r) => r.key === "co")).toBeUndefined(); // neither measured nor accounted for
+    expect(rows.map((r) => r.key).indexOf("weight")).toBeLessThan(rows.map((r) => r.key).indexOf("hr"));
+  });
+
+  it("never lets the bot's provenance override a measured value", () => {
+    const hostile = parseProvenance(block({ fields: [{ key: "hr", value: 120, status: "reference", basis: "x" }] })).provenance;
+    expect(buildValueRows(request(), hostile).find((r) => r.key === "hr")).toMatchObject({ value: 158, status: "measured" });
+  });
+
+  const raw = {
+    converged: false,
+    iters: 10,
+    unmet: ["pco2"],
+    residuals: [
+      { key: "hr", value: 156.2, target: 158, delta: -1.8, flag: "ok" },
+      { key: "map", value: 34.4, target: 34, delta: 0.4, flag: "ok" },
+      { key: "cvp", value: 2.1, target: null, delta: null, flag: "ok" },
+      { key: "pap_m", value: 30, target: null, delta: null, flag: "ok" },
+      { key: "spo2_pre", value: 91.5, target: 91, delta: 0.5, flag: "ok" },
+      { key: "pco2", value: 57, target: 51, delta: 6, flag: "ok" },
+      { key: "ph", value: 7.24, target: null, delta: null, flag: "ok" },
+      { key: "bogus" },
+    ],
+    log: "…",
+    spec: { targets: {} },
+  };
+
+  it("parses the server's build report and drops malformed rows", () => {
+    const report = parseBuildReport(raw)!;
+    expect(report.converged).toBe(false);
+    expect(report.residuals).toHaveLength(7);
+    expect(parseBuildReport(null)).toBeNull();
+    expect(parseBuildReport({})!.residuals).toEqual([]);
+  });
+
+  it("compares the model with calibrated targets and with check-only measurements", () => {
+    const rows = buildResultRows(request(), parseBuildReport(raw)!);
+    const row = (k: string) => rows.find((r) => r.key === k)!;
+    expect(row("hr")).toMatchObject({ model: 156.2, measured: 158, delta: -1.8, calibrated: true, met: true });
+    expect(row("pco2")).toMatchObject({ calibrated: true, met: false, delta: 6 });
+    expect(row("spo2")).toMatchObject({ caption: "SpO2", measured: 91, calibrated: true });
+    // pH was measured but not targeted: compared by the app, not by the builder
+    expect(row("ph")).toMatchObject({ model: 7.24, measured: 7.28, delta: -0.04, calibrated: false, met: null });
+    // not measured at all: model value only
+    expect(row("cvp")).toMatchObject({ measured: null, delta: null, calibrated: false });
+    expect(row("pap_m").caption).toBe("Mean pulmonary artery pressure");
   });
 });
