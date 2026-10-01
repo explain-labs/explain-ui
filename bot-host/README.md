@@ -19,6 +19,17 @@ proxy talks to. It wraps the Claude Agent SDK (`query()`), and adds the
   response **`artifact`** — splicing the calibration report + a `loadDefinition` action
   card into the visible answer. The model needs **no shell/Write tools**: it only emits
   the SPEC; the wrapper does the build.
+- Alongside the `artifact` it returns **`build`**, the structured calibration report
+  parsed from the builder's stderr (`parse_build_report()`): `converged`, `iters`,
+  `unmet`, `residuals` (every reported vital with its value, target, Δ and normal-range
+  flag — targeted or not), the capped raw `log`, and the echoed `spec`. The one-line
+  verdict in the answer hides a target that is inside tolerance but out of range, and
+  any untargeted vital that drifted; `build` carries both.
+- Rejects a SPEC that would **apply the prematurity adjustments twice**
+  (`double_seed_error()`): a baseline that is itself preterm (`preterm_*`,
+  `bischoff_cohort`) combined with `targets.gestational_age` below 37. The builder
+  applies its gestational-age seed whenever that target is below 37, whatever the
+  baseline. Fetal baselines use a separate seed table and are not checked.
 
 This is the canonical copy. The deployed location on the bot host is
 `~/claude-bots/explain/glue/api.py` (a different directory, outside this checkout), so a

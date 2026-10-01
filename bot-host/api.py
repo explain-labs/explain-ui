@@ -193,15 +193,97 @@ def _safe_name(s: object) -> str:
     return out or "patient"
 
 
-def run_build(spec: dict) -> tuple[dict | None, str]:
+# The builder writes its calibration report to stderr. One line per reported vital:
+#   "  hr           147.31  (target 150, Δ -2.69)  [ok]"   (the target part is optional)
+# and a closing line:
+#   "  calibration CONVERGED after 4 iter — all targets met"
+_NUM = r"-?\d+(?:\.\d+)?"
+_RESIDUAL_RE = re.compile(
+    rf"^\s*([a-z0-9_]+)\s+({_NUM})(?:\s+\(target ({_NUM}), Δ ({_NUM})\))?\s+\[([^\]]*)\]\s*$"
+)
+_VERDICT_RE = re.compile(r"calibration (CONVERGED|INCOMPLETE) after (\d+) iter — (.*)$")
+BUILD_LOG_MAX_CHARS = 8000
+
+
+def parse_build_report(stderr: str) -> dict:
+    """Turn the builder's stderr report into structured detail for the app.
+
+    `residuals` holds every reported vital (targeted or not) with its normal-range
+    flag, so the app can show what the one-line verdict hides: a target that is
+    inside tolerance but out of range, or an untargeted vital that drifted."""
+    residuals: list[dict] = []
+    converged: bool | None = None
+    iters: int | None = None
+    unmet: list[str] = []
+    for line in (stderr or "").splitlines():
+        v = _VERDICT_RE.search(line)
+        if v:
+            converged = v.group(1) == "CONVERGED"
+            iters = int(v.group(2))
+            if not converged:
+                unmet = [k.strip() for k in v.group(3).split(",") if k.strip()]
+            continue
+        m = _RESIDUAL_RE.match(line)
+        if m:
+            key, value, target, delta, flag = m.groups()
+            residuals.append({
+                "key": key,
+                "value": float(value),
+                "target": float(target) if target is not None else None,
+                "delta": float(delta) if delta is not None else None,
+                "flag": flag.strip(),
+            })
+    return {
+        "converged": converged,
+        "iters": iters,
+        "unmet": unmet,
+        "residuals": residuals,
+        "log": (stderr or "")[-BUILD_LOG_MAX_CHARS:],
+    }
+
+
+def double_seed_error(spec: dict, baseline: str) -> str | None:
+    """The builder applies its gestational-age seed (stiff lungs, reduced diffusion,
+    venous trim — all multiplicative) whenever targets.gestational_age < 37, whatever
+    the baseline. A baseline that is itself preterm already carries those adjustments,
+    so the combination applies them twice. Fetal baselines use a separate seed table
+    and are left alone."""
+    targets = spec.get("targets")
+    ga = targets.get("gestational_age") if isinstance(targets, dict) else None
+    if not isinstance(ga, (int, float)) or isinstance(ga, bool) or ga >= 37:
+        return None
+    if spec.get("fetal") or "fetus" in baseline:
+        return None
+    path = EXPLAIN_REPO / "explain-engine" / "model_definitions" / f"{baseline}.json"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None  # unknown baseline: let the builder report it
+    definition = data.get("model_definition", data) if isinstance(data, dict) else {}
+    base_ga = definition.get("gestational_age") if isinstance(definition, dict) else None
+    if not isinstance(base_ga, (int, float)) or isinstance(base_ga, bool) or base_ga >= 37:
+        return None
+    return (
+        f"baseline {baseline!r} is already preterm ({base_ga:g} wk) and carries the "
+        f"prematurity adjustments; adding gestational_age {ga:g} would apply them a "
+        f"second time. Use baseline 'term_neonate' with gestational_age, or keep "
+        f"{baseline!r} and leave gestational_age out"
+    )
+
+
+def run_build(spec: dict) -> tuple[dict | None, str, dict | None]:
     """Run scripts/build_patient.mjs with `spec` on stdin (fixed command, no shell).
-    Returns (artifact, report): artifact is the parsed scenario JSON or None on
-    failure; report is a one-line human summary (convergence line or the error)."""
+    Returns (artifact, report, detail): artifact is the parsed scenario JSON or None
+    on failure; report is a one-line human summary (convergence line or the error);
+    detail is the structured calibration report (None on failure)."""
     if not BUILD_SCRIPT.exists():
-        return None, f"builder not found at {BUILD_SCRIPT}"
+        return None, f"builder not found at {BUILD_SCRIPT}", None
     baseline = str(spec.get("baseline", "term_neonate"))
     if not re.fullmatch(r"[A-Za-z0-9_]+", baseline):
-        return None, f"invalid baseline name: {baseline!r}"
+        return None, f"invalid baseline name: {baseline!r}", None
+    seed_error = double_seed_error(spec, baseline)
+    if seed_error:
+        return None, seed_error, None
     try:
         proc = subprocess.run(
             [NODE_BIN, str(BUILD_SCRIPT)],
@@ -213,17 +295,17 @@ def run_build(spec: dict) -> tuple[dict | None, str]:
             env={**os.environ, "PATH": BUILD_PATH},
         )
     except subprocess.TimeoutExpired:
-        return None, f"build timed out after {BUILD_TIMEOUT}s"
+        return None, f"build timed out after {BUILD_TIMEOUT}s", None
     except Exception as e:  # noqa: BLE001
-        return None, f"build failed to start: {e}"
+        return None, f"build failed to start: {e}", None
 
     if proc.returncode != 0 or not proc.stdout.strip():
         tail = "\n".join((proc.stderr or "").strip().splitlines()[-4:])
-        return None, f"build failed (exit {proc.returncode}): {tail or 'no output'}"
+        return None, f"build failed (exit {proc.returncode}): {tail or 'no output'}", None
     try:
         artifact = json.loads(proc.stdout)
     except (json.JSONDecodeError, ValueError) as e:
-        return None, f"build produced invalid JSON: {e}"
+        return None, f"build produced invalid JSON: {e}", None
 
     summary = ""
     for line in (proc.stderr or "").splitlines():
@@ -234,33 +316,36 @@ def run_build(spec: dict) -> tuple[dict | None, str]:
         (PATIENTS_DIR / f"{name}.json").write_text(proc.stdout)
     except OSError:
         pass
-    return artifact, summary or "patient built"
+    detail = parse_build_report(proc.stderr or "")
+    detail["spec"] = spec  # echoed so the app can check what was actually built
+    return artifact, summary or "patient built", detail
 
 
-def maybe_build(answer: str) -> tuple[str, dict | None]:
+def maybe_build(answer: str) -> tuple[str, dict | None, dict | None]:
     """If the reply contains an ```explain-build``` SPEC block, run the builder,
     strip the raw SPEC from the visible answer, splice in a loadDefinition command
-    (so the app shows an Apply card), and return the built patient as the artifact."""
+    (so the app shows an Apply card), and return the built patient as the artifact
+    together with the structured calibration report."""
     m = _BUILD_RE.search(answer or "")
     if not m:
-        return answer, None
+        return answer, None, None
     block = m.group(0)
     try:
         spec = json.loads(m.group(1))
     except (json.JSONDecodeError, ValueError) as e:
-        return answer.replace(block, f"\n⚠️ build spec was not valid JSON: {e}\n"), None
+        return answer.replace(block, f"\n⚠️ build spec was not valid JSON: {e}\n"), None, None
     if not isinstance(spec, dict):
-        return answer.replace(block, "\n⚠️ build spec must be a JSON object\n"), None
+        return answer.replace(block, "\n⚠️ build spec must be a JSON object\n"), None, None
 
     name = _safe_name(spec.get("name") or "patient")
-    artifact, report = run_build(spec)
+    artifact, report, detail = run_build(spec)
     answer = answer.replace(block, "").strip()
     if artifact is None:
-        return answer + f"\n\n⚠️ patient build failed: {report}", None
+        return answer + f"\n\n⚠️ patient build failed: {report}", None, None
     summary = spec.get("summary") or report
     cmd = json.dumps({"op": "loadDefinition", "name": name, "summary": summary})
     answer = f"{answer}\n\n{report}\n\n```explain-command\n{cmd}\n```"
-    return answer, artifact
+    return answer, artifact, detail
 
 
 # ---------- claude call ----------
@@ -364,6 +449,8 @@ class AskResponse(BaseModel):
     conversation_id: str
     files: list[FileOutput] = Field(default_factory=list)
     artifact: dict | None = None  # a bot-built patient definition (op:"loadDefinition")
+    # calibration report for `artifact`: converged, iters, unmet, residuals, log, spec
+    build: dict | None = None
 
 
 # ---------- app ----------
@@ -435,12 +522,13 @@ async def ask(req: AskRequest, _key: str = Depends(require_api_key)) -> AskRespo
         log.info("ask conv=%s returning %d file(s)", conversation_id, len(files))
 
     # if the bot asked to build a patient, run the builder here (off the event loop)
-    answer, artifact = await asyncio.to_thread(maybe_build, answer)
+    answer, artifact, build = await asyncio.to_thread(maybe_build, answer)
     if artifact:
         log.info("ask conv=%s built patient -> artifact", conversation_id)
 
     return AskResponse(
-        answer=answer, conversation_id=conversation_id, files=files, artifact=artifact
+        answer=answer, conversation_id=conversation_id, files=files, artifact=artifact,
+        build=build,
     )
 
 
