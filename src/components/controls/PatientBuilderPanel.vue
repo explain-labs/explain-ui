@@ -9,7 +9,7 @@ import Checkbox from "primevue/checkbox";
 import Tag from "primevue/tag";
 import { usePatientBuilderStore } from "@/stores/patientBuilder";
 import { CATEGORY_LABELS, PATIENT_FIELDS, fromSpecValue, numberField, type FieldCategory, type PatientField } from "@/services/patientSchema";
-import type { ResultRow, ValueRow } from "@/services/patientBuilder";
+import { targetCaption, type ResultRow, type ValueRow } from "@/services/patientBuilder";
 
 // Patient builder: enter what was measured on a real neonate, let the AI bot
 // fill the structural unknowns and the server calibrate a patient to it, then
@@ -131,6 +131,36 @@ const verdict = computed(() => {
       ? `Not every target was reached: ${missed.join(", ")}.`
       : "The calibration did not converge.",
   };
+});
+// The builder's lever names are model internals; say what each lever is in
+// clinical terms, keyed by the target it calibrates.
+const LEVER_WORDS: Record<string, string> = {
+  spo2: "lung oxygen uptake",
+  po2: "lung oxygen uptake",
+  pco2: "breathing drive",
+  map: "systemic vascular resistance",
+  pap_m: "pulmonary vascular resistance",
+  cvp: "venous filling",
+  co: "heart contractility",
+  hr: "heart-rate setting",
+  be: "unmeasured acid load",
+  ph: "unmeasured acid load",
+};
+// Targets whose calibration lever ended on its bound. A missed one is out of that
+// lever's reach; a reached one needed the extreme of it, so treat it with caution.
+const leverLimits = computed(() => {
+  const r = store.result;
+  if (!r?.report) return [];
+  const missed = new Set(r.report.unmet);
+  return r.report.leverLimits.map((l) => {
+    const lever = LEVER_WORDS[l.key] ?? l.lever;
+    return {
+      key: l.key,
+      text: missed.has(l.key)
+        ? `${targetCaption(l.key)}: not reached — the model's ${lever} is at its limit, so this patient is beyond what the model can represent that way.`
+        : `${targetCaption(l.key)}: reached only with the model's ${lever} at its limit. Treat this part of the fit with caution.`,
+    };
+  });
 });
 const outOfRange = computed(() => (store.result?.resultRows ?? []).filter((r) => r.flag && r.flag !== "ok"));
 const showLog = ref(false);
@@ -272,6 +302,20 @@ watch(saveName, () => (askOverwrite.value = false));
           The bot host did not send a calibration report, so this patient cannot be checked against the form
           here. Load it and compare the monitor values yourself.
         </p>
+        <ul v-if="leverLimits.length" class="flex flex-col gap-1 text-xs text-amber-300">
+          <li v-for="l in leverLimits" :key="l.key" class="flex gap-2">
+            <i class="pi pi-exclamation-triangle mt-0.5 shrink-0"></i><span>{{ l.text }}</span>
+          </li>
+        </ul>
+        <ul
+          v-if="store.result.report?.ignoredTargets.length || store.result.report?.notes.length"
+          class="flex flex-col gap-1 text-xs opacity-70"
+        >
+          <li v-if="store.result.report.ignoredTargets.length">
+            Not used by the builder: {{ store.result.report.ignoredTargets.join(", ") }}
+          </li>
+          <li v-for="n in store.result.report.notes" :key="n">{{ n }}</li>
+        </ul>
         <p v-if="store.result.prose" class="text-xs opacity-70 whitespace-pre-line">{{ store.result.prose }}</p>
 
         <div v-if="store.result.specProblems.length" class="rounded border border-red-500/60 p-2 text-sm text-red-300">

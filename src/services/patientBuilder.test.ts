@@ -233,6 +233,50 @@ describe("result tables", () => {
     expect(parseBuildReport({})!.residuals).toEqual([]);
   });
 
+  it("reads lever limits, ignored targets and notes from an engine build report", () => {
+    const report = parseBuildReport({
+      ...raw,
+      lever_limits: [{ key: "spo2", lever: "alveolar O2 diffusion x", value: 0.1, bounds: [0.1, 8] }, { lever: "no key" }],
+      ignored_targets: ["bogus"],
+      notes: ["pco2 was targeted but spontaneous breathing is off"],
+    })!;
+    expect(report.leverLimits).toEqual([{ key: "spo2", lever: "alveolar O2 diffusion x", value: 0.1 }]);
+    expect(report.ignoredTargets).toEqual(["bogus"]);
+    expect(report.notes).toHaveLength(1);
+    // an older bot host sends none of these
+    expect(parseBuildReport(raw)!.leverLimits).toEqual([]);
+  });
+
+  it("maps cardiac output and the extra vitals to their form fields", () => {
+    const report = parseBuildReport({
+      ...raw,
+      residuals: [
+        { key: "lvo", value: 0.286, target: null, delta: null, flag: "" },
+        { key: "sys", value: 37.1, target: null, delta: null, flag: "ok" },
+        { key: "spo2_post", value: 90.2, target: null, delta: null, flag: "" },
+      ],
+    })!;
+    const rows = buildResultRows(request(), report);
+    expect(rows.map((r) => r.key)).toEqual(["co", "sys", "spo2_post"]);
+    expect(rows[0]).toMatchObject({ caption: "Cardiac output (echo)", unit: "L/min", measured: null });
+    expect(rows[1]).toMatchObject({ measured: 48, calibrated: false, delta: -10.9 });
+  });
+
+  it("compares a post-ductal SpO2 with the model's post-ductal value", () => {
+    const f: PatientForm = { ...FORM, choices: { ...FORM.choices, spo2_site: "postductal" } };
+    const req = buildRequest(f, "pb_post")!;
+    const report = parseBuildReport({
+      ...raw,
+      residuals: [
+        { key: "spo2_pre", value: 93, target: null, delta: null, flag: "ok" },
+        { key: "spo2_post", value: 90.5, target: null, delta: null, flag: "" },
+      ],
+    })!;
+    const [pre, post] = buildResultRows(req, report);
+    expect(pre).toMatchObject({ key: "spo2_pre", caption: "SpO2 pre-ductal", measured: null });
+    expect(post).toMatchObject({ key: "spo2", model: 90.5, measured: 91, calibrated: false, delta: -0.5 });
+  });
+
   it("compares the model with calibrated targets and with check-only measurements", () => {
     const rows = buildResultRows(request(), parseBuildReport(raw)!);
     const row = (k: string) => rows.find((r) => r.key === k)!;
