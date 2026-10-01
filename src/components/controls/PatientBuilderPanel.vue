@@ -139,6 +139,8 @@ const LEVER_WORDS: Record<string, string> = {
   po2: "lung oxygen uptake",
   pco2: "breathing drive",
   map: "systemic vascular resistance",
+  pp: "large-artery stiffness",
+  rr: "split between breath size and rate",
   pap_m: "pulmonary vascular resistance",
   cvp: "venous filling",
   co: "heart contractility",
