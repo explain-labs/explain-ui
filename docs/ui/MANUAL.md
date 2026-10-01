@@ -63,4 +63,5 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 4. Monitoring dashboards *(done)*: reading cards, toolbar, dashboards, groups, the group editor.
 5. Model editor *(done)*: picking a model, sections, field types, factors, functions, refresh, keeping/undoing.
 6. Common tasks *(done)*: categories, −/+ and step size, reset, watching the effect, the bot.
-7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.
+7. Ventilator *(done)*: switch, modes, settings, ET tube, synchronisation, measured values, graphs.
+8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.

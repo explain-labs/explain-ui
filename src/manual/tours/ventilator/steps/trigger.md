@@ -1,0 +1,2 @@
+- **Synchronized** lets the patient's own breathing effort trigger a breath. Once the patient has breathed in a set percentage of the target tidal volume (the **Trigger** setting), the ventilator delivers the breath. In **PS** mode, switch this on: otherwise the patient gets only backup breaths.
+- **Manual breath** delivers a single extra breath straight away.

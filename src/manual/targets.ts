@@ -59,6 +59,16 @@ export const TOUR_TARGETS = [
   "commontasks.task",
   "commontasks.step",
   "commontasks.reset",
+  // ventilator panel + scope
+  "vent.panel",
+  "vent.switch",
+  "vent.on", // only present while the ventilator is enabled
+  "vent.mode",
+  "vent.settings",
+  "vent.tube",
+  "vent.trigger",
+  "vent.measured",
+  "vent.scope",
   // realtime chart + PV loop
   "chart.presets",
   "chart.series",

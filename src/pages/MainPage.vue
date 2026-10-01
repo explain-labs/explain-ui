@@ -658,7 +658,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               />
             </TabPanel>
             <TabPanel value="ventilator">
-              <VentilatorScope height="35vh" min-height="260px" />
+              <VentilatorScope data-tour="vent.scope" height="35vh" min-height="260px" />
             </TabPanel>
           </TabPanels>
         </Tabs>
