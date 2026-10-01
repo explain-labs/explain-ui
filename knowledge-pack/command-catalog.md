@@ -863,8 +863,8 @@ Actions:
 - `setPicto` — fields: name, picto. swap a compartment's sprite image
 - `delete` — fields: name. remove a component (and its attached connectors) or a connector
 
-- **picto** must be one of: container.png, vessel.png, lung.png, pump.png, blood.png, exchanger.png, gas_container.png, general.png, placenta.png, trachea.png
-- **path.type** must be one of: straight, arc, arc_r, arc_flip
+- **picto** must be one of: container.png, vessel.png, lung.png, pump.png, blood.png, exchanger.png, oxygenator.png, gas_container.png, general.png, placenta.png, trachea.png
+- **path.type** must be one of: straight, arc, arc_r, arc_flip, outer
 - **setLayout patch** keys (cosmetic only): general.alpha, general.z_index, general.tinting, sprite.color, sprite.scale.x, sprite.scale.y, sprite.rotation, sprite.pos, label.size, label.color, label.pos_x, label.pos_y, path.type, path.width
 - **pos**: `{"type":"arc","dgs":<0-360>}` to sit on the layout ring, or
   `{"type":"rel","x":<-1..1>,"y":<-1..1>}` relative to centre.

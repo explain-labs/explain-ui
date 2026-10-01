@@ -12,6 +12,7 @@ export const PICTOS = [
   "pump.png",
   "blood.png",
   "exchanger.png",
+  "oxygenator.png",
   "gas_container.png",
   "general.png",
   "placenta.png",
@@ -20,8 +21,10 @@ export const PICTOS = [
 
 // Connector path shapes. "arc"/"arc_r" run clockwise/anticlockwise along the ring
 // between two ring nodes; with an off-ring endpoint both draw the same chord-arc,
-// and "arc_flip" draws that chord-arc bending the other way.
-export const PATH_TYPES = ["straight", "arc", "arc_r", "arc_flip"] as const;
+// and "arc_flip" draws that chord-arc bending the other way. "outer" routes a
+// device line (e.g. an ECLS cannula) around the outside of the ring on its own
+// concentric track (`path.track`, in ring radii).
+export const PATH_TYPES = ["straight", "arc", "arc_r", "arc_flip", "outer"] as const;
 
 // Cosmetic layout-patch whitelist for the bot `setLayout` action. A patch may
 // only touch these dotted paths into `component.layout` — never structural
@@ -43,6 +46,44 @@ export const LAYOUT_PATCH_WHITELIST = [
   "path.type",
   "path.width",
 ] as const;
+
+// ---- Device groups -----------------------------------------------------------
+// A diagram component may carry `group: "<name>"`. Grouped components are built
+// hidden and shown at runtime via DiagramRenderer.setGroupVisible (the host
+// decides when, from engine state). While a group is shown the ring shrinks up
+// to open a band below it (settings.deviceBand, a fraction of the ring radius).
+export const DEVICE_BAND_DEFAULT = 0.5;
+
+// ECLS circuit: visible while ECLS is on (Ecls.ecls_running), clamped or not —
+// a clamped circuit is drawn static (its flow is forced to 0, so no dots).
+// The drainage/return connectors re-route to the diagram component holding the
+// live cannulation site (e.g. drainage_site "RASVC" → the "RA" compartment).
+export const ECLS_DIAGRAM = {
+  group: "ecls",
+  drainageConnector: "ECLS_DRAINAGE",
+  returnConnector: "ECLS_RETURN",
+  pumpNode: "ECLS_PUMP",
+  watch: [
+    "Ecls.ecls_running",
+    "Ecls.drainage_site",
+    "Ecls.return_site",
+    "Ecls.pump_rpm",
+    "Ecls.pump_mode",
+  ],
+} as const;
+
+// Pump sprite spin (revolutions per second on screen) from the pump speed. A
+// roller pump (mode 1, tens to ~200 RPM) spins at its true rate. A centrifugal
+// pump (mode 0, ~1500-4000 RPM = 25-65 rev/s) would only strobe, so its speed
+// is compressed: rises monotonically and saturates toward PUMP_SPIN_MAX
+// (≈0.8 rev/s at 1500 RPM, ≈1.2 at 3500), so speed changes stay visible.
+const PUMP_SPIN_MAX = 1.5;
+const PUMP_SPIN_RPM_REF = 2000;
+export function pumpSpinRate(rpm: number, mode: number): number {
+  if (!(rpm > 0)) return 0;
+  if (mode === 1) return Math.min(rpm / 60, PUMP_SPIN_MAX * 2);
+  return PUMP_SPIN_MAX * (1 - Math.exp(-rpm / PUMP_SPIN_RPM_REF));
+}
 
 // ---- O2-content colour ramp (compartment tint) ------------------------------
 // Default to2 window; a diagram may override it with settings.to2_lo/to2_hi.
