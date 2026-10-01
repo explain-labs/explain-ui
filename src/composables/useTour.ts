@@ -2,7 +2,7 @@ import { computed, nextTick, ref, shallowRef, watch, type WatchStopHandle } from
 import { useExplain } from "@/composables/useExplain";
 import { useLayoutStore } from "@/stores/layout";
 import { getTour, loadStepMarkdown } from "@/manual/index";
-import { findTarget } from "@/manual/targets";
+import { findTarget, findVisibleTarget } from "@/manual/targets";
 import type { Tour, TourOp, TourStep, UiOp } from "@/manual/types";
 import type { DiagramHighlight } from "@/components/host/Diagram.vue";
 import { DIAGRAM_LABELS } from "@/lessons/diagramLabels";
@@ -120,15 +120,16 @@ export function useTour() {
     } else if ("running" in cond) {
       stopAdvance = watch(explain.isRunning, (v) => v === cond.running && next());
     } else if ("appear" in cond) {
-      if (findTarget(cond.appear)) return;
+      // "appear" means visible: v-show'n rows exist in the DOM while hidden
+      if (findVisibleTarget(cond.appear)) return;
       waitingFor.value = cond.appear;
       const obs = new MutationObserver(() => {
-        if (!findTarget(cond.appear)) return;
+        if (!findVisibleTarget(cond.appear)) return;
         obs.disconnect();
         waitingFor.value = null;
         next();
       });
-      obs.observe(document.body, { childList: true, subtree: true });
+      obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class"] });
       stopAdvance = () => {
         obs.disconnect();
         waitingFor.value = null;

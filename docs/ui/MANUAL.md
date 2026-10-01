@@ -53,7 +53,7 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 - Tours that need a model element (most of them) are disabled in the menu until a model is loaded. Set `needsModel: false` for a tour that doesn't.
 - Panels behind role checks (e.g. *Save to cloud* for model developers) can be missing for some users. Write the step text so it still makes sense when the target falls back to a centred card.
 - Going back does not undo `onEnter` ops.
-- A target with no box (`display: none`, a collapsed section) is treated as missing: the card is centred.
+- A target with no box (`display: none`, a collapsed section) is treated as missing: the card is centred. When several elements share a key (one per list row), `findTarget` picks the first **visible** one. The `appear` gate also waits for the element to be visible, not just mounted (so v-show'n rows count only once shown).
 
 ## Roadmap
 
@@ -62,4 +62,5 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 3. Charts and PV loops *(done)*: series, view options, presets, CSV, reading a PV loop.
 4. Monitoring dashboards *(done)*: reading cards, toolbar, dashboards, groups, the group editor.
 5. Model editor *(done)*: picking a model, sections, field types, factors, functions, refresh, keeping/undoing.
-6. Common tasks · 7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.
+6. Common tasks *(done)*: categories, −/+ and step size, reset, watching the effect, the bot.
+7. Ventilator · 8. ECLS · 9. Resuscitation and pregnancy · 10. Scaler and event scheduler · 11. AI bot · 12. Saving and loading states.

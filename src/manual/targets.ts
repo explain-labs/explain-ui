@@ -53,6 +53,12 @@ export const TOUR_TARGETS = [
   "modeleditor.refresh",
   "modeleditor.sections", // only once a model with an interface is selected
   "modeleditor.factors", // the Factors accordion section
+  // common tasks (row keys repeat; findTarget picks the first visible one)
+  "commontasks.panel",
+  "commontasks.category",
+  "commontasks.task",
+  "commontasks.step",
+  "commontasks.reset",
   // realtime chart + PV loop
   "chart.presets",
   "chart.series",
@@ -76,6 +82,21 @@ export const TOUR_TARGETS = [
 
 export type TourTarget = (typeof TOUR_TARGETS)[number];
 
+// Several elements may share a key (one per list row); prefer the first one
+// that is actually visible (v-show / collapsed sections leave hidden copies).
 export function findTarget(key: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-tour="${CSS.escape(key)}"]`);
+  const all = document.querySelectorAll<HTMLElement>(`[data-tour="${CSS.escape(key)}"]`);
+  for (const el of all) if (isVisible(el)) return el;
+  return all[0] ?? null;
+}
+
+export function isVisible(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 || r.height > 0;
+}
+
+// Like findTarget, but only a visible element counts.
+export function findVisibleTarget(key: string): HTMLElement | null {
+  const el = findTarget(key);
+  return el && isVisible(el) ? el : null;
 }
