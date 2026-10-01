@@ -39,9 +39,8 @@ tables. A number field has:
   - `iterated`: a calibration target the builder tunes a lever to reach;
   - `check`: not targeted, reported next to the model's value;
   - `context`: never reaches the builder (postnatal age, birth weight).
-- `since` — `"A"` if the current builder can use it, `"B"` if it cannot yet (respiratory
-  rate, systolic/diastolic as targets, lactate, electrolytes, glucose, albumin,
-  post-ductal SpO2). A `"B"` value is still collected and shown as "not used yet". When the
+- `since` — `"A"` if the current builder can use it, `"B"` if it cannot yet (lactate,
+  electrolytes, glucose, albumin). A `"B"` value is still collected and shown as "not used yet". When the
   engine gains a target, flip its `since` to `"A"` and, if needed, its `role`.
 
 Choice fields (sample site, respiratory support, probe site, …) are always `context`.
@@ -60,6 +59,8 @@ the bot:
 | Rule | Reason |
 |---|---|
 | MAP = diastolic + (systolic − diastolic)/3 when MAP is empty | deterministic; shown as "Derived" |
+| Systolic and diastolic are targets only as a pair; one alone is a check | the builder calibrates their mean (resistance) and their difference, the pulse pressure (large-artery stiffness) |
+| A respiratory rate is a target unless the patient is ventilated (NIV, invasive, HFO) | the builder sets the spontaneous rate; a ventilator's rate is not modelled |
 | An arterial pO2 is the oxygenation target and SpO2 becomes a check | the builder silently prefers `po2` over `spo2` when given both |
 | A capillary or venous pO2 is never a target | it does not reflect arterial oxygenation |
 | A venous pCO2 and pH are not targets; a venous base excess is | variable arteriovenous difference |
@@ -122,7 +123,11 @@ give up at 300 s.
 - **Built patient at steady state** — model value, measured value and difference for every
   vital the builder reports; "target" rows were calibrated to, "compared only" rows were
   measured but not targeted (the app computes that difference itself). Includes
-  systolic/diastolic, respiratory rate, post-ductal SpO2, temperature and cardiac output.
+  systolic/diastolic, the pulse pressure, respiratory rate, post-ductal SpO2, temperature
+  and cardiac output. Systolic and diastolic count as missed when the mean or the pulse
+  pressure was missed. In small preterms the pulse pressure often stops short: the
+  stiffness lever is capped for numerical stability, and weight scaling leaves their
+  arteries as compliant as a term baby's.
   A post-ductal SpO2 is compared with the model's post-ductal value.
 - **Lever limits** — above the table, a warning for each target whose lever ended on its
   bound, in clinical words ("lung oxygen uptake", "breathing drive"): "not reached" means

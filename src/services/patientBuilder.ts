@@ -413,7 +413,12 @@ function reportToForm(key: string, request: PatientBuildRequest): string {
 const REPORT_CAPTIONS: Record<string, { caption: string; unit: string }> = {
   pap_m: { caption: "Mean pulmonary artery pressure", unit: "mmHg" },
   spo2_pre: { caption: "SpO2 pre-ductal", unit: "%" },
+  pp: { caption: "Pulse pressure", unit: "mmHg" },
 };
+
+// The builder calibrates systolic/diastolic as mean (map) + pulse pressure (pp), so
+// whether a systolic or diastolic target was met follows from those two.
+const MET_VIA: Record<string, string[]> = { sys: ["map", "pp"], dia: ["map", "pp"] };
 
 // caption for a SPEC target key, for messages about the calibration
 export function targetCaption(key: string): string {
@@ -429,7 +434,12 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
     const key = reportToForm(r.key, request);
     const field = numberField(key);
     const label = field ? { caption: field.caption, unit: field.specUnit } : (REPORT_CAPTIONS[key] ?? { caption: key, unit: "" });
-    const target = field?.specTarget != null ? resolved.targets[field.specTarget] : undefined;
+    // pulse pressure is not a form field: it is calibrated when both pressures are
+    const bothPressures = resolved.targets.sys != null && resolved.targets.dia != null;
+    const target =
+      key === "pp"
+        ? bothPressures ? resolved.targets.sys - resolved.targets.dia : undefined
+        : field?.specTarget != null ? resolved.targets[field.specTarget] : undefined;
     const calibrated = target != null;
     const measured = calibrated ? target : (validated.values[key] ?? null);
     const delta = measured != null ? Number((r.value - measured).toPrecision(4)) : null;
@@ -441,7 +451,7 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
       measured,
       delta,
       calibrated,
-      met: calibrated ? !unmet.has(key) : null,
+      met: calibrated ? !(MET_VIA[key] ?? [key]).some((k) => unmet.has(k)) : null,
       flag: r.flag,
     };
   });

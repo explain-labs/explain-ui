@@ -107,9 +107,28 @@ describe("resolveTargets", () => {
 
   it("derives MAP from systolic and diastolic when it was not measured", () => {
     const r = resolve({ ...W, sys: [48, "mmHg"], dia: [27, "mmHg"] });
-    expect(r.targets.map).toBe(34);
+    expect(r.targets).toMatchObject({ sys: 48, dia: 27, map: 34 });
     expect(r.derived).toEqual([{ key: "map", value: 34, basis: "diastolic + (systolic − diastolic) / 3" }]);
     expect(r.unknown).not.toContain("map");
+  });
+
+  it("calibrates systolic and diastolic only as a pair", () => {
+    for (const [k, other] of [["sys", "dia"], ["dia", "sys"]] as const) {
+      const r = resolve({ ...W, [k]: [k === "sys" ? 48 : 27, "mmHg"] });
+      expect(r.targets[k]).toBeUndefined();
+      expect(r.targets.map).toBeUndefined();
+      expect(r.checks[k]).toMatch(other === "dia" ? /diastolic/ : /systolic/);
+    }
+  });
+
+  it("targets the respiratory rate of a spontaneously breathing patient only", () => {
+    expect(resolve({ ...W, rr: [62, "/min"] }, { resp_support: "cpap" }).targets.rr).toBe(62);
+    expect(resolve({ ...W, rr: [62, "/min"] }).targets.rr).toBe(62);
+    for (const mode of ["invasive", "hfo", "niv"]) {
+      const r = resolve({ ...W, rr: [40, "/min"] }, { resp_support: mode });
+      expect(r.targets.rr).toBeUndefined();
+      expect(r.checks.rr).toMatch(/ventilator/);
+    }
   });
 
   it("keeps a measured MAP over the derived one", () => {
@@ -168,8 +187,8 @@ describe("resolveTargets", () => {
   });
 
   it("reports values the builder cannot use yet instead of sending them", () => {
-    const r = resolve({ ...W, rr: [62, "/min"], lactate: [3.1, "mmol/L"], na: [138, "mmol/L"] });
-    expect(r.unsupported.sort()).toEqual(["lactate", "na", "rr"]);
+    const r = resolve({ ...W, lactate: [3.1, "mmol/L"], na: [138, "mmol/L"] });
+    expect(r.unsupported.sort()).toEqual(["lactate", "na"]);
     expect(r.targets).toEqual({ weight: 1.08, gestational_age: 28 });
   });
 
@@ -201,6 +220,8 @@ describe("resolveTargets", () => {
     expect(r.unknown).not.toContain("hr");
     expect(r.unknown).not.toContain("weight");
     // context, check-only and not-yet-supported fields are never "unknowns"
-    for (const k of ["postnatal_age", "hco3", "fio2", "rr", "sys"]) expect(r.unknown).not.toContain(k);
+    for (const k of ["postnatal_age", "hco3", "fio2", "lactate"]) expect(r.unknown).not.toContain(k);
+    // unmeasured vitals the builder can calibrate are unknowns (the bot marks them "emergent")
+    for (const k of ["sys", "dia", "rr"]) expect(r.unknown).toContain(k);
   });
 });

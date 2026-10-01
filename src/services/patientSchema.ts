@@ -97,8 +97,8 @@ export const PATIENT_FIELDS: PatientField[] = [
 
   // ---- circulation ----
   { kind: "number", key: "hr", caption: "Heart rate", category: "haemodynamics", units: [same("/min", 1, 0)], specUnit: "/min", range: [40, 260], role: "iterated", specTarget: "hr", since: "A" },
-  { kind: "number", key: "sys", caption: "Systolic pressure", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [15, 150], role: "check", specTarget: "sys", since: "B" },
-  { kind: "number", key: "dia", caption: "Diastolic pressure", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [5, 110], role: "check", specTarget: "dia", since: "B" },
+  { kind: "number", key: "sys", caption: "Systolic pressure", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [15, 150], role: "iterated", specTarget: "sys", since: "A", hint: "Calibrated together with diastolic, as mean and pulse pressure" },
+  { kind: "number", key: "dia", caption: "Diastolic pressure", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [5, 110], role: "iterated", specTarget: "dia", since: "A" },
   { kind: "number", key: "map", caption: "Mean arterial pressure", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [10, 120], role: "iterated", specTarget: "map", since: "A", hint: "Left empty, it is derived from systolic and diastolic" },
   { kind: "choice", key: "bp_method", caption: "Pressure measured by", category: "haemodynamics", role: "context", options: [{ value: "arterial_line", label: "Arterial line" }, { value: "cuff", label: "Cuff" }] },
   { kind: "number", key: "cvp", caption: "Central venous pressure", category: "haemodynamics", units: [same("mmHg", 0.5, 1)], specUnit: "mmHg", range: [-3, 25], role: "iterated", specTarget: "cvp", since: "A" },
@@ -107,7 +107,7 @@ export const PATIENT_FIELDS: PatientField[] = [
   // ---- breathing and oxygen ----
   { kind: "choice", key: "resp_support", caption: "Respiratory support", category: "respiratory", role: "context", options: [{ value: "none", label: "None" }, { value: "low_flow", label: "Low-flow oxygen" }, { value: "high_flow", label: "High-flow cannula" }, { value: "cpap", label: "CPAP" }, { value: "niv", label: "Non-invasive ventilation" }, { value: "invasive", label: "Invasive ventilation" }, { value: "hfo", label: "High-frequency oscillation" }] },
   { kind: "number", key: "fio2", caption: "FiO2", category: "respiratory", units: [scaled("%", 100, 1, 0)], specUnit: "fraction", range: [0.21, 1], role: "structural", specTarget: "fio2", since: "A", hint: "Left empty, room air (21%) is assumed" },
-  { kind: "number", key: "rr", caption: "Respiratory rate", category: "respiratory", units: [same("/min", 1, 0)], specUnit: "/min", range: [0, 150], role: "check", specTarget: "rr", since: "B" },
+  { kind: "number", key: "rr", caption: "Respiratory rate", category: "respiratory", units: [same("/min", 1, 0)], specUnit: "/min", range: [0, 150], role: "iterated", specTarget: "rr", since: "A", hint: "Spontaneous breathing rate" },
   { kind: "number", key: "spo2", caption: "SpO2", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "iterated", specTarget: "spo2", since: "A" },
   { kind: "choice", key: "spo2_site", caption: "SpO2 probe", category: "respiratory", role: "context", options: [{ value: "preductal", label: "Right hand (pre-ductal)" }, { value: "postductal", label: "Foot or left hand (post-ductal)" }] },
   { kind: "number", key: "spo2_post", caption: "SpO2 post-ductal (second probe)", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "check", specTarget: null, since: "B" },
@@ -257,6 +257,10 @@ const VENTILATED = new Set(["niv", "invasive", "hfo"]);
 // Decides, from the validated form alone, what the builder calibrates to.
 // These rules are deliberately NOT left to the bot:
 //   - MAP is derived from systolic/diastolic when it was not measured.
+//   - Systolic and diastolic are calibrated as a pair (mean + pulse pressure);
+//     one without the other is only compared.
+//   - A respiratory rate is a target only for a spontaneously breathing patient;
+//     a ventilated patient's rate is set by the ventilator, which is not modelled.
 //   - The builder silently prefers po2 over spo2 and be over ph, so exactly one
 //     of each pair is sent as a target; the other is reported as a check.
 //   - A pO2 is only a target when the sample is arterial. Capillary and venous
@@ -297,6 +301,14 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
     if (field.specTarget) targets[field.specTarget] = value;
   }
 
+  // systolic/diastolic only as a pair: the builder calibrates their mean and
+  // their difference, and ignores one on its own
+  if (has("sys") !== has("dia")) {
+    const k = has("sys") ? "sys" : "dia";
+    delete targets[k];
+    checks[k] = `calibrated only together with ${k === "sys" ? "diastolic" : "systolic"} pressure`;
+  }
+
   // MAP from systolic/diastolic
   if (!has("map") && has("sys") && has("dia")) {
     const map = tidy(values.dia + (values.sys - values.dia) / 3);
@@ -330,6 +342,11 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
   if (targets.be != null && targets.ph != null) {
     delete targets.ph;
     checks.ph = "base excess and pCO2 are the targets; pH follows from them";
+  }
+
+  if (targets.rr != null && VENTILATED.has(choices.resp_support ?? "")) {
+    delete targets.rr;
+    checks.rr = "ventilated: the rate is set by the ventilator, which the built patient does not have";
   }
 
   if (targets.pco2 != null && VENTILATED.has(choices.resp_support ?? "")) {

@@ -35,8 +35,8 @@ describe("buildRequest", () => {
 
   it("sends targets in SPEC units, measured non-targets as checks, and choices as context", () => {
     const { payload } = request();
-    expect(payload.targets).toEqual({ weight: 1.08, gestational_age: 28, hr: 158, map: 34, spo2: 91, pco2: 51, be: -4.5 });
-    expect(payload.checks).toEqual({ sys: 48, dia: 27, ph: 7.28 });
+    expect(payload.targets).toEqual({ weight: 1.08, gestational_age: 28, hr: 158, sys: 48, dia: 27, map: 34, spo2: 91, pco2: 51, be: -4.5 });
+    expect(payload.checks).toEqual({ ph: 7.28 });
     expect(payload.context).toEqual({ gas_site: "capillary", resp_support: "cpap", postnatal_age: 3 });
     expect(payload.unknown).toEqual(expect.arrayContaining(["height", "hb", "temp", "cvp", "co"]));
     expect(payload.unknown).not.toContain("fio2"); // empty FiO2 = room air, not a lookup
@@ -193,7 +193,7 @@ describe("result tables", () => {
     const row = (k: string) => rows.find((r) => r.key === k)!;
     expect(row("weight")).toMatchObject({ value: 1.08, status: "measured", use: "target" });
     expect(row("postnatal_age")).toMatchObject({ value: 3, status: "measured", use: "context" });
-    expect(row("sys")).toMatchObject({ status: "measured", use: "check" });
+    expect(row("sys")).toMatchObject({ status: "measured", use: "target" });
     expect(row("ph")).toMatchObject({ status: "measured", use: "check" });
     expect(row("map")).toMatchObject({ value: 34, status: "derived", use: "target" });
     expect(row("hb")).toMatchObject({ value: 9, status: "reference", use: "target" });
@@ -252,14 +252,32 @@ describe("result tables", () => {
       ...raw,
       residuals: [
         { key: "lvo", value: 0.286, target: null, delta: null, flag: "" },
-        { key: "sys", value: 37.1, target: null, delta: null, flag: "ok" },
+        { key: "sys", value: 42.8, target: 48, delta: -5.2, flag: "ok" },
+        { key: "dia", value: 23.9, target: 27, delta: -3.1, flag: "ok" },
+        { key: "pp", value: 18.9, target: 21, delta: -2.1, flag: "" },
         { key: "spo2_post", value: 90.2, target: null, delta: null, flag: "" },
       ],
     })!;
     const rows = buildResultRows(request(), report);
-    expect(rows.map((r) => r.key)).toEqual(["co", "sys", "spo2_post"]);
+    expect(rows.map((r) => r.key)).toEqual(["co", "sys", "dia", "pp", "spo2_post"]);
     expect(rows[0]).toMatchObject({ caption: "Cardiac output (echo)", unit: "L/min", measured: null });
-    expect(rows[1]).toMatchObject({ measured: 48, calibrated: false, delta: -10.9 });
+    expect(rows[1]).toMatchObject({ measured: 48, calibrated: true, delta: -5.2, met: true });
+    expect(rows[3]).toMatchObject({ caption: "Pulse pressure", unit: "mmHg", measured: 21, calibrated: true, met: true });
+  });
+
+  it("marks systolic and diastolic as missed when the pulse pressure was missed", () => {
+    const report = parseBuildReport({
+      ...raw,
+      unmet: ["pp"],
+      residuals: [
+        { key: "sys", value: 42.8, target: 48, delta: -5.2, flag: "ok" },
+        { key: "dia", value: 23.9, target: 27, delta: -3.1, flag: "ok" },
+        { key: "pp", value: 18.9, target: 21, delta: -2.1, flag: "" },
+        { key: "map", value: 32.9, target: 34, delta: -1.1, flag: "ok" },
+      ],
+    })!;
+    const met = Object.fromEntries(buildResultRows(request(), report).map((r) => [r.key, r.met]));
+    expect(met).toEqual({ sys: false, dia: false, pp: false, map: true });
   });
 
   it("compares a post-ductal SpO2 with the model's post-ductal value", () => {

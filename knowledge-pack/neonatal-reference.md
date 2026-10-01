@@ -83,10 +83,9 @@ runs high and their pO2 low.
 
 ## 4. What the builder cannot set yet
 
-Do not put these in a build SPEC; the builder ignores unknown targets without saying so.
+Do not put these in a build SPEC; the builder ignores them (it lists them as ignored).
 If the form supplies one, it arrives under `checks`, and you leave it there.
 
-- respiratory rate, systolic and diastolic pressure as targets
 - lactate, sodium, potassium, chloride, glucose, albumin
 - post-ductal SpO2
 - oxygen consumption, blood volume, P50 / fetal haemoglobin fraction, lung compliance,
