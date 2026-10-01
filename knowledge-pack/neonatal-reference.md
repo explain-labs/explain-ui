@@ -86,7 +86,6 @@ runs high and their pO2 low.
 Do not put these in a build SPEC; the builder ignores them (it lists them as ignored).
 If the form supplies one, it arrives under `checks`, and you leave it there.
 
-- lactate, sodium, potassium, chloride, glucose, albumin
-- post-ductal SpO2
+- post-ductal SpO2 (compared with the model's value by the app, never a target)
 - oxygen consumption, blood volume, P50 / fetal haemoglobin fraction, lung compliance,
   dead space: these stay at the baseline scenario's values

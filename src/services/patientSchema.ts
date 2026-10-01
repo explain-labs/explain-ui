@@ -110,7 +110,7 @@ export const PATIENT_FIELDS: PatientField[] = [
   { kind: "number", key: "rr", caption: "Respiratory rate", category: "respiratory", units: [same("/min", 1, 0)], specUnit: "/min", range: [0, 150], role: "iterated", specTarget: "rr", since: "A", hint: "Spontaneous breathing rate" },
   { kind: "number", key: "spo2", caption: "SpO2", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "iterated", specTarget: "spo2", since: "A" },
   { kind: "choice", key: "spo2_site", caption: "SpO2 probe", category: "respiratory", role: "context", options: [{ value: "preductal", label: "Right hand (pre-ductal)" }, { value: "postductal", label: "Foot or left hand (post-ductal)" }] },
-  { kind: "number", key: "spo2_post", caption: "SpO2 post-ductal (second probe)", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "check", specTarget: null, since: "B" },
+  { kind: "number", key: "spo2_post", caption: "SpO2 post-ductal (second probe)", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "check", specTarget: null, since: "A" },
 
   // ---- blood gas ----
   { kind: "choice", key: "gas_site", caption: "Sample", category: "bloodgas", role: "context", options: [{ value: "arterial", label: "Arterial" }, { value: "capillary", label: "Capillary" }, { value: "venous", label: "Venous" }] },
@@ -119,17 +119,17 @@ export const PATIENT_FIELDS: PatientField[] = [
   { kind: "number", key: "po2", caption: "pO2", category: "bloodgas", units: [scaled("kPa", KPA_PER_MMHG, 0.1, 1), same("mmHg", 1, 0)], specUnit: "mmHg", range: [10, 500], role: "iterated", specTarget: "po2", since: "A" },
   { kind: "number", key: "be", caption: "Base excess", category: "bloodgas", units: [same("mmol/L", 0.1, 1)], specUnit: "mmol/L", range: [-30, 20], role: "iterated", specTarget: "be", since: "A" },
   { kind: "number", key: "hco3", caption: "Bicarbonate", category: "bloodgas", units: [same("mmol/L", 0.1, 1)], specUnit: "mmol/L", range: [3, 50], role: "check", specTarget: null, since: "A" },
-  { kind: "number", key: "lactate", caption: "Lactate", category: "bloodgas", units: [same("mmol/L", 0.1, 1)], specUnit: "mmol/L", range: [0.2, 30], role: "structural", specTarget: "lactate", since: "B" },
+  { kind: "number", key: "lactate", caption: "Lactate", category: "bloodgas", units: [same("mmol/L", 0.1, 1)], specUnit: "mmol/L", range: [0.2, 30], role: "structural", specTarget: "lactate", since: "A" },
 
   // ---- laboratory ----
   { kind: "number", key: "hb", caption: "Haemoglobin", category: "labs", units: [same("mmol/L", 0.1, 1), scaled("g/dL", GDL_PER_MMOL_HB, 0.1, 1)], specUnit: "mmol/L", range: [2.5, 16], role: "structural", specTarget: "hb", since: "A" },
   { kind: "choice", key: "transfused", caption: "Red-cell transfusion given", category: "labs", role: "context", options: [{ value: "no", label: "No" }, { value: "yes", label: "Yes" }] },
   { kind: "number", key: "temp", caption: "Temperature", category: "labs", units: [same("°C", 0.1, 1)], specUnit: "°C", range: [30, 42], role: "structural", specTarget: "temp", since: "A" },
-  { kind: "number", key: "na", caption: "Sodium", category: "labs", units: [same("mmol/L", 1, 0)], specUnit: "mmol/L", range: [105, 175], role: "structural", specTarget: "na", since: "B" },
-  { kind: "number", key: "k", caption: "Potassium", category: "labs", units: [same("mmol/L", 0.1, 1)], specUnit: "mmol/L", range: [1.5, 10], role: "structural", specTarget: "k", since: "B" },
-  { kind: "number", key: "cl", caption: "Chloride", category: "labs", units: [same("mmol/L", 1, 0)], specUnit: "mmol/L", range: [70, 135], role: "structural", specTarget: "cl", since: "B" },
-  { kind: "number", key: "glucose", caption: "Glucose", category: "labs", units: [same("mmol/L", 0.1, 1), scaled("mg/dL", MGDL_PER_MMOL_GLUCOSE, 1, 0)], specUnit: "mmol/L", range: [0.3, 45], role: "structural", specTarget: "glucose", since: "B" },
-  { kind: "number", key: "albumin", caption: "Albumin", category: "labs", units: [same("g/L", 1, 0)], specUnit: "g/L", range: [8, 55], role: "structural", specTarget: "albumin", since: "B" },
+  { kind: "number", key: "na", caption: "Sodium", category: "labs", units: [same("mmol/L", 1, 0)], specUnit: "mmol/L", range: [105, 175], role: "structural", specTarget: "na", since: "A" },
+  { kind: "number", key: "k", caption: "Potassium", category: "labs", units: [same("mmol/L", 0.1, 1)], specUnit: "mmol/L", range: [1.5, 10], role: "structural", specTarget: "k", since: "A" },
+  { kind: "number", key: "cl", caption: "Chloride", category: "labs", units: [same("mmol/L", 1, 0)], specUnit: "mmol/L", range: [70, 135], role: "structural", specTarget: "cl", since: "A" },
+  { kind: "number", key: "glucose", caption: "Glucose", category: "labs", units: [same("mmol/L", 0.1, 1), scaled("mg/dL", MGDL_PER_MMOL_GLUCOSE, 1, 0)], specUnit: "mmol/L", range: [0.3, 45], role: "structural", specTarget: "glucose", since: "A" },
+  { kind: "number", key: "albumin", caption: "Albumin", category: "labs", units: [same("g/L", 1, 0)], specUnit: "g/L", range: [8, 55], role: "structural", specTarget: "albumin", since: "A" },
 ];
 
 const FIELD_BY_KEY = new Map(PATIENT_FIELDS.map((f) => [f.key, f]));
@@ -253,6 +253,7 @@ export interface ResolvedTargets {
 }
 
 const VENTILATED = new Set(["niv", "invasive", "hfo"]);
+const NOT_LOOKED_UP = new Set(["fio2", "lactate", "na", "k", "cl", "glucose", "albumin"]);
 
 // Decides, from the validated form alone, what the builder calibrates to.
 // These rules are deliberately NOT left to the bot:
@@ -365,8 +366,9 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
     (f): f is NumberField => f.kind === "number" && f.since === "A" && (f.role === "structural" || f.role === "iterated"),
   )
     .filter((f) => !has(f.key) && !(f.key === "map" && targets.map != null))
-    // an unmeasured FiO2 means room air, not a value for the bot to look up
-    .filter((f) => f.key !== "fio2")
+    // an unmeasured FiO2 means room air, and an unmeasured solute keeps the baseline's
+    // normal value: neither is something for the bot to look up
+    .filter((f) => !NOT_LOOKED_UP.has(f.key))
     .map((f) => f.key);
 
   return { targets, checks, derived, unsupported, unknown, warnings };

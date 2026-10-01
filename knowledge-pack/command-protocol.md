@@ -176,6 +176,10 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
     "sys": 48, "dia": 27, // iterated AS A PAIR (mean + pulse pressure); one alone is ignored;
                           //   without "map" the builder derives it as dia + (sys - dia)/3
     "rr": 60,             // iterated: spontaneous respiratory rate (/min); breathing baselines only
+    "na": 134, "k": 4.8, "cl": 104, "lactate": 4.5, "glucose": 3.2,  // structural, mmol/L
+    "albumin": 24         // structural, g/L. With measured ions a BE target is fitted by the
+                          //   unmeasured anions left over, so a lactic or hyperchloraemic acidosis
+                          //   is represented as such
     "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3 // iterated
   },
   "pathophysiology": { "rds": "mild|moderate|severe", "pvr_scale": 1.7 },
@@ -257,6 +261,8 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
    `height`, `hb`. Look in `neonatal-reference.md` first; use web search only for what it
    does not cover. Add each filled value to the SPEC `targets` and give it a provenance row.
    - `temp`: leave it out when unknown (the baseline's normal temperature applies).
+   - Lactate, electrolytes, glucose, albumin and FiO2 never appear in `unknown`: unmeasured,
+     they keep the baseline's normal values (room air for FiO2). Do not add them.
    - If you cannot find a source, either leave the value out or fill it and mark it
      `assumed` — never present a guess as a reference value.
 4. **Do not invent calibration targets.** An unmeasured vital (`hr`, `sys`, `dia`, `map`,

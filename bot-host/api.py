@@ -288,6 +288,11 @@ def detail_from_build_report(report: dict, stderr: str) -> dict:
         "ignored_targets": [k for k in report.get("ignored_targets") or [] if isinstance(k, str)],
         "superseded_targets": [s for s in report.get("superseded_targets") or [] if isinstance(s, dict)],
         "notes": [n for n in report.get("notes") or [] if isinstance(n, str)],
+        # solutes as set and as read back from the arterial blood after calibration
+        "solutes": {
+            k: v for k, v in (report.get("solutes") or {}).items()
+            if isinstance(k, str) and isinstance(v, dict)
+        },
         "source": "build_report",
         "log": (stderr or "")[-BUILD_LOG_MAX_CHARS:],
     }
@@ -508,7 +513,7 @@ class AskResponse(BaseModel):
     files: list[FileOutput] = Field(default_factory=list)
     artifact: dict | None = None  # a bot-built patient definition (op:"loadDefinition")
     # calibration report for `artifact`: converged, iters, unmet, residuals, log, spec, source;
-    # with a current engine also lever_limits, ignored_targets, superseded_targets, notes
+    # with a current engine also lever_limits, ignored_targets, superseded_targets, notes, solutes
     build: dict | None = None
 
 

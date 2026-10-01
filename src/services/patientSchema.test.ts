@@ -186,10 +186,17 @@ describe("resolveTargets", () => {
     expect(Object.keys(r.checks).sort()).toEqual(["pco2", "ph"]);
   });
 
-  it("reports values the builder cannot use yet instead of sending them", () => {
-    const r = resolve({ ...W, lactate: [3.1, "mmol/L"], na: [138, "mmol/L"] });
-    expect(r.unsupported.sort()).toEqual(["lactate", "na"]);
-    expect(r.targets).toEqual({ weight: 1.08, gestational_age: 28 });
+  it("sends lactate, electrolytes, glucose and albumin to the builder", () => {
+    const r = resolve({ ...W, lactate: [3.1, "mmol/L"], na: [132, "mmol/L"], k: [4.8, "mmol/L"], cl: [101, "mmol/L"], glucose: [54, "mg/dL"], albumin: [24, "g/L"] });
+    expect(r.targets).toMatchObject({ lactate: 3.1, na: 132, k: 4.8, cl: 101, glucose: 2.997, albumin: 24 });
+    expect(r.unsupported).toEqual([]);
+  });
+
+  it("compares a second, post-ductal SpO2 without targeting it", () => {
+    const r = resolve({ ...W, spo2: [93, "%"], spo2_post: [86, "%"] }, { spo2_site: "preductal" });
+    expect(r.targets.spo2).toBe(93);
+    expect(r.checks.spo2_post).toBe("reported for comparison");
+    expect(r.unsupported).toEqual([]);
   });
 
   it("sends FiO2 to the builder as a structural value", () => {

@@ -348,6 +348,8 @@ export interface BuildReport {
   leverLimits: LeverLimit[];
   ignoredTargets: string[];
   notes: string[];
+  // solutes written into the model, with the arterial value read back after calibration
+  solutes: { key: string; set: number; value: number }[];
 }
 
 export function parseBuildReport(raw: unknown): BuildReport | null {
@@ -384,6 +386,14 @@ export function parseBuildReport(raw: unknown): BuildReport | null {
     leverLimits,
     ignoredTargets: strings(r.ignored_targets, 40),
     notes: strings(r.notes, 300, 10),
+    solutes: Object.entries(r.solutes && typeof r.solutes === "object" ? (r.solutes as Record<string, unknown>) : {})
+      .slice(0, 20)
+      .flatMap(([key, v]) => {
+        const x = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+        const set = num(x.set);
+        const value = num(x.value);
+        return numberField(key) && set != null && value != null ? [{ key, set, value }] : [];
+      }),
   };
 }
 
@@ -397,6 +407,7 @@ export interface ResultRow {
   measured: number | null;
   delta: number | null; // model − measured
   calibrated: boolean; // true: the builder tuned to it; false: comparison only
+  set?: boolean; // a value written into the model (a solute): the row shows whether it held
   met: boolean | null; // calibrated targets only: within tolerance
   flag: string; // the builder's normal-range flag ("ok", "LOW", "HIGH", "")
 }
@@ -430,7 +441,22 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
   const { validated, resolved } = request;
   // unmet holds SPEC target keys, which are also the form keys
   const unmet = new Set(report.unmet);
-  return report.residuals.map((r) => {
+  const solutes: ResultRow[] = report.solutes.map((x) => {
+    const field = numberField(x.key)!;
+    return {
+      key: x.key,
+      caption: field.caption,
+      unit: field.specUnit,
+      model: x.value,
+      measured: x.set,
+      delta: Number((x.value - x.set).toPrecision(4)),
+      calibrated: false,
+      set: true,
+      met: null,
+      flag: "",
+    };
+  });
+  const vitals = report.residuals.map((r): ResultRow => {
     const key = reportToForm(r.key, request);
     const field = numberField(key);
     const label = field ? { caption: field.caption, unit: field.specUnit } : (REPORT_CAPTIONS[key] ?? { caption: key, unit: "" });
@@ -455,4 +481,5 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
       flag: r.flag,
     };
   });
+  return [...vitals, ...solutes];
 }

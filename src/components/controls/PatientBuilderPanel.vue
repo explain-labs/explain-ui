@@ -353,7 +353,8 @@ watch(saveName, () => (askOverwrite.value = false));
                   {{ shownDelta(row) }}
                 </td>
                 <td class="py-1 opacity-60">
-                  <template v-if="row.measured == null">not measured</template>
+                  <template v-if="row.set">set in the model</template>
+                  <template v-else-if="row.measured == null">not measured</template>
                   <template v-else-if="row.calibrated">{{ row.met === false ? "target missed" : "target" }}</template>
                   <template v-else>compared only</template>
                   <span v-if="row.flag && row.flag !== 'ok'" class="ml-1 text-amber-300">· {{ row.flag.toLowerCase() }} for age</span>
