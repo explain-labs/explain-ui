@@ -251,9 +251,19 @@ function manualBreath() {
 
       <!-- patient trigger + manual breath -->
       <div class="flex items-center justify-between gap-2 border-t border-surface-700 pt-2" data-tour="vent.trigger">
-        <label class="text-sm opacity-80 flex items-center gap-2">
+        <!-- PS is always patient-triggered (the engine runs triggering in PS whatever
+             `synchronized` says), so the switch shows on and is locked there -->
+        <label
+          v-tooltip.top="mode === 'PS' ? 'Pressure support is always patient-triggered' : undefined"
+          class="text-sm opacity-80 flex items-center gap-2"
+        >
           Synchronized
-          <ToggleSwitch :model-value="synchronized" @update:model-value="onSync" />
+          <ToggleSwitch
+            :model-value="synchronized || mode === 'PS'"
+            :disabled="mode === 'PS'"
+            @update:model-value="onSync"
+          />
+          <span v-if="mode === 'PS'" class="text-xs opacity-60">always in PS</span>
         </label>
         <Button
           label="Manual breath"
