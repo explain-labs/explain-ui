@@ -68,9 +68,8 @@ const CALC_OPTIONS = [5, 10, 30, 60, 120, 300]; // seconds to calculate
 const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
 // Panels that aren't finished yet: hidden on the deployed site, still shown
 // under `npm run dev` so they can be worked on. Remove a name here to release
-// its panel. ("builder" waits for the engine to apply an FiO2: until then a
-// patient on oxygen is fitted as if in room air.)
-const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler", "builder"]);
+// its panel.
+const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler"]);
 const showPanel = (name: string) => import.meta.env.DEV || !UNFINISHED_PANELS.has(name);
 const tour = useTour();
 // first visit (no manual progress stored yet): offer the getting-started tour
