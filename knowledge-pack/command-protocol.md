@@ -210,7 +210,7 @@ baby on oxygen much healthier lungs than it has. A value outside 0.21–1.0 fail
 
 The builder runs a closed loop: warm to steady state → measure vitals → nudge one lever
 per off-target vital → repeat. Lever map (one dominant lever each): MAP←systemic
-resistance, mean or systolic PAP←pulmonary resistance, CVP←venous unstressed volume, HR←heart-rate
+resistance, mean or systolic PAP←pulmonary resistance (the intrapulmonary shunt moves with it, so a raised PAP desaturates through the duct and foramen, not the lung), CVP←venous unstressed volume, HR←heart-rate
 reference, pulse pressure (sys − dia)←large-artery stiffness, RR←split between breath size
 and rate (minute volume unchanged), PO2/SpO2←alveolar O₂ diffusion, then (once diffusion is at its floor) the intrapulmonary shunt, **pCO2←spontaneous ventilatory drive** (so it
 assumes the patient breathes spontaneously — for a ventilated patient set ventilator
