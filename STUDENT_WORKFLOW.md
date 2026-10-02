@@ -260,7 +260,43 @@ gets the old engine code.
 
 ## 5. Picking up changes from `main`
 
-Do this regularly, and always **engine first, then app**:
+Do this regularly. A rebase replays your commits on top of the latest `main`, so your work is
+kept. These commands work the same in PowerShell.
+
+### Before you update
+
+A rebase only moves *committed* work. Check that the engine is on your branch:
+
+```sh
+git -C explain-engine branch --show-current
+```
+
+If that prints nothing, the engine is on a detached HEAD. Switch to your branch first with
+`git -C explain-engine switch student/<yourname>`; uncommitted changes come along. If you
+never made an engine branch, use `switch -c` instead of `switch`.
+
+Then commit your work and make a backup branch in each repository, engine first:
+
+```sh
+cd explain-engine
+git add -A
+git commit -m "work in progress"
+git branch backup/<yourname>
+cd ..
+
+git add -A
+git commit -m "work in progress"
+git branch backup/<yourname>
+```
+
+If there is nothing to commit, `git commit` says so and that is fine. The backup branches
+stay on your laptop, so you can always get back to where you started. If `git status` lists
+thousands of files under `node_modules/`, do **not** run `git add -A` yet. Fix that first, as
+described under [Troubleshooting](#troubleshooting).
+
+### Update
+
+Always **engine first, then app**:
 
 ```sh
 cd explain-engine
@@ -287,6 +323,88 @@ git -C explain-engine checkout student/<yourname>
 git add explain-engine
 git rebase --continue
 ```
+
+When the app rebase is done, record your engine branch and push again. If `git commit` says
+there is nothing to commit, that is fine:
+
+```sh
+git add explain-engine
+git commit -m "point at my engine branch"
+git push --force-with-lease
+```
+
+### If the rebase stops on a code conflict
+
+`git status` lists the conflicting files. Open each one, resolve the `<<<<<<<` / `>>>>>>>`
+blocks, then:
+
+```sh
+git add <file>
+git rebase --continue
+```
+
+To give up and return to where you were before the rebase: `git rebase --abort`.
+
+Conflicts usually have one of three causes:
+
+- **You edited a shared file** (`ModelIndex.js` or `src/model-interface/registry.ts`). Take
+  `main`'s version of it and move your additions to the extension points from
+  [section 2](#2-writing-your-own-model) (`CustomModelIndex.js`, `custom_models/`,
+  `custom-registry.ts`). After that, future rebases won't conflict.
+- **Your clone still tracks `node_modules`.** See [Troubleshooting](#troubleshooting).
+- **You edited a built-in scenario.** Save your version under a new name
+  (`student_<yourname>_….json`) and keep `main`'s version of the original.
+
+If it gets messy, push your branch as it is and ask your instructor to do the rebase.
+
+### Updating an older clone
+
+If your clone dates from before the repositories moved to `explain-labs`, update the URLs
+once before you start:
+
+```sh
+git remote set-url origin git@github.com:explain-labs/explain-ui.git
+git submodule sync
+git -C explain-engine remote set-url origin git@github.com:explain-labs/explain-engine.git
+```
+
+Also check `public/model_definitions/` for scenarios you created or edited there. That
+folder is not saved in git and is overwritten on every `npm run dev`, so copy them to
+`explain-engine/model_definitions/` first.
+
+### Starting over from `main` (no work yet)
+
+If you have done no work on your branch, it is simpler to reset it to `main` than to rebase.
+**This throws away everything on the branch.** Check first that both of these show nothing
+(`git status` should list no changed files; untracked files are fine):
+
+```sh
+git fetch origin
+git status
+git log --oneline origin/main..student/<yourname>
+```
+
+Then reset the app, then the engine. The engine's `checkout -B` also creates the branch if
+you never made one:
+
+```sh
+git checkout student/<yourname>
+git reset --hard origin/main
+git submodule update --init
+git push --force-with-lease -u origin student/<yourname>
+
+cd explain-engine
+git fetch origin
+git checkout -B student/<yourname> origin/main
+git push --force-with-lease -u origin student/<yourname>
+cd ..
+
+npm install
+```
+
+Afterwards `git status` may show `explain-engine (new commits)`: the engine's `main` can be
+newer than the engine commit the app's `main` records. It is recorded the first time you
+commit engine work (see [section 4](#4-committing)).
 
 ---
 
