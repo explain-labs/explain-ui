@@ -51,6 +51,9 @@ powershell -ExecutionPolicy Bypass -File .\setup-student.ps1 <yourname>
 
 When it finishes, start the app with `npm run dev` and skip ahead to section 2.
 
+If the script fails on Windows, follow [By hand on Windows](#by-hand-on-windows-powershell)
+below. It does the same thing one command at a time.
+
 ### By hand (what the script does)
 
 ```sh
@@ -99,6 +102,52 @@ Start the app with `npm run dev` and open the URL Vite prints.
 You don't need a database, an SSH tunnel or a login. With no `MONGODB_URI` in `.env.local`, the
 dev server runs in *local mode* and logs you in as the local `developer`. Snapshots are saved as
 files in the engine repo.
+
+### By hand on Windows (PowerShell)
+
+The same steps as above, written for PowerShell on Windows 10/11. Use these if the setup
+script fails on your machine. Every command is on its own line because Windows PowerShell 5.1,
+the version that ships with Windows, does not understand `&&`.
+
+Clone into a short path such as `C:\dev`. Deeply nested folders can hit Windows' path-length
+limit:
+
+```powershell
+mkdir C:\dev
+cd C:\dev
+git clone --recurse-submodules git@github.com:explain-labs/explain-ui.git
+cd explain-ui
+git -C explain-engine remote set-url origin git@github.com:explain-labs/explain-engine.git
+npm install
+```
+
+Create your branch in the app repo:
+
+```powershell
+git checkout -b student/<yourname>
+```
+
+Then in the engine. It starts on a detached HEAD, so check out `main` first:
+
+```powershell
+cd explain-engine
+git checkout main
+git pull
+git checkout -b student/<yourname>
+git push -u origin student/<yourname>
+cd ..
+git push -u origin student/<yourname>
+```
+
+Check it worked. Both should print `student/<yourname>`:
+
+```powershell
+git branch --show-current
+git -C explain-engine branch --show-current
+```
+
+Start the app with `npm run dev`. If something goes wrong on the way, see the Windows entries
+under [Troubleshooting](#troubleshooting).
 
 ---
 
@@ -259,6 +308,14 @@ so they can be read together.
 **PowerShell says "running scripts is disabled on this system"** — start the setup script
 exactly as shown in section 1, with `powershell -ExecutionPolicy Bypass -File .\setup-student.ps1`;
 that bypasses the policy for this one run without changing any system setting.
+
+**Windows: `npm` says "running scripts is disabled on this system"** — PowerShell is refusing
+to run `npm.ps1`. Run once:
+`Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`.
+
+**Windows: `Filename too long` during the clone** — run
+`git config --global core.longpaths true`, delete the half-finished `explain-ui` folder, and
+clone again, preferably into a short path such as `C:\dev`.
 
 **`ERROR: <type> model not found` at build** — either a `model_type` typo in the scenario
 JSON, or a missing export line in `CustomModelIndex.js`.
