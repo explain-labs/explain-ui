@@ -135,8 +135,8 @@ const verdict = computed(() => {
 // The builder's lever names are model internals; say what each lever is in
 // clinical terms, keyed by the target it calibrates.
 const LEVER_WORDS: Record<string, string> = {
-  spo2: "lung oxygen uptake",
-  po2: "lung oxygen uptake",
+  spo2: "lung oxygen uptake and intrapulmonary shunt",
+  po2: "lung oxygen uptake and intrapulmonary shunt",
   pco2: "breathing drive",
   map: "systemic vascular resistance",
   pp: "large-artery stiffness",
