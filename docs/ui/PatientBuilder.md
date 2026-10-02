@@ -152,8 +152,11 @@ give up at 300 s.
 - **Lever limits** — above the table, a warning for each target whose lever ended on its
   bound, in clinical words ("lung oxygen uptake", "breathing drive"): "not reached" means
   the patient is beyond what that lever can represent; "reached only at the limit" means
-  the fit needed the extreme of the lever. Typical case: a baby on high FiO2, where oxygen
-  uptake hits its floor.
+  the fit needed the extreme of the lever. For oxygenation the lever continues past the
+  floor of lung oxygen uptake into the intrapulmonary shunt (blood bypassing the ventilated
+  lung), so a baby on high FiO2 with a low saturation is reached through shunt; the notes
+  say when that happened. A limit warning for oxygenation means even a shunt of ten times
+  the starting size was not enough.
 - **What the patient was built from** — every value with its status (Measured, Derived,
   Reference, Assumed, Left to the model), what the builder did with it, and the source.
 - **Load this patient** — `useExplain().loadFromObject()` with the built scenario, after
