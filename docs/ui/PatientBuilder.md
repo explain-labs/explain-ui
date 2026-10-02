@@ -131,9 +131,11 @@ give up at 300 s.
   measured but not targeted (the app computes that difference itself). Includes
   systolic/diastolic, the pulse pressure, respiratory rate, post-ductal SpO2, temperature
   and cardiac output. Systolic and diastolic count as missed when the mean or the pulse
-  pressure was missed. In small preterms the pulse pressure often stops short: the
-  stiffness lever is capped for numerical stability, and weight scaling leaves their
-  arteries as compliant as a term baby's.
+  pressure was missed. A small baby's arteries are made stiffer than a term baby's in
+  proportion to size (as measured pulse-wave velocity and preterm stiffness studies
+  indicate), so a 28-week patient starts near a pulse pressure of 20 mmHg. The stiffness is
+  capped for numerical stability, though: pulse pressures above about 22 at 28 weeks are out
+  of reach, and below about 1 kg the size stiffening itself is capped (the notes say so).
   A post-ductal SpO2 is compared with the model's post-ductal value.
 - **Ductal shunt** — the model's net ductal flow in mL/min (+ = left-to-right). When the
   form gives an echo flow direction and the model's net flow disagrees (or is close to zero
