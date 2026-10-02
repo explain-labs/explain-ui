@@ -192,6 +192,19 @@ describe("resolveTargets", () => {
     expect(r.unsupported).toEqual([]);
   });
 
+  it("sends the echo PDA diameter and systolic PA pressure, and compares etCO2 only", () => {
+    const r = resolve({ ...W, pda_mm: [2.2, "mm"], pap_s: [38, "mmHg"], etco2: [6.1, "kPa"] }, { pda_flow: "ltr" });
+    expect(r.targets).toMatchObject({ pda_mm: 2.2, pap_s: 38 });
+    expect(r.targets.etco2).toBeUndefined();
+    expect(r.checks.etco2).toBe("reported for comparison");
+    expect(r.unknown).not.toContain("pda_mm"); // an unmeasured duct keeps the gestational-age default
+    expect(resolve({ ...W }).unknown).toContain("pap_s");
+  });
+
+  it("accepts a closed duct", () => {
+    expect(resolve({ ...W, pda_mm: [0, "mm"] }).targets.pda_mm).toBe(0);
+  });
+
   it("compares a second, post-ductal SpO2 without targeting it", () => {
     const r = resolve({ ...W, spo2: [93, "%"], spo2_post: [86, "%"] }, { spo2_site: "preductal" });
     expect(r.targets.spo2).toBe(93);
