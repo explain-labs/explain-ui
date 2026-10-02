@@ -426,12 +426,13 @@ const REPORT_CAPTIONS: Record<string, { caption: string; unit: string }> = {
   spo2_pre: { caption: "SpO2 pre-ductal", unit: "%" },
   pp: { caption: "Pulse pressure", unit: "mmHg" },
   q_da: { caption: "Ductal shunt (+ = left-to-right)", unit: "mL/min" },
+  q_fo: { caption: "Atrial shunt (+ = left-to-right)", unit: "mL/min" },
 };
 
-// the engine reports the ductal flow in L/s
+// the engine reports shunt flows in L/s
 const ML_MIN_PER_L_S = 60000;
-// below this net flow (mL/min) the duct is treated as having no clear direction
-const DUCT_FLOW_THRESHOLD = 5;
+// below this net flow (mL/min) a shunt is treated as having no clear direction
+const SHUNT_FLOW_THRESHOLD = 5;
 
 // The builder calibrates systolic/diastolic as mean (map) + pulse pressure (pp), so
 // whether a systolic or diastolic target was met follows from those two.
@@ -464,8 +465,8 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
   });
   const vitals = report.residuals.map((r): ResultRow => {
     const key = reportToForm(r.key, request);
-    if (key === "q_da") {
-      return { key, ...REPORT_CAPTIONS.q_da, model: Number((r.value * ML_MIN_PER_L_S).toFixed(1)), measured: null, delta: null, calibrated: false, met: null, flag: "" };
+    if (key === "q_da" || key === "q_fo") {
+      return { key, ...REPORT_CAPTIONS[key], model: Number((r.value * ML_MIN_PER_L_S).toFixed(1)), measured: null, delta: null, calibrated: false, met: null, flag: "" };
     }
     const field = numberField(key);
     const label = field ? { caption: field.caption, unit: field.specUnit } : (REPORT_CAPTIONS[key] ?? { caption: key, unit: "" });
@@ -493,20 +494,43 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
   return [...vitals, ...solutes];
 }
 
-// Compares the echo's ductal flow direction with the model's net ductal flow. Returns a
-// sentence for the result view when they disagree, or null. A bidirectional duct cannot be
-// checked against a net flow, so it is never reported as a mismatch.
-export function ductalFlowNote(request: PatientBuildRequest, report: BuildReport): string | null {
-  const echo = request.validated.choices.pda_flow;
-  const row = report.residuals.find((r) => r.key === "q_da");
+// Compares an echo's shunt flow direction with the model's net flow through that shunt.
+// Returns a sentence for the result view when they disagree, or null. A bidirectional shunt
+// cannot be checked against a net flow, so it is never reported as a mismatch.
+function shuntFlowNote(
+  request: PatientBuildRequest,
+  report: BuildReport,
+  shunt: { choice: string; key: string; name: string; check: string },
+): string | null {
+  const echo = request.validated.choices[shunt.choice];
+  const row = report.residuals.find((r) => r.key === shunt.key);
   if (!echo || echo === "bidirectional" || !row) return null;
   const q = row.value * ML_MIN_PER_L_S;
-  const model = q > DUCT_FLOW_THRESHOLD ? "ltr" : q < -DUCT_FLOW_THRESHOLD ? "rtl" : "none";
+  const model = q > SHUNT_FLOW_THRESHOLD ? "ltr" : q < -SHUNT_FLOW_THRESHOLD ? "rtl" : "none";
   if (model === echo) return null;
   const words: Record<string, string> = { ltr: "left-to-right", rtl: "right-to-left", none: "close to zero" };
   return (
-    `The echo shows ${words[echo]} ductal flow, but the model's net ductal flow is ${words[model]} ` +
-    `(${q > 0 ? "+" : ""}${q.toFixed(0)} mL/min). Direction follows the pressures on either side of the duct: ` +
-    `check the pulmonary and systemic pressures that were entered.`
+    `The echo shows ${words[echo]} ${shunt.name} flow, but the model's net ${shunt.name} flow is ${words[model]} ` +
+    `(${q > 0 ? "+" : ""}${q.toFixed(0)} mL/min). ${shunt.check}`
   );
+}
+
+export function ductalFlowNote(request: PatientBuildRequest, report: BuildReport): string | null {
+  return shuntFlowNote(request, report, {
+    choice: "pda_flow",
+    key: "q_da",
+    name: "ductal",
+    check: "Direction follows the pressures on either side of the duct: check the pulmonary and systemic pressures that were entered.",
+  });
+}
+
+export function atrialFlowNote(request: PatientBuildRequest, report: BuildReport): string | null {
+  return shuntFlowNote(request, report, {
+    choice: "fo_flow",
+    key: "q_fo",
+    name: "atrial",
+    check:
+      "Direction follows the pressures in the two atria, and the model's foramen ovale lets blood pass right-to-left more easily than left-to-right (a flap valve): " +
+      "check the venous and pulmonary pressures that were entered.",
+  });
 }

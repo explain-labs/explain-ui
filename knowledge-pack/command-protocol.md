@@ -173,6 +173,7 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
     "temp": 36.8, "pda": 0.4,                                        // structural
     "pda_mm": 2.2,        // structural: echo duct diameter at its narrowest end (mm); 0 = closed;
                           //   wins over the 0-1 "pda" fraction
+    "fo_mm": 3,           // structural: echo foramen ovale / atrial septal opening (mm); 0 = closed
     "fio2": 0.3,          // inspired O2 fraction 0.21-1.0 (NOT a percentage); structural
     "hr": 165, "map": 33, "cvp": 4, "pap_m": 28,                     // iterated (mmHg, bpm)
     "pap_s": 38,          // iterated: systolic PA pressure from an echo TR jet; same lever as
@@ -184,7 +185,9 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
     "albumin": 24,        // structural, g/L. With measured ions a BE target is fitted by the
                           //   unmeasured anions left over, so a lactic or hyperchloraemic acidosis
                           //   is represented as such
-    "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3 // iterated
+    "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3, // iterated
+    "ef": 60              // iterated: echo LV ejection fraction in % (not a fraction); same lever
+                          //   as co, which wins when both are given
   },
   "pathophysiology": { "rds": "mild|moderate|severe", "pvr_scale": 1.7 },
   "tolerance": { "map": 3, "pco2": 4 },  // optional per-target band overrides
@@ -211,7 +214,8 @@ resistance, mean or systolic PAP←pulmonary resistance, CVP←venous unstressed
 reference, pulse pressure (sys − dia)←large-artery stiffness, RR←split between breath size
 and rate (minute volume unchanged), PO2/SpO2←alveolar O₂ diffusion, **pCO2←spontaneous ventilatory drive** (so it
 assumes the patient breathes spontaneously — for a ventilated patient set ventilator
-rate/Vt instead), BE/pH←Stewart unmeasured anions, CO←contractility. Targets it can't
+rate/Vt instead), BE/pH←Stewart unmeasured anions, CO←contractility, LV ejection fraction←left-ventricular
+contractility (only without a CO). Targets it can't
 reach in `max_iters` are reported `INCOMPLETE`; don't claim a value the report didn't hit.
 A target reached with its lever at the edge of its range (for example oxygen uptake at its
 floor for a baby on high FiO2) is flagged to the user by the app; do not present such a fit
@@ -265,15 +269,15 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
    `height`, `hb`. Look in `neonatal-reference.md` first; use web search only for what it
    does not cover. Add each filled value to the SPEC `targets` and give it a provenance row.
    - `temp`: leave it out when unknown (the baseline's normal temperature applies).
-   - Lactate, electrolytes, glucose, albumin, FiO2 and the PDA diameter never appear in
-     `unknown`: unmeasured, they keep the baseline's normal values (room air for FiO2, the
-     gestational-age default for the duct). Do not add them.
-   - The echo PDA flow direction arrives under `context`. Do not turn it into a target: the
-     direction follows from the pressures, and the app compares it with the model's.
+   - Lactate, electrolytes, glucose, albumin, FiO2 and the PDA and foramen ovale diameters
+     never appear in `unknown`: unmeasured, they keep the baseline's normal values (room air
+     for FiO2, the gestational-age default for the duct, the baseline's foramen). Do not add them.
+   - The echo PDA and atrial shunt flow directions arrive under `context`. Do not turn them
+     into targets: the direction follows from the pressures, and the app compares it with the model's.
    - If you cannot find a source, either leave the value out or fill it and mark it
      `assumed` — never present a guess as a reference value.
 4. **Do not invent calibration targets.** An unmeasured vital (`hr`, `sys`, `dia`, `map`,
-   `rr`, `cvp`, `co`, `spo2`, `po2`, `pco2`, `ph`, `be`) is **not** set to a normal value: the targets are
+   `rr`, `cvp`, `co`, `ef`, `pap_s`, `spo2`, `po2`, `pco2`, `ph`, `be`) is **not** set to a normal value: the targets are
    coupled, and calibrating to made-up numbers distorts the fit to the measured ones. Give
    it a provenance row with status `emergent` and the expected range, and leave it out of
    the SPEC.

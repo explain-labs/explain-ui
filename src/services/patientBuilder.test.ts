@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FORM_MARKER, buildRequest, buildResultRows, buildValueRows, checkSpec, ductalFlowNote, parseBuildReport, parseProvenance, type PatientBuildRequest } from "./patientBuilder";
+import { FORM_MARKER, atrialFlowNote, buildRequest, buildResultRows, buildValueRows, checkSpec, ductalFlowNote, parseBuildReport, parseProvenance, type PatientBuildRequest } from "./patientBuilder";
 import type { PatientForm } from "./patientSchema";
 
 const FORM: PatientForm = {
@@ -292,6 +292,15 @@ describe("result tables", () => {
     expect(ductalFlowNote(withFlow("ltr"), reportWith(2))).toMatch(/close to zero/);
     expect(ductalFlowNote(withFlow("bidirectional"), reportWith(120))).toBeNull(); // not checkable from a net flow
     expect(ductalFlowNote(request(), reportWith(120))).toBeNull(); // no echo direction given
+  });
+
+  it("compares the echo's atrial shunt direction with the model's foramen ovale flow", () => {
+    const withFlow = (fo_flow: string) => buildRequest({ ...FORM, choices: { ...FORM.choices, fo_flow } }, "pb_f")!;
+    const reportWith = (q: number) => parseBuildReport({ ...raw, residuals: [{ key: "q_fo", value: q / 60000, target: null, delta: null, flag: "" }] })!;
+    expect(atrialFlowNote(withFlow("ltr"), reportWith(50))).toBeNull();
+    expect(atrialFlowNote(withFlow("ltr"), reportWith(-14))).toMatch(/echo shows left-to-right atrial flow.*right-to-left \(-14 mL\/min\).*flap valve/);
+    expect(atrialFlowNote(withFlow("bidirectional"), reportWith(-14))).toBeNull();
+    expect(buildResultRows(request(), reportWith(50))[0]).toMatchObject({ key: "q_fo", caption: "Atrial shunt (+ = left-to-right)", unit: "mL/min", model: 50, calibrated: false });
   });
 
   it("marks systolic and diastolic as missed when the pulse pressure was missed", () => {

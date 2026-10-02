@@ -106,6 +106,9 @@ export const PATIENT_FIELDS: PatientField[] = [
   { kind: "number", key: "pap_s", caption: "Systolic PA pressure (echo)", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [5, 120], role: "iterated", specTarget: "pap_s", since: "A", hint: "From the tricuspid jet: 4v² + right atrial pressure" },
   { kind: "number", key: "pda_mm", caption: "PDA diameter (echo)", category: "haemodynamics", units: [same("mm", 0.1, 1)], specUnit: "mm", range: [0, 10], role: "structural", specTarget: "pda_mm", since: "A", hint: "At its narrowest (pulmonary) end; 0 = closed" },
   { kind: "choice", key: "pda_flow", caption: "PDA flow direction (echo)", category: "haemodynamics", role: "context", options: [{ value: "ltr", label: "Left-to-right" }, { value: "bidirectional", label: "Bidirectional" }, { value: "rtl", label: "Right-to-left" }] },
+  { kind: "number", key: "fo_mm", caption: "Foramen ovale diameter (echo)", category: "haemodynamics", units: [same("mm", 0.1, 1)], specUnit: "mm", range: [0, 15], role: "structural", specTarget: "fo_mm", since: "A", hint: "Opening in the atrial septum (PFO or ASD); 0 = closed" },
+  { kind: "choice", key: "fo_flow", caption: "Atrial shunt direction (echo)", category: "haemodynamics", role: "context", options: [{ value: "ltr", label: "Left-to-right" }, { value: "bidirectional", label: "Bidirectional" }, { value: "rtl", label: "Right-to-left" }] },
+  { kind: "number", key: "ef", caption: "LV ejection fraction (echo)", category: "haemodynamics", units: [same("%", 1, 0)], specUnit: "%", range: [5, 95], role: "iterated", specTarget: "ef", since: "A", hint: "Calibrated through heart contractility, which cardiac output uses too: with both given, EF is compared only" },
 
   // ---- breathing and oxygen ----
   { kind: "choice", key: "resp_support", caption: "Respiratory support", category: "respiratory", role: "context", options: [{ value: "none", label: "None" }, { value: "low_flow", label: "Low-flow oxygen" }, { value: "high_flow", label: "High-flow cannula" }, { value: "cpap", label: "CPAP" }, { value: "niv", label: "Non-invasive ventilation" }, { value: "invasive", label: "Invasive ventilation" }, { value: "hfo", label: "High-frequency oscillation" }] },
@@ -258,7 +261,7 @@ export interface ResolvedTargets {
 
 const VENTILATED = new Set(["niv", "invasive", "hfo"]);
 // unmeasured, these keep the baseline's value (or the gestational-age default for the duct)
-const NOT_LOOKED_UP = new Set(["fio2", "lactate", "na", "k", "cl", "glucose", "albumin", "pda_mm"]);
+const NOT_LOOKED_UP = new Set(["fio2", "lactate", "na", "k", "cl", "glucose", "albumin", "pda_mm", "fo_mm"]);
 
 // Decides, from the validated form alone, what the builder calibrates to.
 // These rules are deliberately NOT left to the bot:
@@ -267,8 +270,8 @@ const NOT_LOOKED_UP = new Set(["fio2", "lactate", "na", "k", "cl", "glucose", "a
 //     one without the other is only compared.
 //   - A respiratory rate is a target only for a spontaneously breathing patient;
 //     a ventilated patient's rate is set by the ventilator, which is not modelled.
-//   - The builder silently prefers po2 over spo2 and be over ph, so exactly one
-//     of each pair is sent as a target; the other is reported as a check.
+//   - The builder silently prefers po2 over spo2, be over ph and co over ef, so
+//     exactly one of each pair is sent as a target; the other is reported as a check.
 //   - A pO2 is only a target when the sample is arterial. Capillary and venous
 //     pO2 do not reflect arterial oxygenation.
 //   - A venous pCO2/pH is not a target (it differs from arterial by a variable
@@ -350,6 +353,13 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
     checks.ph = "base excess and pCO2 are the targets; pH follows from them";
   }
 
+  // cardiac output and ejection fraction share the contractility lever; output is the
+  // value that separates flow from resistance, so it keeps it
+  if (targets.co != null && targets.ef != null) {
+    delete targets.ef;
+    checks.ef = "cardiac output is the target on heart contractility; the ejection fraction follows from it";
+  }
+
   if (targets.rr != null && VENTILATED.has(choices.resp_support ?? "")) {
     delete targets.rr;
     checks.rr = "ventilated: the rate is set by the ventilator, which the built patient does not have";
@@ -372,8 +382,8 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
   )
     .filter((f) => !has(f.key) && !(f.key === "map" && targets.map != null))
     // an unmeasured FiO2 means room air, an unmeasured solute keeps the baseline's normal
-    // value, and an unmeasured duct keeps the gestational-age default: none is something
-    // for the bot to look up
+    // value, an unmeasured duct keeps the gestational-age default and an unmeasured foramen
+    // the baseline's: none is something for the bot to look up
     .filter((f) => !NOT_LOOKED_UP.has(f.key))
     .map((f) => f.key);
 

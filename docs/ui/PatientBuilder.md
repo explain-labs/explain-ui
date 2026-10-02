@@ -66,6 +66,7 @@ the bot:
 | A venous pCO2 and pH are not targets; a venous base excess is | variable arteriovenous difference |
 | Base excess + pCO2 are the targets and pH becomes a check | the builder silently prefers `be` over `ph` |
 | A post-ductal SpO2 is a check | the engine reads saturation pre-ductally |
+| Cardiac output is the target and the LV ejection fraction becomes a check when both are given | both are calibrated through heart contractility; output is what separates flow from resistance |
 | A gas with no sample site is treated as capillary | conservative default, with a warning |
 
 It also produces the warnings shown under the form: ventilated patient (the builder reaches
@@ -73,8 +74,9 @@ a pCO2 through spontaneous breathing drive), no FiO2 (oxygenation fitted in room
 no cardiac output (output and resistance then come from the baseline).
 
 An empty FiO2 is not sent to the bot as an unknown: it means room air, not a value to look up.
-The same holds for the PDA diameter (an unmeasured duct keeps the gestational-age default)
-and for lactate, electrolytes, glucose and albumin: unmeasured, they keep the
+The same holds for the PDA diameter (an unmeasured duct keeps the gestational-age default),
+the foramen ovale diameter (an unmeasured foramen keeps the baseline's, closed in
+`term_neonate`) and for lactate, electrolytes, glucose and albumin: unmeasured, they keep the
 baseline's normal values. Measured, they are written into the model before calibration, so a
 base-excess target is fitted by the unmeasured anions left over after the measured ions.
 
@@ -137,6 +139,13 @@ give up at 300 s.
   form gives an echo flow direction and the model's net flow disagrees (or is close to zero
   where the echo shows a direction), a note above the table says so. A bidirectional duct is
   never reported: it cannot be checked against a net flow.
+- **Atrial shunt** — the same for the foramen ovale (+ = left-to-right, left to right
+  atrium), compared with the echo's atrial shunt direction. The model's foramen is a flap
+  valve that passes right-to-left flow more easily than left-to-right, so a measured opening
+  carries less left-to-right flow than an open hole of that size would.
+- **LV ejection fraction** — the model's EF of the last beat, in %. A target when it was
+  entered without a cardiac output; with one it is compared only, and can end well away from
+  the echo value, because contractility moves EF much more than it moves output.
 - **Solutes** — below the vitals, each lactate/electrolyte/glucose/albumin value as set and as
   read back from the arterial blood after calibration ("set in the model"); a difference
   means the model moved it (kidney filtration, or lactate production in a hypoxic patient).
