@@ -171,13 +171,17 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
     "hb": 9.5,            // hemoglobin in mmol/L (the model's unit)
     "hb_gdl": 15.3,       // OR hemoglobin in g/dL — the builder converts to mmol/L (use ONE of hb / hb_gdl)
     "temp": 36.8, "pda": 0.4,                                        // structural
+    "pda_mm": 2.2,        // structural: echo duct diameter at its narrowest end (mm); 0 = closed;
+                          //   wins over the 0-1 "pda" fraction
     "fio2": 0.3,          // inspired O2 fraction 0.21-1.0 (NOT a percentage); structural
     "hr": 165, "map": 33, "cvp": 4, "pap_m": 28,                     // iterated (mmHg, bpm)
+    "pap_s": 38,          // iterated: systolic PA pressure from an echo TR jet; same lever as
+                          //   pap_m, which wins when both are given
     "sys": 48, "dia": 27, // iterated AS A PAIR (mean + pulse pressure); one alone is ignored;
                           //   without "map" the builder derives it as dia + (sys - dia)/3
     "rr": 60,             // iterated: spontaneous respiratory rate (/min); breathing baselines only
     "na": 134, "k": 4.8, "cl": 104, "lactate": 4.5, "glucose": 3.2,  // structural, mmol/L
-    "albumin": 24         // structural, g/L. With measured ions a BE target is fitted by the
+    "albumin": 24,        // structural, g/L. With measured ions a BE target is fitted by the
                           //   unmeasured anions left over, so a lactic or hyperchloraemic acidosis
                           //   is represented as such
     "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3 // iterated
@@ -203,7 +207,7 @@ baby on oxygen much healthier lungs than it has. A value outside 0.21–1.0 fail
 
 The builder runs a closed loop: warm to steady state → measure vitals → nudge one lever
 per off-target vital → repeat. Lever map (one dominant lever each): MAP←systemic
-resistance, mean PAP←pulmonary resistance, CVP←venous unstressed volume, HR←heart-rate
+resistance, mean or systolic PAP←pulmonary resistance, CVP←venous unstressed volume, HR←heart-rate
 reference, pulse pressure (sys − dia)←large-artery stiffness, RR←split between breath size
 and rate (minute volume unchanged), PO2/SpO2←alveolar O₂ diffusion, **pCO2←spontaneous ventilatory drive** (so it
 assumes the patient breathes spontaneously — for a ventilated patient set ventilator
@@ -261,8 +265,11 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
    `height`, `hb`. Look in `neonatal-reference.md` first; use web search only for what it
    does not cover. Add each filled value to the SPEC `targets` and give it a provenance row.
    - `temp`: leave it out when unknown (the baseline's normal temperature applies).
-   - Lactate, electrolytes, glucose, albumin and FiO2 never appear in `unknown`: unmeasured,
-     they keep the baseline's normal values (room air for FiO2). Do not add them.
+   - Lactate, electrolytes, glucose, albumin, FiO2 and the PDA diameter never appear in
+     `unknown`: unmeasured, they keep the baseline's normal values (room air for FiO2, the
+     gestational-age default for the duct). Do not add them.
+   - The echo PDA flow direction arrives under `context`. Do not turn it into a target: the
+     direction follows from the pressures, and the app compares it with the model's.
    - If you cannot find a source, either leave the value out or fill it and mark it
      `assumed` — never present a guess as a reference value.
 4. **Do not invent calibration targets.** An unmeasured vital (`hr`, `sys`, `dia`, `map`,
