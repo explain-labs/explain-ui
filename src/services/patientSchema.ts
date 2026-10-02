@@ -103,6 +103,9 @@ export const PATIENT_FIELDS: PatientField[] = [
   { kind: "choice", key: "bp_method", caption: "Pressure measured by", category: "haemodynamics", role: "context", options: [{ value: "arterial_line", label: "Arterial line" }, { value: "cuff", label: "Cuff" }] },
   { kind: "number", key: "cvp", caption: "Central venous pressure", category: "haemodynamics", units: [same("mmHg", 0.5, 1)], specUnit: "mmHg", range: [-3, 25], role: "iterated", specTarget: "cvp", since: "A" },
   { kind: "number", key: "co", caption: "Cardiac output (echo)", category: "haemodynamics", units: [scaled("mL/min", 1000, 10, 0), same("L/min", 0.01, 2)], specUnit: "L/min", range: [0.03, 2.5], role: "iterated", specTarget: "co", since: "A", hint: "Left ventricular output. The most informative optional value: without a flow, output and resistance cannot be told apart" },
+  { kind: "number", key: "pap_s", caption: "Systolic PA pressure (echo)", category: "haemodynamics", units: [same("mmHg", 1, 0)], specUnit: "mmHg", range: [5, 120], role: "iterated", specTarget: "pap_s", since: "A", hint: "From the tricuspid jet: 4v² + right atrial pressure" },
+  { kind: "number", key: "pda_mm", caption: "PDA diameter (echo)", category: "haemodynamics", units: [same("mm", 0.1, 1)], specUnit: "mm", range: [0, 10], role: "structural", specTarget: "pda_mm", since: "A", hint: "At its narrowest (pulmonary) end; 0 = closed" },
+  { kind: "choice", key: "pda_flow", caption: "PDA flow direction (echo)", category: "haemodynamics", role: "context", options: [{ value: "ltr", label: "Left-to-right" }, { value: "bidirectional", label: "Bidirectional" }, { value: "rtl", label: "Right-to-left" }] },
 
   // ---- breathing and oxygen ----
   { kind: "choice", key: "resp_support", caption: "Respiratory support", category: "respiratory", role: "context", options: [{ value: "none", label: "None" }, { value: "low_flow", label: "Low-flow oxygen" }, { value: "high_flow", label: "High-flow cannula" }, { value: "cpap", label: "CPAP" }, { value: "niv", label: "Non-invasive ventilation" }, { value: "invasive", label: "Invasive ventilation" }, { value: "hfo", label: "High-frequency oscillation" }] },
@@ -111,6 +114,7 @@ export const PATIENT_FIELDS: PatientField[] = [
   { kind: "number", key: "spo2", caption: "SpO2", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "iterated", specTarget: "spo2", since: "A" },
   { kind: "choice", key: "spo2_site", caption: "SpO2 probe", category: "respiratory", role: "context", options: [{ value: "preductal", label: "Right hand (pre-ductal)" }, { value: "postductal", label: "Foot or left hand (post-ductal)" }] },
   { kind: "number", key: "spo2_post", caption: "SpO2 post-ductal (second probe)", category: "respiratory", units: [same("%", 1, 0)], specUnit: "%", range: [30, 100], role: "check", specTarget: null, since: "A" },
+  { kind: "number", key: "etco2", caption: "End-tidal CO2", category: "respiratory", units: [scaled("kPa", KPA_PER_MMHG, 0.1, 1), same("mmHg", 1, 0)], specUnit: "mmHg", range: [5, 120], role: "check", specTarget: null, since: "A" },
 
   // ---- blood gas ----
   { kind: "choice", key: "gas_site", caption: "Sample", category: "bloodgas", role: "context", options: [{ value: "arterial", label: "Arterial" }, { value: "capillary", label: "Capillary" }, { value: "venous", label: "Venous" }] },
@@ -253,7 +257,8 @@ export interface ResolvedTargets {
 }
 
 const VENTILATED = new Set(["niv", "invasive", "hfo"]);
-const NOT_LOOKED_UP = new Set(["fio2", "lactate", "na", "k", "cl", "glucose", "albumin"]);
+// unmeasured, these keep the baseline's value (or the gestational-age default for the duct)
+const NOT_LOOKED_UP = new Set(["fio2", "lactate", "na", "k", "cl", "glucose", "albumin", "pda_mm"]);
 
 // Decides, from the validated form alone, what the builder calibrates to.
 // These rules are deliberately NOT left to the bot:
@@ -366,8 +371,9 @@ export function resolveTargets(v: ValidatedForm): ResolvedTargets {
     (f): f is NumberField => f.kind === "number" && f.since === "A" && (f.role === "structural" || f.role === "iterated"),
   )
     .filter((f) => !has(f.key) && !(f.key === "map" && targets.map != null))
-    // an unmeasured FiO2 means room air, and an unmeasured solute keeps the baseline's
-    // normal value: neither is something for the bot to look up
+    // an unmeasured FiO2 means room air, an unmeasured solute keeps the baseline's normal
+    // value, and an unmeasured duct keeps the gestational-age default: none is something
+    // for the bot to look up
     .filter((f) => !NOT_LOOKED_UP.has(f.key))
     .map((f) => f.key);
 

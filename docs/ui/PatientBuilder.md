@@ -73,7 +73,8 @@ a pCO2 through spontaneous breathing drive), no FiO2 (oxygenation fitted in room
 no cardiac output (output and resistance then come from the baseline).
 
 An empty FiO2 is not sent to the bot as an unknown: it means room air, not a value to look up.
-The same holds for lactate, electrolytes, glucose and albumin: unmeasured, they keep the
+The same holds for the PDA diameter (an unmeasured duct keeps the gestational-age default)
+and for lactate, electrolytes, glucose and albumin: unmeasured, they keep the
 baseline's normal values. Measured, they are written into the model before calibration, so a
 base-excess target is fitted by the unmeasured anions left over after the measured ions.
 
@@ -132,6 +133,10 @@ give up at 300 s.
   stiffness lever is capped for numerical stability, and weight scaling leaves their
   arteries as compliant as a term baby's.
   A post-ductal SpO2 is compared with the model's post-ductal value.
+- **Ductal shunt** — the model's net ductal flow in mL/min (+ = left-to-right). When the
+  form gives an echo flow direction and the model's net flow disagrees (or is close to zero
+  where the echo shows a direction), a note above the table says so. A bidirectional duct is
+  never reported: it cannot be checked against a net flow.
 - **Solutes** — below the vitals, each lactate/electrolyte/glucose/albumin value as set and as
   read back from the arterial blood after calibration ("set in the model"); a difference
   means the model moved it (kidney filtration, or lactate production in a hypoxic patient).

@@ -425,7 +425,13 @@ const REPORT_CAPTIONS: Record<string, { caption: string; unit: string }> = {
   pap_m: { caption: "Mean pulmonary artery pressure", unit: "mmHg" },
   spo2_pre: { caption: "SpO2 pre-ductal", unit: "%" },
   pp: { caption: "Pulse pressure", unit: "mmHg" },
+  q_da: { caption: "Ductal shunt (+ = left-to-right)", unit: "mL/min" },
 };
+
+// the engine reports the ductal flow in L/s
+const ML_MIN_PER_L_S = 60000;
+// below this net flow (mL/min) the duct is treated as having no clear direction
+const DUCT_FLOW_THRESHOLD = 5;
 
 // The builder calibrates systolic/diastolic as mean (map) + pulse pressure (pp), so
 // whether a systolic or diastolic target was met follows from those two.
@@ -458,6 +464,9 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
   });
   const vitals = report.residuals.map((r): ResultRow => {
     const key = reportToForm(r.key, request);
+    if (key === "q_da") {
+      return { key, ...REPORT_CAPTIONS.q_da, model: Number((r.value * ML_MIN_PER_L_S).toFixed(1)), measured: null, delta: null, calibrated: false, met: null, flag: "" };
+    }
     const field = numberField(key);
     const label = field ? { caption: field.caption, unit: field.specUnit } : (REPORT_CAPTIONS[key] ?? { caption: key, unit: "" });
     // pulse pressure is not a form field: it is calibrated when both pressures are
@@ -482,4 +491,22 @@ export function buildResultRows(request: PatientBuildRequest, report: BuildRepor
     };
   });
   return [...vitals, ...solutes];
+}
+
+// Compares the echo's ductal flow direction with the model's net ductal flow. Returns a
+// sentence for the result view when they disagree, or null. A bidirectional duct cannot be
+// checked against a net flow, so it is never reported as a mismatch.
+export function ductalFlowNote(request: PatientBuildRequest, report: BuildReport): string | null {
+  const echo = request.validated.choices.pda_flow;
+  const row = report.residuals.find((r) => r.key === "q_da");
+  if (!echo || echo === "bidirectional" || !row) return null;
+  const q = row.value * ML_MIN_PER_L_S;
+  const model = q > DUCT_FLOW_THRESHOLD ? "ltr" : q < -DUCT_FLOW_THRESHOLD ? "rtl" : "none";
+  if (model === echo) return null;
+  const words: Record<string, string> = { ltr: "left-to-right", rtl: "right-to-left", none: "close to zero" };
+  return (
+    `The echo shows ${words[echo]} ductal flow, but the model's net ductal flow is ${words[model]} ` +
+    `(${q > 0 ? "+" : ""}${q.toFixed(0)} mL/min). Direction follows the pressures on either side of the duct: ` +
+    `check the pulmonary and systemic pressures that were entered.`
+  );
 }

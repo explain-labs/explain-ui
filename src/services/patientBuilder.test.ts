@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FORM_MARKER, buildRequest, buildResultRows, buildValueRows, checkSpec, parseBuildReport, parseProvenance, type PatientBuildRequest } from "./patientBuilder";
+import { FORM_MARKER, buildRequest, buildResultRows, buildValueRows, checkSpec, ductalFlowNote, parseBuildReport, parseProvenance, type PatientBuildRequest } from "./patientBuilder";
 import type { PatientForm } from "./patientSchema";
 
 const FORM: PatientForm = {
@@ -276,6 +276,22 @@ describe("result tables", () => {
     expect(rows.map((r) => r.key)).toEqual(["hr", "lactate", "na"]);
     expect(rows[2]).toMatchObject({ caption: "Sodium", unit: "mmol/L", model: 134.19, measured: 134, delta: 0.19, set: true, calibrated: false, met: null });
     expect(parseBuildReport(raw)!.solutes).toEqual([]); // an older bot host sends none
+  });
+
+  it("shows the ductal shunt in mL/min", () => {
+    const report = parseBuildReport({ ...raw, residuals: [{ key: "q_da", value: 0.00275, target: null, delta: null, flag: "" }] })!;
+    expect(buildResultRows(request(), report)[0]).toMatchObject({ key: "q_da", caption: "Ductal shunt (+ = left-to-right)", unit: "mL/min", model: 165, measured: null });
+  });
+
+  it("compares the echo's ductal flow direction with the model's net flow", () => {
+    const withFlow = (pda_flow: string) => buildRequest({ ...FORM, choices: { ...FORM.choices, pda_flow } }, "pb_d")!;
+    const reportWith = (q: number) => parseBuildReport({ ...raw, residuals: [{ key: "q_da", value: q / 60000, target: null, delta: null, flag: "" }] })!;
+    expect(ductalFlowNote(withFlow("ltr"), reportWith(120))).toBeNull();
+    expect(ductalFlowNote(withFlow("rtl"), reportWith(-40))).toBeNull();
+    expect(ductalFlowNote(withFlow("rtl"), reportWith(120))).toMatch(/echo shows right-to-left.*left-to-right \(\+120 mL\/min\)/);
+    expect(ductalFlowNote(withFlow("ltr"), reportWith(2))).toMatch(/close to zero/);
+    expect(ductalFlowNote(withFlow("bidirectional"), reportWith(120))).toBeNull(); // not checkable from a net flow
+    expect(ductalFlowNote(request(), reportWith(120))).toBeNull(); // no echo direction given
   });
 
   it("marks systolic and diastolic as missed when the pulse pressure was missed", () => {
