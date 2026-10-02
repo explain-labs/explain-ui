@@ -9,7 +9,7 @@ import Checkbox from "primevue/checkbox";
 import Tag from "primevue/tag";
 import { usePatientBuilderStore } from "@/stores/patientBuilder";
 import { CATEGORY_LABELS, PATIENT_FIELDS, fromSpecValue, numberField, type FieldCategory, type PatientField } from "@/services/patientSchema";
-import { ductalFlowNote, targetCaption, type ResultRow, type ValueRow } from "@/services/patientBuilder";
+import { atrialFlowNote, ductalFlowNote, targetCaption, type ResultRow, type ValueRow } from "@/services/patientBuilder";
 
 // Patient builder: enter what was measured on a real neonate, let the AI bot
 // fill the structural unknowns and the server calibrate a patient to it, then
@@ -145,6 +145,7 @@ const LEVER_WORDS: Record<string, string> = {
   pap_s: "pulmonary vascular resistance",
   cvp: "venous filling",
   co: "heart contractility",
+  ef: "left heart contractility",
   hr: "heart-rate setting",
   be: "unmeasured acid load",
   ph: "unmeasured acid load",
@@ -165,7 +166,11 @@ const leverLimits = computed(() => {
     };
   });
 });
-const ductNote = computed(() => (store.result?.report ? ductalFlowNote(store.result.request, store.result.report) : null));
+const shuntNotes = computed(() => {
+  const r = store.result;
+  if (!r?.report) return [];
+  return [ductalFlowNote(r.request, r.report), atrialFlowNote(r.request, r.report)].filter((n): n is string => n != null);
+});
 const outOfRange = computed(() => (store.result?.resultRows ?? []).filter((r) => r.flag && r.flag !== "ok"));
 const showLog = ref(false);
 
@@ -306,8 +311,8 @@ watch(saveName, () => (askOverwrite.value = false));
           The bot host did not send a calibration report, so this patient cannot be checked against the form
           here. Load it and compare the monitor values yourself.
         </p>
-        <p v-if="ductNote" class="flex gap-2 text-xs text-amber-300">
-          <i class="pi pi-exclamation-triangle mt-0.5 shrink-0"></i><span>{{ ductNote }}</span>
+        <p v-for="(note, i) in shuntNotes" :key="i" class="flex gap-2 text-xs text-amber-300">
+          <i class="pi pi-exclamation-triangle mt-0.5 shrink-0"></i><span>{{ note }}</span>
         </p>
         <ul v-if="leverLimits.length" class="flex flex-col gap-1 text-xs text-amber-300">
           <li v-for="l in leverLimits" :key="l.key" class="flex gap-2">

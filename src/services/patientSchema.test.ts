@@ -205,6 +205,20 @@ describe("resolveTargets", () => {
     expect(resolve({ ...W, pda_mm: [0, "mm"] }).targets.pda_mm).toBe(0);
   });
 
+  it("sends the echo foramen ovale diameter and ejection fraction", () => {
+    const r = resolve({ ...W, fo_mm: [3, "mm"], ef: [45, "%"] }, { fo_flow: "ltr" });
+    expect(r.targets).toMatchObject({ fo_mm: 3, ef: 45 });
+    expect(r.unknown).not.toContain("fo_mm"); // an unmeasured foramen keeps the baseline's
+    expect(resolve({ ...W }).unknown).toContain("ef");
+  });
+
+  it("keeps cardiac output on the contractility lever and compares the ejection fraction", () => {
+    const r = resolve({ ...W, co: [250, "mL/min"], ef: [45, "%"] });
+    expect(r.targets.co).toBe(0.25);
+    expect(r.targets.ef).toBeUndefined();
+    expect(r.checks.ef).toMatch(/cardiac output is the target/);
+  });
+
   it("compares a second, post-ductal SpO2 without targeting it", () => {
     const r = resolve({ ...W, spo2: [93, "%"], spo2_post: [86, "%"] }, { spo2_site: "preductal" });
     expect(r.targets.spo2).toBe(93);

@@ -245,10 +245,11 @@ def parse_build_report(stderr: str) -> dict:
 # Vitals passed to the app from the engine's build_report, in display order: the ones the
 # stderr report shows, plus those the form can measure (sys/dia, rr, post-ductal SpO2,
 # temperature, cardiac output) so the app can compare them with what was entered. `pp`
-# (pulse pressure, sys - dia) is what the builder calibrates for a sys/dia pair; `q_da` is the
-# net ductal flow in L/s (+ = left-to-right), which the app compares with the echo direction.
+# (pulse pressure, sys - dia) is what the builder calibrates for a sys/dia pair; `q_da` and
+# `q_fo` are the net ductal and atrial (foramen ovale) flows in L/s (+ = left-to-right), which
+# the app compares with the echo directions; `ef` is the LV ejection fraction in %.
 _REPORT_VITALS = (
-    "hr", "sys", "dia", "pp", "map", "cvp", "pap_s", "pap_m", "lvo", "q_da", "rr", "spo2_pre",
+    "hr", "sys", "dia", "pp", "map", "cvp", "pap_s", "pap_m", "lvo", "ef", "q_da", "q_fo", "rr", "spo2_pre",
     "spo2_post", "etco2", "po2", "pco2", "ph", "be", "hco3", "temp",
 )
 # controller key -> the measured vital it reads (scripts/build_patient.mjs READKEY)

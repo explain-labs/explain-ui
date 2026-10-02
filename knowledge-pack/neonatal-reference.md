@@ -86,7 +86,7 @@ runs high and their pO2 low.
 Do not put these in a build SPEC; the builder ignores them (it lists them as ignored).
 If the form supplies one, it arrives under `checks`, and you leave it there.
 
-- post-ductal SpO2, end-tidal CO2 and the PDA flow direction (compared with the model by
-  the app, never targets)
+- post-ductal SpO2, end-tidal CO2 and the PDA and atrial shunt flow directions (compared
+  with the model by the app, never targets)
 - oxygen consumption, blood volume, P50 / fetal haemoglobin fraction, lung compliance,
   dead space: these stay at the baseline scenario's values
