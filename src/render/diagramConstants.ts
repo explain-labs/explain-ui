@@ -56,6 +56,9 @@ export const DEVICE_BAND_DEFAULT = 0.5;
 
 // ECLS circuit: visible while ECLS is on (Ecls.ecls_running), clamped or not —
 // a clamped circuit is drawn static (its flow is forced to 0, so no dots).
+// The sweep-gas row (ECLS_GAS_SOURCE → ECLS_GAS_OXY → ECLS_GAS_OUT, drawn under the
+// oxygenator) is in the same group, so it shows and hides with it; sweep keeps
+// flowing while the blood side is clamped.
 // The drainage/return connectors re-route to the diagram component holding the
 // live cannulation site (e.g. drainage_site "RASVC" → the "RA" compartment).
 export const ECLS_DIAGRAM = {
