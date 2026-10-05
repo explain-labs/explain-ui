@@ -41,10 +41,15 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 
+# Fleet-wide secrets (Anthropic OAuth token). Same two-stage, non-overriding
+# load as bot.py and the other bots' api.py: plist env > secrets.env > .env.
+load_dotenv(dotenv_path=Path.home() / ".config" / "claude-bots" / "secrets.env",
+            override=False)
+
 load_dotenv(dotenv_path=Path.cwd() / ".env")
 
 BOT_NAME = os.environ.get("BOT_NAME", "cradle")
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-7")
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 ALLOWED_TOOLS = os.environ.get(
     "ALLOWED_TOOLS", "Read,Glob,Grep,WebSearch,WebFetch"
 ).split(",")
