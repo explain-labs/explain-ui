@@ -38,7 +38,10 @@ tables. A number field has:
   - `structural`: written into the model before calibration (weight, haemoglobin, …);
   - `iterated`: a calibration target the builder tunes a lever to reach;
   - `check`: not targeted, reported next to the model's value;
-  - `context`: never reaches the builder (postnatal age, birth weight).
+  - `context`: not a builder target (postnatal age, birth weight). Postnatal age does reach
+    the builder, as `postnatal_age_days`: a term baby's PA pressure falls steeply over the
+    first days, so its normal-range flags follow it (day 1 when absent). `checkSpec` reports
+    a spec that lost it.
 - `since` — `"A"` if the current builder can use it, `"B"` if it cannot yet (no field is
   `"B"` at the moment; the mechanism stays for the next value the engine cannot use). A `"B"` value is still collected and shown as "not used yet". When the
   engine gains a target, flip its `since` to `"A"` and, if needed, its `role`.

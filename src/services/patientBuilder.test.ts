@@ -146,7 +146,7 @@ describe("checkSpec", () => {
   const spec = (extra: Record<string, unknown> = {}, drop: string[] = []) => {
     const targets: Record<string, unknown> = { ...request().payload.targets, ...extra };
     for (const k of drop) delete targets[k];
-    return { baseline: "term_neonate", targets };
+    return { baseline: "term_neonate", postnatal_age_days: 3, targets };
   };
 
   it("accepts a spec that carries the submitted targets unchanged", () => {
@@ -170,6 +170,19 @@ describe("checkSpec", () => {
   it("allows a structural fill only when the provenance accounts for it", () => {
     expect(checkSpec(spec({ hb: 9.6 }), request(), prov)).toEqual([]);
     expect(checkSpec(spec({ hb: 9.6 }), request(), null)[0].message).toMatch(/without an explanation/);
+  });
+
+  it("flags a postnatal age that did not reach the builder", () => {
+    const { postnatal_age_days: _, ...noAge } = spec();
+    expect(checkSpec(noAge, request(), null)[0].message).toMatch(/postnatal_age: 3 days, but it was not passed/);
+    expect(checkSpec({ ...spec(), postnatal_age_days: 30 }, request(), null)[0].message).toMatch(/given 30/);
+  });
+
+  it("does not ask for a postnatal age the form did not have", () => {
+    const f = { ...FORM, numbers: { ...FORM.numbers, postnatal_age: { value: null, unit: "days" } } };
+    const r = buildRequest(f, "pb_noage")!;
+    const { postnatal_age_days: _, ...noAge } = { baseline: "term_neonate", postnatal_age_days: 0, targets: { ...r.payload.targets } };
+    expect(checkSpec(noAge, r, null)).toEqual([]);
   });
 
   it("reports a spec with no target list", () => {

@@ -166,6 +166,9 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
 {
   "baseline": "term_neonate",          // required — a scenario name to start from
   "name": "custom_patient",            // output patient name
+  "postnatal_age_days": 3,             // optional metadata: postnatal age in days. A term baby's
+                                       //   PA pressure falls steeply over the first days, so its
+                                       //   normal-range flags follow it (none = day 1)
   "targets": {                          // all optional; only listed vitals are calibrated
     "weight": 1.2, "gestational_age": 28, "height": 0.355, "age": 0, // structural
     "hb": 9.5,            // hemoglobin in mmol/L (the model's unit)
@@ -285,7 +288,9 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
    targets (see the preterm rule under "Building a new patient"). Do not add
    `pathophysiology`, `pda` or a `profile`, and do not pick a lesion baseline: form requests
    build a structurally normal baby.
-6. **SPEC settings:** `"name"` = the `request_id`; `"max_iters": 10`; no `summary` text
+6. **SPEC settings:** `"name"` = the `request_id`; `"max_iters": 10`; when `context` has a
+   `postnatal_age` (days), copy it unchanged into `"postnatal_age_days"` (top level, not a
+   target; the app checks that it arrived); no `summary` text
    beyond a plain description of size and gestation; no `tolerance` unless the form sends
    one.
 

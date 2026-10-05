@@ -233,6 +233,7 @@ const close = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Ma
 //   - a calibration target the user did not measure must not appear (unknown
 //     vitals are left to emerge from the model, not invented)
 //   - a structural value may only be added when the provenance block accounts for it
+//   - a postnatal age on the form must reach the builder (its PA pressure flags follow it)
 export function checkSpec(spec: unknown, request: PatientBuildRequest, provenance: Provenance | null): SpecProblem[] {
   const problems: SpecProblem[] = [];
   const targets = spec && typeof spec === "object" ? (spec as { targets?: unknown }).targets : null;
@@ -257,6 +258,15 @@ export function checkSpec(spec: unknown, request: PatientBuildRequest, provenanc
       problems.push({ key, message: `${key}: ${String(got)} was added as a target although it was not measured` });
     } else if (!accounted.has(key)) {
       problems.push({ key, message: `${key}: ${String(got)} was filled in without an explanation` });
+    }
+  }
+  const age = request.payload.context.postnatal_age;
+  if (typeof age === "number") {
+    const got = (spec as { postnatal_age_days?: unknown }).postnatal_age_days;
+    if (typeof got !== "number") {
+      problems.push({ key: "postnatal_age", message: `postnatal_age: ${age} days, but it was not passed to the builder (its PA pressure flags assume day 1)` });
+    } else if (!close(got, age)) {
+      problems.push({ key: "postnatal_age", message: `postnatal_age: ${age} days, but the builder was given ${got}` });
     }
   }
   return problems;
