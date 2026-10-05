@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommands } from "./botCommands";
+import { parseCommands, validateCommand } from "./botCommands";
 
 const block = (json: string) => "```explain-command\n" + json + "\n```";
 
@@ -48,5 +48,30 @@ describe("parseCommands", () => {
   it("returns an empty result for a non-string answer", () => {
     const r = parseCommands(undefined as unknown as string);
     expect(r).toEqual({ clean: "", commands: [], parseErrors: [] });
+  });
+});
+
+describe("validateCommand tune", () => {
+  const tune = (changes: { target: string; value: number }[]) =>
+    validateCommand({ op: "tune", changes, reason: "t" } as any, {}, "full");
+
+  it("accepts the builder-aligned targets", () => {
+    const r = tune([{ target: "pap_s", value: 36 }, { target: "spo2", value: 85 }]);
+    expect(r.ok).toBe(true);
+    expect(r.normalized).toEqual({ kind: "tune", targets: { pap_s: 36, spo2: 85 } });
+  });
+
+  it("accepts systolic and diastolic as a pair", () => {
+    const r = tune([{ target: "sys", value: 40 }, { target: "dia", value: 24 }]);
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects systolic or diastolic alone", () => {
+    expect(tune([{ target: "sys", value: 40 }]).ok).toBe(false);
+    expect(tune([{ target: "dia", value: 24 }, { target: "map", value: 30 }]).error).toMatch(/together/);
+  });
+
+  it("rejects an unknown target", () => {
+    expect(tune([{ target: "pp", value: 20 }]).ok).toBe(false);
   });
 });

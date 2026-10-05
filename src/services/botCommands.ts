@@ -331,9 +331,11 @@ function validateLoadDefinition(cmd: BotCommand, scope: CommandScope): Validatio
 
 // Validate an `op:"tune"` command: closed-loop drive measured quantities of the
 // running model to exact target values. Full scope only. `changes` is a list of
-// { target, value } where target ∈ LIVE_TARGETS (map/co/hr/po2/spo2/pco2/be/ph/
-// blood_volume) and value is a finite number. Builds the {target:value} map the
-// engine's tune() consumes.
+// { target, value } where target ∈ LIVE_TARGETS (map/sys/dia/co/hr/pap_m/pap_s/po2/
+// spo2/pco2/be/ph/blood_volume) and value is a finite number. sys and dia only
+// together: the engine tunes them as a pair (pulse pressure, and MAP unless given)
+// and would silently ignore one alone. Builds the {target:value} map the engine's
+// tune() consumes.
 function validateTuneCommand(cmd: BotCommand, scope: CommandScope): ValidationResult {
   const label = cmd.reason || "tune";
   if (scope === "guided")
@@ -352,6 +354,8 @@ function validateTuneCommand(cmd: BotCommand, scope: CommandScope): ValidationRe
     targets[t] = v;
     parts.push(`${t}→${v}`);
   }
+  if ((targets.sys == null) !== (targets.dia == null))
+    return reject(label, "tune needs sys and dia together (they are tuned as a pair)");
   return {
     ok: true,
     normalized: { kind: "tune", targets },

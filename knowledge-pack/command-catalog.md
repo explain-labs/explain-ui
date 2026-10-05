@@ -87,7 +87,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `start`  — start the realtime simulation loop
 - `stop`  — stop the realtime simulation loop
 - `revert`  — undo all live changes — reload the patient as it was loaded
-- `tune`  — tune the live model to target value(s): map/co/hr/po2/spo2/pco2/be/ph/blood_volume (Full scope)
+- `tune`  — tune the live model to target value(s): map, sys+dia (together), co, hr, pap_m/pap_s, po2/spo2, pco2, be/ph, blood_volume (Full scope)
 - `loadDefinition`  — load+run a bot-built calibrated patient (Full scope; definition rides in response.artifact)
 - `setProp` `Pda.diameter_relative` — Ductus arteriosus (PDA) size — directional nudge lever
 - `setProp` `Shunts.diameter_fo` — Foramen ovale size — directional nudge lever

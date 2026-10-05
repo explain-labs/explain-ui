@@ -360,9 +360,15 @@ fluid type): `{"op":"call","model":"Fluids","target":"add_volume","args":[250,10
 
 **3. Exact number — `tune` (closed-loop; iterates until it hits the value).** Use this
 when the user gives a **number** ("set CO to 0.25 L/min", "blood volume to 0.26 L", "MAP
-to 45"). It drives the live model to the target in place (a few seconds; the sim resumes
-at the new operating point). Targets: `map`, `co` (L/min), `hr`, `po2`, `spo2`, `pco2`,
-`be`, `ph`, `blood_volume` (L).
+to 45"). It drives the live model to the target in place (a few seconds, up to about a
+minute with an oxygen target; the sim resumes at the new operating point). Targets: `map`,
+`sys` + `dia` (only together: tuned as pulse pressure, and MAP unless you also give `map`),
+`co` (L/min), `hr`, `pap_m` / `pap_s` (mean / systolic PA pressure), `po2`, `spo2`, `pco2`,
+`be`, `ph`, `blood_volume` (L). These move the same levers the patient builder uses: an SpO2
+target on a patient already on high oxygen desaturates through intrapulmonary shunt, a PAP
+target moves the pulmonary vessels together with that shunt, and a small baby's pulse pressure
+has a ceiling (about 17 mmHg at 28 weeks; the result says INCOMPLETE when a target is out of
+reach).
 
 ```explain-command
 {"op":"tune","changes":[{"target":"co","value":0.25}],"reason":"set cardiac output to 0.25 L/min"}
