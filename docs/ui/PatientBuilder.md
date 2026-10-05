@@ -133,9 +133,9 @@ give up at 300 s.
   and cardiac output. Systolic and diastolic count as missed when the mean or the pulse
   pressure was missed. A small baby's arteries are made stiffer than a term baby's in
   proportion to size (as measured pulse-wave velocity and preterm stiffness studies
-  indicate), so a 28-week patient starts near a pulse pressure of 20 mmHg. The stiffness is
-  capped for numerical stability, though: pulse pressures above about 22 at 28 weeks are out
-  of reach, and below about 1 kg the size stiffening itself is capped (the notes say so).
+  indicate), so a 28-week patient starts at a pulse pressure of about 16–18 mmHg (lower at a
+  faster heart rate). The stiffness is capped for numerical stability, though: pulse
+  pressures above about 20 at 28 weeks are out of reach, and below about 1 kg the size stiffening itself is capped (the notes say so).
   A post-ductal SpO2 is compared with the model's post-ductal value.
 - **Ductal shunt** — the model's net ductal flow in mL/min (+ = left-to-right). When the
   form gives an echo flow direction and the model's net flow disagrees (or is close to zero
