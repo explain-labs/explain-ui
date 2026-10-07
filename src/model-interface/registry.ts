@@ -6590,6 +6590,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "ul": 50
     },
     {
+      "caption": "pressure support above PEEP (cmH2O)",
+      "target": "ps_cmh2o",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "delta": 1,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 40
+    },
+    {
       "caption": "positive end expiratory pressure (cmH2O)",
       "target": "peep_cmh2o",
       "type": "number",
