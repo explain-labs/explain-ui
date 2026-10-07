@@ -86,7 +86,7 @@ const SLOW_PATHS = [
   "Ventilator.exp_tidal_volume",
   "Ventilator.minute_volume",
   "Ventilator.compliance",
-  "Ventilator.pip_cmh2o",
+  "Ventilator.p_peak",
   "Ventilator.etco2",
 ];
 
@@ -106,7 +106,7 @@ const measured = computed(() => {
     { label: "Vt", value: fmt(l["Ventilator.exp_tidal_volume"], 1, 1000), unit: "mL" },
     { label: "MV", value: fmt(l["Ventilator.minute_volume"], 2), unit: "L/min" },
     { label: "Cdyn", value: fmt(l["Ventilator.compliance"], 1), unit: "mL/cmH₂O" },
-    { label: "PIP", value: fmt(l["Ventilator.pip_cmh2o"], 0), unit: "cmH₂O" },
+    { label: "Ppeak", value: fmt(l["Ventilator.p_peak"], 0), unit: "cmH₂O" },
     { label: "etCO₂", value: fmt(l["Ventilator.etco2"], 0), unit: "mmHg" },
   ];
 });
