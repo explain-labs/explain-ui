@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **422 settable params**, **28 functions**
-(+ 59 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **44 model_types**, **423 settable params**, **28 functions**
+(+ 60 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -43,6 +43,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ventilator.tidal_volume` — target tidal volume (mL)
 - `setProp` `Ventilator.pip_cmh2o` — peak inspiratory pressure (cmH2O)
 - `setProp` `Ventilator.pip_cmh2o_max` — max peak inspiratory pressure, PRVC (cmH2O)
+- `setProp` `Ventilator.ps_cmh2o` — pressure support above PEEP, PS mode (cmH2O)
 - `setProp` `Ventilator.peep_cmh2o` — positive end-expiratory pressure (cmH2O); doubles as the CPAP level in CPAP mode
 - `setProp` `Ventilator.insp_flow` — inspiratory/bias flow (L/min)
 - `setProp` `Ventilator.synchronized` — synchronized (patient-triggered) ventilation on/off
@@ -728,6 +729,7 @@ _setProp_:
 - `tidal_volume` — tidal volume (mL) (number, mL, range 1–500)
 - `pip_cmh2o` — peak inspiratory pressure (cmH2O) (number, cmH2O, range 5–50)
 - `pip_cmh2o_max` — max peak inspiratory pressure (cmH2O) (number, cmH2O, range 5–50)
+- `ps_cmh2o` — pressure support above PEEP (cmH2O) (number, cmH2O, range 0–40)
 - `peep_cmh2o` — positive end expiratory pressure (cmH2O) (number, cmH2O, range 0–20)
 - `exp_flow` — expiratory flow (l/min) (number, l/min, range 0–20) _(extra)_
 - `trigger_volume_perc` — trigger volume percentage (%) (number, %, range 5–20) _(extra)_

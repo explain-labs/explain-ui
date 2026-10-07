@@ -35,8 +35,8 @@ const LANES: MonitorLane[] = [
     label: "Paw",
     color: "#facc15",
     unit: "cmH₂O",
-    // achieved peak / PEEP targets
-    readNumeric: (n) => `${f(n, "Ventilator.pip_cmh2o", 0)}/${f(n, "Ventilator.peep_cmh2o", 0)}`,
+    // measured peak (not the PIP setting: PS delivers PEEP + PS, PRVC/VC servo their own peak)
+    readNumeric: (n) => `${f(n, "Ventilator.p_peak", 0)}/${f(n, "Ventilator.peep_cmh2o", 0)}`,
   },
   {
     signal: "Ventilator.flow",
@@ -61,7 +61,7 @@ const LANES: MonitorLane[] = [
 
 const FAST_PATHS = LANES.map((l) => l.signal);
 const SLOW_PATHS = [
-  "Ventilator.pip_cmh2o",
+  "Ventilator.p_peak",
   "Ventilator.peep_cmh2o",
   "Ventilator.minute_volume",
   "Ventilator.exp_tidal_volume",

@@ -67,6 +67,12 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
   {
     op: "setProp",
     model: "Ventilator",
+    target: "ps_cmh2o",
+    note: "pressure support above PEEP, PS mode (cmH2O)",
+  },
+  {
+    op: "setProp",
+    model: "Ventilator",
     target: "peep_cmh2o",
     note: "positive end-expiratory pressure (cmH2O); doubles as the CPAP level in CPAP mode",
   },
@@ -247,7 +253,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
   // Drive a measured quantity of the RUNNING model to an exact value by iterating
   // (apply lever → run → measure → nudge). targets: map, co, hr, po2, spo2, pco2,
   // be, ph, blood_volume. Done in place (no reload). See validateTuneCommand.
-  { op: "tune", note: "tune the live model to target value(s): map/co/hr/po2/spo2/pco2/be/ph/blood_volume (Full scope)" },
+  { op: "tune", note: "tune the live model to target value(s): map, sys+dia (together), co, hr, pap_m/pap_s, po2/spo2, pco2, be/ph, blood_volume (Full scope)" },
 
   // --- Whole-patient replacement (Full scope only) ---
   // Loads a complete, bot-built calibrated patient definition and runs it

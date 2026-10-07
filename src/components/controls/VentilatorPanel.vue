@@ -46,13 +46,15 @@ const TINSP: Field = { p: "insp_time", label: "Tinsp", unit: "s", min: 0.1, max:
 const INSP_FLOW: Field = { p: "insp_flow", label: "Insp flow", unit: "L/min", min: 0, max: 20, step: 0.5, rounding: 1 };
 const PIP: Field = { p: "pip_cmh2o", label: "PIP", unit: "cmH₂O", min: 5, max: 50, step: 1, rounding: 0 };
 const PIP_MAX: Field = { p: "pip_cmh2o_max", label: "PIP max", unit: "cmH₂O", min: 5, max: 50, step: 1, rounding: 0 };
+const PS_LEVEL: Field = { p: "ps_cmh2o", label: "PS above PEEP", unit: "cmH₂O", min: 0, max: 40, step: 1, rounding: 0 };
 const VT: Field = { p: "tidal_volume", label: "Vt target", unit: "mL", min: 1, max: 500, step: 1, rounding: 0, factor: 1000 };
 const TRIG_VOL: Field = { p: "trigger_volume_perc", label: "Trigger", unit: "%", min: 5, max: 20, step: 0.5, rounding: 1 };
 
 const MODE_FIELDS: Record<string, Field[]> = {
   PC: [PIP, RATE, TINSP, INSP_FLOW],
   PRVC: [PIP_MAX, VT, RATE, TINSP, INSP_FLOW],
-  PS: [PIP, INSP_FLOW, TRIG_VOL],
+  // PS: support level above PEEP; rate and Tinsp are the apnea backup and Ti max.
+  PS: [PS_LEVEL, RATE, TINSP, INSP_FLOW, TRIG_VOL],
   // Pure CPAP: a single continuous distending pressure (PEEP, from COMMON) plus the
   // bias/insp flow. No mandatory breaths — the patient breathes spontaneously on top.
   CPAP: [INSP_FLOW],
@@ -84,7 +86,7 @@ const SLOW_PATHS = [
   "Ventilator.exp_tidal_volume",
   "Ventilator.minute_volume",
   "Ventilator.compliance",
-  "Ventilator.pip_cmh2o",
+  "Ventilator.p_peak",
   "Ventilator.etco2",
 ];
 
@@ -104,7 +106,7 @@ const measured = computed(() => {
     { label: "Vt", value: fmt(l["Ventilator.exp_tidal_volume"], 1, 1000), unit: "mL" },
     { label: "MV", value: fmt(l["Ventilator.minute_volume"], 2), unit: "L/min" },
     { label: "Cdyn", value: fmt(l["Ventilator.compliance"], 1), unit: "mL/cmH₂O" },
-    { label: "PIP", value: fmt(l["Ventilator.pip_cmh2o"], 0), unit: "cmH₂O" },
+    { label: "Ppeak", value: fmt(l["Ventilator.p_peak"], 0), unit: "cmH₂O" },
     { label: "etCO₂", value: fmt(l["Ventilator.etco2"], 0), unit: "mmHg" },
   ];
 });
