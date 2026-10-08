@@ -7,6 +7,7 @@ import ParamTile from "./ParamTile.vue";
 import MonitoredValues from "./MonitoredValues.vue";
 import ModePanel from "./ModePanel.vue";
 import { PARAMS, MODES, SLOW_PATHS, SETTING_NAMES, decimalsOf, labelOf, stepParam, interlocks } from "./sleUi";
+import { SLE_THEME as T, SLE_CSS_VARS } from "./sleTheme";
 
 // On-screen replica of the SLE6000 touchscreen (IFU V2.0 §21, pp 138-155), drawn as a 1024 x 768
 // frame scaled to the pane: information bar, button column, three waveforms, monitored values and
@@ -56,7 +57,7 @@ const pendingCircuit = ref<number | null>(null);
 const selected = ref<string | null>(null);
 const panel = ref<"mode" | null>(null);
 const showExtra = ref(false);
-const doubleColumn = ref(false);
+const doubleColumn = ref(true); // as on the device photos; a 1 s hold switches to single
 const locked = ref(false);
 const lockHint = ref(false);
 const pausedLeft = ref(0);
@@ -218,11 +219,15 @@ const CHANNELS: SleChannel[] = [
     title: "Pressure (mbar)",
     scale: 1 / 1.01972,
     ranges: [[-5, 20], [-5, 30], [-10, 40], [-10, 60], [-20, 80]],
+    color: T.pressure.line,
+    fill: T.pressure.fill,
   },
   {
     signal: "Ventilator.flow",
     title: "Flow (l/min)",
     ranges: [[-5, 5], [-10, 10], [-20, 20], [-40, 40], [-80, 80]],
+    color: T.flow.line,
+    fill: T.flow.fill,
   },
   {
     // the volume trace restarts at each breath and spontaneous breaths between ventilator breaths
@@ -230,8 +235,19 @@ const CHANNELS: SleChannel[] = [
     signal: "Ventilator.vol",
     title: "Volume (ml)",
     ranges: [[-5, 15], [-10, 30], [-20, 60], [-40, 120], [-100, 250], [-200, 500]],
+    color: T.volume.line,
+    fill: T.volume.fill,
   },
 ];
+const PALETTE = {
+  background: T.screen,
+  header: T.header,
+  title: T.text,
+  axis: T.axis,
+  tick: T.label,
+  zero: T.zero,
+  sweep: T.sweep,
+};
 const FAST_PATHS = CHANNELS.map((c) => c.signal);
 
 function rewatch() {
@@ -249,7 +265,7 @@ watch(modelReady, (ready) => {
 
 let clockTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
-  renderer = new Sle6000Renderer(wave.value!, CHANNELS, 6);
+  renderer = new Sle6000Renderer(wave.value!, CHANNELS, PALETTE, 6);
   addRenderer(renderer);
   rewatch();
   ro = new ResizeObserver(() => {
@@ -273,11 +289,19 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="host" class="w-full" :style="{ height: `${H * scale}px` }">
-    <div class="sle" :style="{ transform: `scale(${scale})` }">
+    <div class="sle" :style="{ transform: `scale(${scale})`, ...SLE_CSS_VARS }">
+      <!-- alarm mute (top left), the mode name under it -->
+      <button class="sle-bell" disabled title="Alarms come in a later phase">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6zm-2 15a2 2 0 0 0 4 0" />
+        </svg>
+      </button>
+      <div class="sle-modename">
+        <div>{{ previewMode ?? liveMode }}</div>
+        <div class="sub">{{ ventilating && shown.vtv > 0 && liveMode !== "CPAP" ? "VTV" : "" }}</div>
+      </div>
       <!-- information bar -->
-      <div class="sle-mode" @click="openMode">{{ previewMode ?? liveMode }}</div>
       <div class="sle-info">
-        <button class="sle-bell" disabled title="Alarms come in a later phase">🔔</button>
         <div class="sle-msg">{{ message }}</div>
         <button
           class="sle-lock"
@@ -286,7 +310,7 @@ onBeforeUnmount(() => {
           @pointerup="lockUp"
           @pointerleave="lockUp"
         >
-          {{ locked ? "🔒" : "Lock" }}
+          {{ locked ? "🔒" : "Lock Screen" }}
         </button>
         <button class="sle-pause" :aria-label="pausedLeft ? 'Play' : 'Pause'" @click="togglePause">
           {{ pausedLeft ? "▶" : "❚❚" }}
@@ -299,9 +323,10 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- left button column -->
-      <button class="sle-side" style="top: 60px" disabled title="Alarms come in a later phase">Alarms</button>
-      <button class="sle-side" style="top: 108px" disabled title="Not modelled">Utilities</button>
-      <button class="sle-side" style="top: 156px" disabled title="Loops and trends come in a later phase">Layout</button>
+      <button class="sle-side" :class="{ on: panel === 'mode' }" style="top: 104px" @click="openMode">Mode</button>
+      <button class="sle-side" style="top: 150px" disabled title="Alarms come in a later phase">Alarms</button>
+      <button class="sle-side" style="top: 196px" disabled title="Not modelled">Utilities</button>
+      <button class="sle-side" style="top: 242px" disabled title="Loops and trends come in a later phase">Layout</button>
       <button
         v-if="rowMode && MODES[rowMode].extra.length"
         class="sle-extra-btn"
@@ -398,17 +423,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* the SLE6000 "Lunar" dark interface; colours in sleTheme.ts (from vendor product photos) */
 .sle {
   position: relative;
   width: 1024px;
   height: 768px;
   transform-origin: 0 0;
-  background: #eceded;
+  background: var(--sle-screen);
   border: 2px solid #2b2d31;
   border-radius: 10px;
   overflow: hidden;
   font-family: Arial, Helvetica, sans-serif;
-  color: #1d1e21;
+  color: var(--sle-text);
   user-select: none;
 }
 button {
@@ -418,19 +444,38 @@ button {
 button:disabled {
   cursor: default;
 }
-.sle-mode {
+.sle-bell {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 112px;
-  height: 46px;
-  background: #000;
-  color: #fff;
-  font-size: 18px;
+  left: 8px;
+  top: 6px;
+  width: 96px;
+  height: 36px;
+  background: transparent;
+  border: 2px solid var(--sle-mute);
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+}
+.sle-bell svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--sle-mute);
+  stroke-width: 1.8;
+}
+.sle-modename {
+  position: absolute;
+  left: 10px;
+  top: 50px;
+  width: 96px;
+  font-size: 20px;
+  line-height: 1.1;
+}
+.sle-modename .sub {
+  font-size: 11px;
+  color: var(--sle-label);
+  height: 13px;
 }
 .sle-info {
   position: absolute;
@@ -442,16 +487,7 @@ button:disabled {
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  background: #ffffff;
-  border-bottom: 1px solid #9a9da2;
-}
-.sle-bell {
-  width: 40px;
-  height: 36px;
-  background: #6b6e73;
-  border: 1px solid #1d1e21;
-  border-radius: 5px;
-  opacity: 0.5;
+  background: var(--sle-screen);
 }
 .sle-msg {
   flex: 1;
@@ -460,21 +496,21 @@ button:disabled {
 }
 .sle-lock,
 .sle-pause {
-  height: 36px;
-  min-width: 64px;
-  background: #6b6e73;
-  color: #fff;
-  border: 1px solid #1d1e21;
+  height: 34px;
+  min-width: 96px;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
   border-radius: 5px;
-  font-size: 14px;
+  font-size: 13px;
 }
 .sle-lock {
   position: relative;
   z-index: 16; /* above the lock overlay: the only control that works while locked */
 }
 .sle-lock.on {
-  background: #f4f4f4;
-  color: #1d1e21;
+  background: var(--sle-text);
+  color: #000;
 }
 .sle-pause {
   min-width: 40px;
@@ -483,63 +519,62 @@ button:disabled {
   font-size: 11px;
   width: 48px;
   text-align: center;
+  color: var(--sle-label);
 }
 .sle-clock {
-  font-size: 13px;
+  font-size: 15px;
   text-align: right;
-  width: 70px;
+  width: 74px;
 }
 .sle-clock .d {
   font-size: 9px;
+  color: var(--sle-label);
 }
 .sle-side {
   position: absolute;
-  left: 6px;
-  width: 100px;
+  left: 8px;
+  width: 96px;
   height: 40px;
-  background: #6b6e73;
-  color: #f4f4f4;
-  border: 2px solid #1d1e21;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
+  font-style: italic;
+}
+.sle-side.on {
+  background: var(--sle-text);
+  color: #000;
 }
 .sle-side:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
 }
-.sle-extra-btn {
-  position: absolute;
-  left: 6px;
-  top: 540px;
-  width: 100px;
-  height: 104px;
-  background: #c9cacc;
-  color: #f4f4f4;
-  border: 2px solid #1d1e21;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: bold;
-  text-shadow: 0 0 2px #55585d;
-}
-.sle-extra-btn.on {
-  background: #f4f4f4;
-  color: #1d1e21;
-  text-shadow: none;
-}
+.sle-extra-btn,
 .sle-manual {
   position: absolute;
-  left: 6px;
-  top: 654px;
-  width: 100px;
-  height: 108px;
-  background: #6b6e73;
-  color: #f4f4f4;
-  border: 2px solid #1d1e21;
+  left: 8px;
+  width: 96px;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
   border-radius: 8px;
-  font-size: 15px;
-  font-weight: bold;
+  font-size: 13px;
+  font-style: italic;
+}
+.sle-extra-btn {
+  top: 540px;
+  height: 104px;
+}
+.sle-extra-btn.on {
+  background: var(--sle-text);
+  color: #000;
+}
+.sle-manual {
+  top: 654px;
+  height: 108px;
 }
 .sle-manual:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
 }
 .sle-wave {
   position: absolute;
@@ -551,13 +586,13 @@ button:disabled {
 .sle-wave-canvas {
   position: absolute;
   inset: 0;
-  background: #fff;
+  background: var(--sle-screen);
 }
 .sle-standby {
   position: absolute;
   inset: 120px 60px;
-  background: #ffffff;
-  border: 2px solid #55585d;
+  background: var(--sle-panel);
+  border: 1px solid #000;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -569,9 +604,9 @@ button:disabled {
 }
 .sle-standby button,
 .sle-notice button {
-  background: #55585d;
-  color: #fff;
-  border: 2px solid #1d1e21;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
   border-radius: 6px;
   padding: 14px 28px;
   font-size: 16px;
@@ -613,9 +648,9 @@ button:disabled {
 .sle-plusminus button {
   width: 56px;
   height: 46px;
-  background: #55585d;
-  color: #fff;
-  border: 2px solid #1d1e21;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
   border-radius: 6px;
   font-size: 26px;
   line-height: 1;
@@ -626,9 +661,9 @@ button:disabled {
   top: 654px;
   width: 116px;
   height: 108px;
-  background: #6b6e73;
-  color: #3fb54c;
-  border: 2px solid #1d1e21;
+  background: var(--sle-button);
+  color: var(--sle-o2);
+  border: 1px solid #000;
   border-radius: 8px;
   font-size: 54px;
   line-height: 1;
@@ -636,7 +671,7 @@ button:disabled {
 .sle-notice {
   position: absolute;
   inset: 0;
-  background: rgba(236, 237, 237, 0.94);
+  background: rgba(0, 0, 0, 0.88);
   display: flex;
   flex-direction: column;
   align-items: center;
