@@ -8,7 +8,7 @@ export type LayoutColumn = "control" | "viz" | "monitor";
 
 export const useLayoutStore = defineStore("layout", () => {
   const controlTab = ref("editor"); // editor | tasks | ventilator | ecls | resuscitation | pregnancy | scaler | events
-  const vizTab = ref("diagram"); // diagram | chart | loop | chat | builder | docs
+  const vizTab = ref("diagram"); // diagram | chart | loop | chat | builder | sle6000 | docs
   const monitorTab = ref("monitoring"); // monitoring | monitor | ventilator
 
   const tabs = { control: controlTab, viz: vizTab, monitor: monitorTab };
