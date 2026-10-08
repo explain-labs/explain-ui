@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **432 settable params**, **28 functions**
+Snapshot: **44 model_types**, **433 settable params**, **28 functions**
 (+ 67 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -234,7 +234,8 @@ _setProp_:
 - `minute_volume_ref` — reference minute volume (L/kg/min) (number, L/kg/min)
 - `vt_rr_ratio` — tidal volume - resp rate ratio (number)
 - `ie_ratio` — insp/exp ratio (number)
-- `rmp_gain_max` — rmp gain max (number) _(extra)_
+- `rmp_gain_max` — max muscle pressure (mmHg) (number, mmHg, range 0–200) _(extra)_
+- `load_compensation` — load compensation (0-1) (number, 0-1, range 0–1) _(extra)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 ### Capacitance
