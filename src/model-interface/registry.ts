@@ -1248,15 +1248,40 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
-      "caption": "rmp gain max",
+      "caption": "max muscle pressure (mmHg)",
       "target": "rmp_gain_max",
       "type": "number",
       "delta": 1,
       "factor": 1,
       "rounding": 0,
+      "ll": 0,
+      "ul": 200,
       "edit_mode": "extra",
       "build_prop": true,
       "readonly": false
+    },
+    {
+      "caption": "load compensation (0-1)",
+      "target": "load_compensation",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1,
+      "edit_mode": "extra",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "muscle effort gain (mmHg/L)",
+      "target": "rmp_gain",
+      "type": "number",
+      "factor": 1,
+      "rounding": 1,
+      "edit_mode": "extra",
+      "build_prop": false,
+      "readonly": true
     }
   ],
   "Capacitance": [
