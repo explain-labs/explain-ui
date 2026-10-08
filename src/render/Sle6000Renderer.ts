@@ -1,8 +1,9 @@
 import type { ChartFrame, AnimFrame, ChannelsPayload, RendererAdapter } from "./types";
 
 // SLE6000 waveform panel: pressure / flow / volume drawn as the ventilator's screen shows them
-// (IFU p146, p150): thin traces on white, a grey header strip per channel with its title, a y-axis
-// with ticks on the left, a zero line, and a sweep that overwrites the previous pass. Same column
+// (the dark "Lunar" interface, IFU p146/p150 for the layout): coloured traces, some filled to the
+// zero line, on black, a dark header strip per channel with its title, a y-axis with ticks on the
+// left, a zero line, and a sweep (red head) that overwrites the previous pass. Same column
 // store as MonitorRenderer (min/max envelope per column). The axes snap to round ranges that only
 // grow within a sweep and shrink back a sweep later, so they don't jump breath to breath. Never
 // Vue-reactive: registered with the RealtimeBus.
@@ -12,11 +13,23 @@ export interface SleChannel {
   title: string; // header strip text, e.g. "Pressure (mbar)"
   scale?: number; // display = raw * scale (cmH2O -> mbar)
   ranges: [number, number][]; // candidate y-ranges, smallest first; the first that fits wins
+  color: string; // trace
+  fill?: string | null; // area between the trace and zero (none = line only)
+}
+
+// screen colours other than the traces
+export interface SlePalette {
+  background: string;
+  header: string;
+  title: string;
+  axis: string;
+  tick: string;
+  zero: string;
+  sweep: string;
 }
 
 const AXIS_W = 34; // y-axis label column (CSS px)
 const HEADER_H = 14; // channel header strip
-const TRACE = "#1e88c8";
 const DEFAULT_WINDOW_S = 6;
 
 export class Sle6000Renderer implements RendererAdapter {
@@ -39,10 +52,12 @@ export class Sle6000Renderer implements RendererAdapter {
   private range: [number, number][] = []; // current y-range per channel
   private hidden = new Set<number>();
   private cssScale = 1; // the screen frame is CSS-scaled; draw at the real pixel size
+  private pal: SlePalette;
 
-  constructor(el: HTMLElement, channels: SleChannel[], windowS = DEFAULT_WINDOW_S) {
+  constructor(el: HTMLElement, channels: SleChannel[], palette: SlePalette, windowS = DEFAULT_WINDOW_S) {
     this.el = el;
     this.channels = channels;
+    this.pal = palette;
     this.windowS = windowS;
     this.idx = channels.map(() => -1);
     this.range = channels.map((c) => c.ranges[0]);
@@ -167,7 +182,7 @@ export class Sle6000Renderer implements RendererAdapter {
     const w = this.el.clientWidth;
     const h = this.el.clientHeight;
     if (!w || !h) return; // hidden tab
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = this.pal.background;
     ctx.fillRect(0, 0, w, h);
     const visible = this.channels.map((_, i) => i).filter((i) => !this.hidden.has(i));
     const chH = h / Math.max(1, visible.length);
@@ -177,10 +192,10 @@ export class Sle6000Renderer implements RendererAdapter {
       const ci = visible[k];
       const top = k * chH;
       // header strip
-      ctx.fillStyle = "#5f6266";
+      ctx.fillStyle = this.pal.header;
       ctx.fillRect(plotL, top + 2, plotR - plotL, HEADER_H);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "10px Arial, Helvetica, sans-serif";
+      ctx.fillStyle = this.pal.title;
+      ctx.font = "italic 10px Arial, Helvetica, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillText(this.channels[ci].title, plotL + 6, top + 2 + HEADER_H / 2);
@@ -191,8 +206,8 @@ export class Sle6000Renderer implements RendererAdapter {
     }
     if (this.headCol >= 0) {
       const x = plotL + (this.headCol / this.plotW) * (plotR - plotL);
-      ctx.strokeStyle = "rgba(30,136,200,0.35)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = this.pal.sweep;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(x + 0.5, 0);
       ctx.lineTo(x + 0.5, h);
@@ -210,13 +225,13 @@ export class Sle6000Renderer implements RendererAdapter {
     const [lo, hi] = this.range[ci];
     const span = hi - lo;
     const step = [1, 2, 5, 10, 20, 50, 100, 200, 500].find((s) => span / s <= 4) ?? 1000;
-    ctx.strokeStyle = "#9a9da2";
+    ctx.strokeStyle = this.pal.axis;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(plotL + 0.5, pTop);
     ctx.lineTo(plotL + 0.5, pBot);
     ctx.stroke();
-    ctx.fillStyle = "#4a4d52";
+    ctx.fillStyle = this.pal.tick;
     ctx.font = "9px Arial, Helvetica, sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -230,7 +245,7 @@ export class Sle6000Renderer implements RendererAdapter {
     }
     if (lo < 0 && hi > 0) {
       const y0 = Math.round(this.y(ci, 0, pTop, pBot)) + 0.5;
-      ctx.strokeStyle = "#c4c6c9";
+      ctx.strokeStyle = this.pal.zero;
       ctx.beginPath();
       ctx.moveTo(plotL, y0);
       ctx.lineTo(plotR, y0);
@@ -244,7 +259,10 @@ export class Sle6000Renderer implements RendererAdapter {
     const ctx = this.ctx;
     const sx = (c: number) => plotL + (c / this.plotW) * (plotR - plotL);
     const sy = (v: number) => Math.max(pTop - 4, Math.min(pBot + 4, this.y(ci, v, pTop, pBot)));
-    ctx.strokeStyle = TRACE;
+    const ch = this.channels[ci];
+    // fill to zero, or to the nearest plot edge when zero is outside the range
+    const base = Math.max(pTop, Math.min(pBot, this.y(ci, 0, pTop, pBot)));
+    ctx.strokeStyle = ch.color;
     ctx.lineWidth = 1.4;
     let c = 0;
     while (c < this.plotW) {
@@ -255,6 +273,15 @@ export class Sle6000Renderer implements RendererAdapter {
       let end = c;
       while (end + 1 < this.plotW && fl[end + 1]) end++;
       if (end > c) {
+        if (ch.fill) {
+          ctx.beginPath();
+          ctx.moveTo(sx(c), base);
+          for (let k = c; k <= end; k++) ctx.lineTo(sx(k), sy(col[k]));
+          ctx.lineTo(sx(end), base);
+          ctx.closePath();
+          ctx.fillStyle = ch.fill;
+          ctx.fill();
+        }
         ctx.beginPath();
         ctx.moveTo(sx(c), sy(col[c]));
         for (let k = c; k <= end; k++) {

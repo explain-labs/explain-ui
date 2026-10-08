@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-// The Mode panel (IFU p139, p151): a light-grey overlay with dark tabs (Invasive | Non-invasive |
+// The Mode panel (IFU p139, p151; dark like the rest of the device screen, an assumption as no
+// photo shows it open): an overlay with dark tabs (Invasive | Non-invasive |
 // Standby), the mode buttons and the patient-circuit selector. Picking a mode previews its
 // parameters along the bottom; nothing changes until Confirm. HFO and the non-invasive modes come
 // in later phases and are shown disabled.
@@ -66,11 +67,12 @@ const LATER = ["HFOV", "HFOV+CMV"];
 .sle-panel {
   position: absolute;
   inset: 0;
-  background: #d6d7d9;
-  border: 2px solid #1d1e21;
+  background: #2b2d31;
+  border: 1px solid #000;
   border-radius: 6px;
   display: flex;
   flex-direction: column;
+  color: #f2f2f2;
   font-family: Arial, Helvetica, sans-serif;
   z-index: 5;
 }
@@ -80,15 +82,15 @@ const LATER = ["HFOV", "HFOV+CMV"];
   padding: 6px;
 }
 .sle-panel-tabs button {
-  background: #55585d;
-  color: #f4f4f4;
+  background: #4a4d52;
+  color: #f2f2f2;
   border: 1px solid #1d1e21;
   border-radius: 5px;
   padding: 8px 18px;
   font-size: 14px;
 }
 .sle-panel-tabs button.on {
-  background: #f4f4f4;
+  background: #f2f2f2;
   color: #1d1e21;
 }
 .sle-panel-tabs button:disabled {
@@ -111,17 +113,17 @@ const LATER = ["HFOV", "HFOV+CMV"];
 }
 .mode {
   height: 64px;
-  background: #55585d;
-  color: #f4f4f4;
+  background: #4a4d52;
+  color: #f2f2f2;
   border: 2px solid #1d1e21;
   border-radius: 6px;
   font-size: 18px;
 }
 .mode.cur {
-  box-shadow: inset 0 0 0 2px #3fb54c;
+  box-shadow: inset 0 0 0 2px #7ed321;
 }
 .mode.sel {
-  background: #f4f4f4;
+  background: #f2f2f2;
   color: #1d1e21;
 }
 .mode:disabled {
@@ -136,22 +138,22 @@ const LATER = ["HFOV", "HFOV+CMV"];
 }
 .cap {
   font-size: 13px;
-  color: #1d1e21;
+  color: #f2f2f2;
 }
 .circuit {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #55585d;
-  color: #f4f4f4;
+  background: #4a4d52;
+  color: #f2f2f2;
   border: 2px solid #1d1e21;
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 15px;
 }
 .circuit.sel {
-  border-color: #3fb54c;
-  box-shadow: 0 0 0 2px #3fb54c;
+  border-color: #7ed321;
+  box-shadow: 0 0 0 2px #7ed321;
 }
 .tube {
   width: 52px;
@@ -163,12 +165,12 @@ const LATER = ["HFOV", "HFOV+CMV"];
 }
 .hint {
   font-size: 11px;
-  color: #3a3d42;
+  color: #a9acb1;
 }
 .standby {
   flex-direction: column;
   align-items: flex-start;
-  color: #1d1e21;
+  color: #f2f2f2;
   font-size: 15px;
 }
 .standby .mode {

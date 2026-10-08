@@ -94,6 +94,20 @@ a load button when the patient's ventilator is not an `Sle6000`.
   later), and a pause (`setPaused`). It uses the same column store as `MonitorRenderer`, plus
   `setCssScale` so the canvas backs the real pixel size inside the scaled frame.
 
+**Colours.** The IFU draws the screen as grey line art, but the device has SLE's dark, low-glare
+"Lunar" interface. Its colours are sampled by eye from vendor product photos (the GE HealthCare
+SLE6000 product page, and the Inspiration Healthcare SLE6000 N/C/H brochure with SIMV + VTV and HFOV
+screens). They live in one palette, `sle6000/sleTheme.ts`, which the frame applies as `--sle-*` CSS
+variables and passes to the renderer:
+- black screen, with dark-grey header strips, buttons and tiles
+- pressure trace slate-teal, filled; flow bright green; volume teal, filled; red sweep head
+- tile arcs: time light blue, pressure/volume amber, O2 green, sensitivities white
+- a yellow alarm-mute outline
+- white monitored values, each with a grey "label (unit)" under it
+
+The mode panel colours are an assumption, because no photo shows it open. The palette also reserves
+the etCO2 yellow and the orange-red alarm-limit lines for later phases.
+
 **Write rule.** Edits are local until Confirm: `pending` settings, `previewMode`, `pendingCircuit`.
 Confirm sends one `call("Ventilator.sle_apply", [settings])`, so every change goes through the
 engine's clamping and interlocks. The screen never `setProp`s.

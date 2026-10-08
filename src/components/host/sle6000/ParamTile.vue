@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from "vue";
+import { SLE_THEME } from "./sleTheme";
 
-// One SLE6000 parameter control (IFU p150, pp 68-76): a rounded tile with the label on top, a 270°
-// arc gauge (black track, a fill coloured by parameter type from the minimum to the value) with the
-// range ends and unit under it, and the value in the middle. A tap selects it; holding it emits
+// One SLE6000 parameter control (IFU p150, pp 68-76; colours from the device photos, see
+// sleTheme.ts): a dark rounded tile with the label on top, the value on a dark disc ringed by a 270°
+// arc gauge (black track, a fill coloured by parameter type from the minimum to the value), and the
+// range ends and unit under it. A tap selects it; holding it emits
 // `hold` (2 s switches an Off function on, 3 s on O2 starts O2 Boost).
 const props = withDefaults(
   defineProps<{
@@ -23,7 +25,8 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ (e: "tap"): void; (e: "hold"): void }>();
 
-const COLORS: Record<string, string> = { time: "#2d9fdc", pressure: "#f0a032", o2: "#3fb54c", sens: "#f2f2f2" };
+const COLORS = SLE_THEME.arc;
+const BOOST = SLE_THEME.boost;
 const off = computed(() => props.canBeOff && props.value === 0);
 const text = computed(() => (off.value ? "Off" : props.value.toFixed(props.decimals)));
 const fmtEnd = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
@@ -90,13 +93,14 @@ onBeforeUnmount(cancel);
   >
     <div class="sle-tile-label">{{ label }}</div>
     <svg viewBox="0 0 100 100" class="sle-tile-svg">
+      <circle :cx="CX" :cy="CY" :r="R - 5.5" class="disc" />
       <path :d="arc(135, 405)" class="track" />
       <path v-if="fillPath" :d="fillPath" class="fill" :style="{ stroke: COLORS[kind] }" />
-      <path v-if="boostPath" :d="boostPath" class="fill" style="stroke: #e53935" />
+      <path v-if="boostPath" :d="boostPath" class="fill" :style="{ stroke: BOOST }" />
       <text :x="CX" :y="CY + 6" class="value" :class="{ off }">{{ text }}</text>
-      <text :x="pt(135)[0] - 1" :y="94" class="end" text-anchor="start">{{ fmtEnd(min) }}</text>
-      <text :x="pt(45)[0] + 1" :y="94" class="end" text-anchor="end">{{ fmtEnd(max) }}</text>
-      <text :x="CX" :y="94" class="unit">{{ unit }}</text>
+      <text :x="pt(135)[0] - 1" :y="90" class="end" text-anchor="start">{{ fmtEnd(min) }}</text>
+      <text :x="pt(45)[0] + 1" :y="90" class="end" text-anchor="end">{{ fmtEnd(max) }}</text>
+      <text :x="CX" :y="98" class="unit">{{ unit }}</text>
     </svg>
   </div>
 </template>
@@ -107,24 +111,21 @@ onBeforeUnmount(cancel);
   width: 108px;
   height: 108px;
   border-radius: 8px;
-  border: 2px solid #1d1e21;
-  background: #6b6e73;
-  color: #f4f4f4;
+  border: 1px solid #000;
+  background: linear-gradient(180deg, #55585d 0%, #3a3c41 100%);
+  color: #f2f2f2;
   user-select: none;
   touch-action: none;
   cursor: pointer;
   font-family: Arial, Helvetica, sans-serif;
 }
 .sle-tile.selected {
-  background: #f4f4f4;
-  color: #1d1e21;
+  background: #f2f2f2;
+  color: #000;
 }
 .sle-tile.preview {
-  background: #111214;
-  border-color: #f4f4f4;
-}
-.sle-tile.preview .track {
-  stroke: #3a3c40; /* the black track would vanish on the black preview tile */
+  background: #000;
+  border: 2px solid #f2f2f2;
 }
 .sle-tile-label {
   position: absolute;
@@ -139,10 +140,19 @@ onBeforeUnmount(cancel);
   width: 100%;
   height: calc(100% - 8px);
 }
+.disc {
+  fill: #1c1d20;
+}
+.selected .disc {
+  fill: #d9dadc;
+}
 .track {
   fill: none;
-  stroke: #111214;
+  stroke: #000;
   stroke-width: 7;
+}
+.preview .track {
+  stroke: #3a3c41; /* the black track would vanish on the black preview tile */
 }
 .fill {
   fill: none;
@@ -160,7 +170,7 @@ onBeforeUnmount(cancel);
 .unit {
   fill: currentColor;
   font-size: 7.5px;
-  opacity: 0.85;
+  opacity: 0.8;
 }
 .unit {
   text-anchor: middle;
