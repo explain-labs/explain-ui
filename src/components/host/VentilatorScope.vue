@@ -13,6 +13,9 @@ import { MonitorRenderer, type MonitorLane } from "@/render/MonitorRenderer";
 const el = ref<HTMLDivElement | null>(null);
 const { addRenderer, removeRenderer } = useRealtimeBus();
 const { watch: watchProps, watchSlow, slowValues, modelReady } = useExplain();
+// HFOV has no peak/PEEP: the pressure numeric shows MAP / ΔP instead. The mode comes off the slow
+// stream with the numerics (modelState only refreshes on a rebuild, not on a live mode change).
+const hfov = (n: Record<string, unknown>) => n["Ventilator.vent_mode"] === "HFOV";
 let adapter: MonitorRenderer | null = null;
 
 const props = withDefaults(
@@ -35,8 +38,13 @@ const LANES: MonitorLane[] = [
     label: "Paw",
     color: "#facc15",
     unit: "cmH₂O",
-    // measured peak (not the PIP setting: PS delivers PEEP + PS, PRVC/VC servo their own peak)
-    readNumeric: (n) => `${f(n, "Ventilator.p_peak", 0)}/${f(n, "Ventilator.peep_cmh2o", 0)}`,
+    // measured peak (not the PIP setting: PS delivers PEEP + PS, PRVC/VC servo their own peak);
+    // in HFOV the measured mean airway pressure and peak-to-peak swing
+    readNumeric: (n) =>
+      hfov(n)
+        ? `${f(n, "Ventilator.hfo_map_meas", 0)}/${f(n, "Ventilator.hfo_amplitude_meas", 0)}`
+        : `${f(n, "Ventilator.p_peak", 0)}/${f(n, "Ventilator.peep_cmh2o", 0)}`,
+    readSub: (n) => (hfov(n) ? "MAP/ΔP" : ""),
   },
   {
     signal: "Ventilator.flow",
@@ -54,7 +62,7 @@ const LANES: MonitorLane[] = [
     unit: "mL",
     fill: true,
     // expiratory tidal volume (L → mL)
-    readNumeric: (n) => f(n, "Ventilator.exp_tidal_volume", 1, 1000),
+    readNumeric: (n) => f(n, "Ventilator.exp_tidal_volume", hfov(n) ? 2 : 1, 1000),
     readSub: () => "Vt",
   },
 ];
@@ -65,11 +73,15 @@ const SLOW_PATHS = [
   "Ventilator.peep_cmh2o",
   "Ventilator.minute_volume",
   "Ventilator.exp_tidal_volume",
+  "Ventilator.hfo_map_meas",
+  "Ventilator.hfo_amplitude_meas",
+  "Ventilator.vent_mode",
 ];
 
 // sweep window (full left→right travel time) — vent graphs run slower than the
 // ECG sweep, so default a touch wider.
 const WINDOW_OPTIONS = [
+  { label: "1 s", value: 1 }, // HFOV oscillation
   { label: "3 s", value: 3 },
   { label: "6 s", value: 6 },
   { label: "8 s", value: 8 },

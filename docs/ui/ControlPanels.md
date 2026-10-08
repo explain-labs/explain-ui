@@ -9,7 +9,7 @@ There is **no `ParameterPanel.vue`** — the generic, registry-driven editor is 
 | File | Responsibility |
 |---|---|
 | `ModelEditor.vue` | Generic, `model_interface`-driven editor — pick any model, render one control per declared field |
-| `VentilatorPanel.vue` | Mode-aware ventilator console (PC / PRVC / PS / CPAP) + measured read-outs |
+| `VentilatorPanel.vue` | Mode-aware ventilator console (PC / PRVC / VC / PS / CPAP / HFOV, volume guarantee, tube leak) + measured read-outs |
 | `EclsPanel.vue` | ECMO/ECLS console — pump, sweep gas, cannulas, resistance factors |
 | `ResuscitationPanel.vue` | CPR console — chest compressions + ventilations, takes over the ventilator |
 | `PregnancyPanel.vue` | Uterus + MaternalPlacenta console — gestation, coupling, contractions |
@@ -61,7 +61,18 @@ How it writes:
 
 ## VentilatorPanel.vue
 
-Bespoke ventilator console. Targets the `Ventilator` model. A `SelectButton` picks the mode (`PC`/`PRVC`/`PS`/`CPAP`); only the fields in `MODE_FIELDS[mode]` plus `COMMON` (PEEP, FiO₂) are shown. `synchronized` adds the trigger-% field in PC/PRVC.
+Bespoke ventilator console. Targets the `Ventilator` model. A `SelectButton` picks the mode (`PC`/`PRVC`/`VC`/`PS`/`CPAP`/`HFOV`); only the fields in `MODE_FIELDS[mode]` plus `COMMON` (PEEP, FiO₂) are shown.
+- **HFOV** drops PEEP; MAP replaces it.
+- **Volume guarantee** (`volume_guarantee`, PC/PS) is a toggle that calls `set_volume_guarantee([v])`, which restarts the working pressure. When it is on, `VG_FIELDS[mode]` replaces the set pressure with *Vt target* + *Pmax*.
+- `synchronized` adds the trigger-% field in PC/PRVC/VC.
+- The tube section also has the **leak gap** (`leak_size`, mm).
+- The measured read-outs are mode-aware:
+  - always: Vt, MV, Ppeak, Cdyn, etCO₂
+  - PRVC/VG: `pip_delivered` as *Pinsp*
+  - with a pause: Pplat/Cstat/Raw
+  - with a leak: Leak %
+  - HFOV: Vt, DCO₂, MAP, ΔP
+- A red *Pmax reached* line shows `pressure_limited` in the volume-targeted modes.
 
 **Write contract — most props go through `setProp()`, but two paths MUST use `call()`:**
 
@@ -70,12 +81,14 @@ Bespoke ventilator console. Targets the `Ventilator` model. A `SelectButton` pic
 | FiO₂ | `call("Ventilator.set_fio2", [v/100], 0)` | re-derives inspired-gas composition; setter takes a **fraction** |
 | ET ⌀ / length | `call("Ventilator.set_ettube_diameter\|set_ettube_length", [v], 0)` | re-derives tube-resistance coefficients |
 | Enable | `call("Ventilator.switch_ventilator", [enabled], 0)` | toggles gas-circuit sub-models + blocks the spontaneous `MOUTH_DS` path — `is_enabled` alone would not |
-| Manual breath | `call("Ventilator.trigger_breath", [], 0)` | |
+| Manual breath | `call("Ventilator.trigger_breath", [], 0)` | ignored during inspiration |
+| Pause | `call("Ventilator.set_pause", [v], 0)` | keeps the pause strictly inside Tinsp |
+| Volume guarantee | `call("Ventilator.set_volume_guarantee", [v], 0)` | restarts the working pressure from the set pressure |
 | All other settings | `setProp("Ventilator.<p>", v/(factor??1), 0)` | plain props |
 
 Mode (`vent_mode`) and `synchronized` are plain `setProp`. In `PS` the Synchronized switch shows on and is disabled: the engine always runs patient triggering in PS (explain-engine #6), so `synchronized` only matters for PC/PRVC. Display scaling: `tidal_volume` carries `factor: 1000` (L → mL); FiO₂ is shown ×100.
 
-Measured read-outs (`exp_tidal_volume`, `minute_volume`, `compliance`, `pip_cmh2o`, `etco2`) come off the slow stream via `watchSlow(SLOW_PATHS)`, **re-registered on every `modelReady`** because `build()` resets the DataCollector watchlist.
+Measured read-outs (`exp_tidal_volume`, `minute_volume`, `compliance`, `p_peak`, `etco2`, and the mode-dependent ones above) come off the slow stream via `watchSlow(SLOW_PATHS)`, **re-registered on every `modelReady`** because `build()` resets the DataCollector watchlist.
 
 ---
 
