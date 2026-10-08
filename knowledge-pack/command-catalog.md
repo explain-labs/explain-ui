@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **423 settable params**, **28 functions**
-(+ 60 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **44 model_types**, **432 settable params**, **28 functions**
+(+ 67 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -37,12 +37,19 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `call` `Ventilator.set_fio2` — set inspired O2 fraction (0.21–1.0)
 - `call` `Ventilator.set_ettube_diameter` — set endotracheal tube diameter (mm)
 - `call` `Ventilator.set_ettube_length` — set endotracheal tube length (mm)
-- `setProp` `Ventilator.vent_mode` — ventilation mode (PC/PRVC/PS/CPAP)
+- `setProp` `Ventilator.vent_mode` — ventilation mode (PC/PRVC/VC/PS/CPAP/HFOV)
 - `setProp` `Ventilator.vent_rate` — ventilator rate (/min)
 - `setProp` `Ventilator.insp_time` — inspiration time (s)
 - `setProp` `Ventilator.tidal_volume` — target tidal volume (mL)
 - `setProp` `Ventilator.pip_cmh2o` — peak inspiratory pressure (cmH2O)
-- `setProp` `Ventilator.pip_cmh2o_max` — max peak inspiratory pressure, PRVC (cmH2O)
+- `setProp` `Ventilator.pip_cmh2o_max` — pressure limit of PRVC and volume guarantee; pop-off in VC (cmH2O)
+- `setProp` `Ventilator.volume_guarantee` — volume guarantee on/off in PC or PS (servo the pressure to tidal_volume, up to pip_cmh2o_max)
+- `setProp` `Ventilator.rise_time` — pressure rise time, PC/PRVC/PS (s)
+- `setProp` `Ventilator.insp_pause` — end-inspiratory pause, PC/PRVC/VC (s); gives plateau pressure, static compliance, resistance
+- `setProp` `Ventilator.leak_size` — leak around an uncuffed ET tube, equivalent gap (mm; ~0.5-1.25 neonate, 1-3 adult; 0 = none)
+- `setProp` `Ventilator.hfo_map_cmh2o` — HFOV mean airway pressure (cmH2O)
+- `setProp` `Ventilator.hfo_amplitude_cmh2o` — HFOV amplitude, peak-to-peak (cmH2O); more amplitude clears more CO2
+- `setProp` `Ventilator.hfo_freq` — HFOV frequency (Hz); higher frequency gives smaller Vt and LESS CO2 clearance
 - `setProp` `Ventilator.ps_cmh2o` — pressure support above PEEP, PS mode (cmH2O)
 - `setProp` `Ventilator.peep_cmh2o` — positive end-expiratory pressure (cmH2O); doubles as the CPAP level in CPAP mode
 - `setProp` `Ventilator.insp_flow` — inspiratory/bias flow (L/min)
@@ -722,16 +729,25 @@ _setProp_:
 ### Ventilator
 
 _setProp_:
-- `vent_mode` — ventilator mode (list, one of PC/PRVC/PS/CPAP)
-- `vent_rate` — ventilator rate (/min) (number, /min, range 0–100)
+- `vent_mode` — ventilator mode (list, one of PC/PRVC/VC/PS/CPAP/HFOV)
+- `vent_rate` — ventilator rate (/min) (number, /min, range 0–120)
 - `insp_time` — inspiration time (s) (number, s, range 0.1–5)
-- `insp_flow` — inspiratory flow (l/min) (number, l/min, range 0–20)
-- `tidal_volume` — tidal volume (mL) (number, mL, range 1–500)
+- `insp_flow` — inspiratory flow (l/min) (number, l/min, range 0–120)
+- `tidal_volume` — tidal volume (mL) (number, mL, range 1–1000)
 - `pip_cmh2o` — peak inspiratory pressure (cmH2O) (number, cmH2O, range 5–50)
 - `pip_cmh2o_max` — max peak inspiratory pressure (cmH2O) (number, cmH2O, range 5–50)
 - `ps_cmh2o` — pressure support above PEEP (cmH2O) (number, cmH2O, range 0–40)
+- `volume_guarantee` — volume guarantee (PC/PS) (boolean, PC/PS)
+- `hfo_map_cmh2o` — HFOV mean airway pressure (cmH2O) (number, cmH2O, range 3–35)
+- `hfo_amplitude_cmh2o` — HFOV amplitude (cmH2O) (number, cmH2O, range 5–80)
+- `hfo_freq` — HFOV frequency (Hz) (number, Hz, range 3–15)
 - `peep_cmh2o` — positive end expiratory pressure (cmH2O) (number, cmH2O, range 0–20)
 - `exp_flow` — expiratory flow (l/min) (number, l/min, range 0–20) _(extra)_
+- `rise_time` — pressure rise time (s) (number, s, range 0–0.5) _(extra)_
+- `insp_pause` — inspiratory pause (s) (number, s, range 0–1) _(extra)_
+- `leak_size` — tube leak gap (mm) (number, mm, range 0–4) _(extra)_
+- `hfo_insp_fraction` — HFOV inspiratory time (%) (number, %, range 20–60) _(extra)_
+- `hfo_bias_flow` — HFOV bias flow (L/min) (number, L/min, range 2–40) _(extra)_
 - `trigger_volume_perc` — trigger volume percentage (%) (number, %, range 5–20) _(extra)_
 - `synchronized` — synchronized ventilation (boolean) _(extra)_
 - `is_enabled` — enabled (boolean) _(all)_

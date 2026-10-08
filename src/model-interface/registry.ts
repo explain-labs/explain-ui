@@ -6494,8 +6494,10 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "choices": [
         "PC",
         "PRVC",
+        "VC",
         "PS",
-        "CPAP"
+        "CPAP",
+        "HFOV"
       ]
     },
     {
@@ -6509,7 +6511,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "factor": 1,
       "rounding": 0,
       "ll": 0,
-      "ul": 100
+      "ul": 120
     },
     {
       "caption": "inspiration time (s)",
@@ -6535,7 +6537,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "factor": 1,
       "rounding": 1,
       "ll": 0,
-      "ul": 20
+      "ul": 120
     },
     {
       "caption": "expiratory flow (l/min)",
@@ -6561,7 +6563,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "factor": 1000,
       "rounding": 0,
       "ll": 1,
-      "ul": 500
+      "ul": 1000
     },
     {
       "caption": "peak inspiratory pressure (cmH2O)",
@@ -6600,6 +6602,118 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "factor": 1,
       "rounding": 0,
       "ll": 0,
+      "ul": 40
+    },
+    {
+      "caption": "pressure rise time (s)",
+      "target": "rise_time",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 0.5
+    },
+    {
+      "caption": "inspiratory pause (s)",
+      "target": "insp_pause",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
+    },
+    {
+      "caption": "volume guarantee (PC/PS)",
+      "target": "volume_guarantee",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "tube leak gap (mm)",
+      "target": "leak_size",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 4
+    },
+    {
+      "caption": "HFOV mean airway pressure (cmH2O)",
+      "target": "hfo_map_cmh2o",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "delta": 1,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 3,
+      "ul": 35
+    },
+    {
+      "caption": "HFOV amplitude (cmH2O)",
+      "target": "hfo_amplitude_cmh2o",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "delta": 1,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 5,
+      "ul": 80
+    },
+    {
+      "caption": "HFOV frequency (Hz)",
+      "target": "hfo_freq",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "delta": 0.5,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 3,
+      "ul": 15
+    },
+    {
+      "caption": "HFOV inspiratory time (%)",
+      "target": "hfo_insp_fraction",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 1,
+      "factor": 100,
+      "rounding": 0,
+      "ll": 20,
+      "ul": 60
+    },
+    {
+      "caption": "HFOV bias flow (L/min)",
+      "target": "hfo_bias_flow",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 1,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 2,
       "ul": 40
     },
     {
