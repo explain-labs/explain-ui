@@ -57,7 +57,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     op: "setProp",
     model: "Ventilator",
     target: "vent_mode",
-    note: "ventilation mode (PC/PRVC/VC/PS/CPAP/HFOV)",
+    note: "ventilation mode (PC/PRVC/VC/PS/SIMV/CPAP/HFOV)",
   },
   { op: "setProp", model: "Ventilator", target: "vent_rate", note: "ventilator rate (/min)" },
   { op: "setProp", model: "Ventilator", target: "insp_time", note: "inspiration time (s)" },
@@ -73,7 +73,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     op: "setProp",
     model: "Ventilator",
     target: "volume_guarantee",
-    note: "volume guarantee on/off in PC or PS (servo the pressure to tidal_volume, up to pip_cmh2o_max)",
+    note: "volume guarantee on/off in PC, PS or SIMV (servo the pressure to tidal_volume, up to pip_cmh2o_max)",
   },
   { op: "setProp", model: "Ventilator", target: "rise_time", note: "pressure rise time, PC/PRVC/PS (s)" },
   {
@@ -105,7 +105,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     op: "setProp",
     model: "Ventilator",
     target: "ps_cmh2o",
-    note: "pressure support above PEEP, PS mode (cmH2O)",
+    note: "pressure support above PEEP, PS mode and SIMV spontaneous breaths (cmH2O; 0 = unsupported in SIMV)",
   },
   {
     op: "setProp",
@@ -126,7 +126,47 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     target: "trigger_volume_perc",
     note: "breath trigger volume (% of tidal volume)",
   },
+  {
+    op: "setProp",
+    model: "Ventilator",
+    target: "trigger_mode",
+    note: "patient trigger type: 'volume' (% of tidal volume) or 'flow' (trigger_flow at the tube)",
+  },
+  { op: "setProp", model: "Ventilator", target: "trigger_flow", note: "flow trigger threshold (L/min)" },
+  {
+    op: "setProp",
+    model: "Ventilator",
+    target: "term_sens_perc",
+    note: "PS termination: the breath ends when inspiratory flow falls below this % of its peak",
+  },
+  {
+    op: "setProp",
+    model: "Ventilator",
+    target: "backup_rate",
+    note: "CPAP apnoea backup rate (/min, 0 = off): breaths at pip_cmh2o / insp_time during apnoea",
+  },
   { op: "call", model: "Ventilator", target: "trigger_breath", note: "trigger a single manual breath (no args)" },
+
+  // --- SLE6000 (only when the scenario's Ventilator is model_type Sle6000, e.g. term_neonate_sle6000;
+  // its settings go through sle_set, which validates them as the device does; the generic setProps
+  // above are not in the Sle6000 interface, so they are rejected there) ---
+  {
+    op: "call",
+    model: "Ventilator",
+    target: "sle_start",
+    note: "SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV)",
+  },
+  {
+    op: "call",
+    model: "Ventilator",
+    target: "sle_set",
+    note:
+      "SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), " +
+      "term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%)",
+  },
+  { op: "call", model: "Ventilator", target: "sle_standby", note: "SLE6000: standby, stop ventilation (no args)" },
+  { op: "call", model: "Ventilator", target: "sle_manual_breath", note: "SLE6000: one manual breath (no args)" },
+  { op: "call", model: "Ventilator", target: "sle_o2_boost", note: "SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)" },
 
   // --- Hemodynamics + autonomic nervous system ---
   { op: "setProp", model: "Heart", target: "heart_rate_ref", note: "reference heart rate (bpm)" },

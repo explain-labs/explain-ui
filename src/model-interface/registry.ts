@@ -6521,6 +6521,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "PRVC",
         "VC",
         "PS",
+        "SIMV",
         "CPAP",
         "HFOV"
       ]
@@ -6617,7 +6618,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "ul": 50
     },
     {
-      "caption": "pressure support above PEEP (cmH2O)",
+      "caption": "pressure support above PEEP, PS/SIMV (cmH2O)",
       "target": "ps_cmh2o",
       "type": "number",
       "build_prop": true,
@@ -6656,7 +6657,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "ul": 1
     },
     {
-      "caption": "volume guarantee (PC/PS)",
+      "caption": "volume guarantee (PC/PS/SIMV)",
       "target": "volume_guarantee",
       "type": "boolean",
       "build_prop": true,
@@ -6776,6 +6777,59 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "trigger type",
+      "target": "trigger_mode",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "options": [],
+      "choices": [
+        "volume",
+        "flow"
+      ],
+      "custom_options": true
+    },
+    {
+      "caption": "flow trigger threshold (l/min)",
+      "target": "trigger_flow",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 0.1,
+      "ul": 20
+    },
+    {
+      "caption": "PS termination sensitivity (% of peak flow)",
+      "target": "term_sens_perc",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 5,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 5,
+      "ul": 80
+    },
+    {
+      "caption": "CPAP apnoea backup rate (/min, 0 = off)",
+      "target": "backup_rate",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 1,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 150
+    },
+    {
       "caption": "trigger a manual breath",
       "target": "trigger_breath",
       "type": "function",
@@ -6852,6 +6906,594 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "advanced",
       "readonly": true,
       "caption": "compliance (mL/cmH2O)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "etco2",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "end-tidal co2 (mmHg)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "map_meas",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "mean airway pressure (cmH2O)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "ti_meas",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "measured inspiratory time (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "te_meas",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "measured expiratory time (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "ie_ratio_meas",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "measured I:E (1:x)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "rr_meas",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "measured rate (/min)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "trig_per_min",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "patient-triggered breaths (/min)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "r_dyn",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "dynamic resistance (cmH2O/(L/s))",
+      "factor": 1,
+      "rounding": 0
+    }
+  ],
+  "Sle6000": [
+    {
+      "target": "description",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "caption",
+      "readonly": true,
+      "caption": "description"
+    },
+    {
+      "target": "sle_mode",
+      "type": "string",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "SLE6000 mode"
+    },
+    {
+      "caption": "start / resume ventilation",
+      "target": "sle_start",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "mode",
+          "target": "mode",
+          "type": "list",
+          "options": [],
+          "choices": [
+            "CPAP",
+            "CMV",
+            "PTV",
+            "PSV",
+            "SIMV"
+          ],
+          "custom_options": true,
+          "default": "CMV"
+        }
+      ]
+    },
+    {
+      "caption": "standby (stop ventilation)",
+      "target": "sle_standby",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": []
+    },
+    {
+      "caption": "change a setting",
+      "target": "sle_set",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "setting",
+          "target": "name",
+          "type": "list",
+          "options": [],
+          "choices": [
+            "rr",
+            "ti",
+            "peep",
+            "pip",
+            "rise",
+            "trig_sens",
+            "term_sens",
+            "rr_backup",
+            "p_support",
+            "vtv",
+            "o2"
+          ],
+          "custom_options": true,
+          "default": "pip"
+        },
+        {
+          "caption": "value",
+          "target": "value",
+          "type": "number",
+          "factor": 1,
+          "delta": 1,
+          "rounding": 2
+        }
+      ]
+    },
+    {
+      "caption": "manual breath",
+      "target": "sle_manual_breath",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": []
+    },
+    {
+      "caption": "O2 Boost (+10 % for 2 min)",
+      "target": "sle_o2_boost",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "on",
+          "target": "state",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "caption": "patient circuit (mm)",
+      "target": "sle_set_circuit",
+      "type": "function",
+      "edit_mode": "extra",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "diameter (mm)",
+          "target": "diameter",
+          "type": "number",
+          "factor": 1,
+          "delta": 5,
+          "rounding": 0,
+          "ll": 10,
+          "ul": 15,
+          "default": 10
+        }
+      ]
+    },
+    {
+      "target": "sle_rr",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "RR (BPM)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_ti",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "Ti / Ti Max (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "sle_peep",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "PEEP / CPAP (mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_pip",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "PIP / PIP Max (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_rise",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "rise time (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "sle_trig_sens",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "trigger sensitivity (l/min)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_term_sens",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "termination sensitivity (%)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_rr_backup",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "RR backup, CPAP (BPM, 0 = off)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_p_support",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "P Support, SIMV (mbar, 0 = off)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_vtv",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "VTV target (ml, 0 = off)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_o2",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "O2 (%)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_circuit",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "patient circuit (mm)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "caption": "endotracheal tube diameter (mm)",
+      "target": "set_ettube_diameter",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "new diameter (mm)",
+          "target": "ettube_diameter",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.5,
+          "rounding": 1
+        }
+      ]
+    },
+    {
+      "caption": "endotracheal tube length (mm)",
+      "target": "set_ettube_length",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "new length (mm)",
+          "target": "ettube_length",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.1,
+          "rounding": 1
+        }
+      ]
+    },
+    {
+      "caption": "humidity",
+      "target": "set_humidity",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "new humidity",
+          "target": "humidity",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.01,
+          "rounding": 2,
+          "ll": 0,
+          "ul": 1
+        }
+      ]
+    },
+    {
+      "caption": "temperature (C)",
+      "target": "set_temp",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "new temp (C)",
+          "target": "temp",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.1,
+          "rounding": 1,
+          "ll": 0,
+          "ul": 42
+        }
+      ]
+    },
+    {
+      "caption": "tube leak gap (mm)",
+      "target": "leak_size",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 4
+    },
+    {
+      "target": "mon_pip",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "PIP (mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_peep",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "PEEP (mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_map",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "MAP (mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_vte",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "Vte (ml)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_vti",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "Vti (ml)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_vmin",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "Vmin (l/min)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "mon_leak",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "leak (%)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_rr",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "RR (BPM)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_trig",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "triggers (/min)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_c",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "compliance (ml/mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_r",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "resistance (mbar/l/s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_c20c",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "C20/C",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_ti",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "Ti (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "mon_te",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "Te (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "mon_ie",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "I:E (1:x)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_o2",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "O2 (%)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_fg_flow",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "fresh gas flow (l/min)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "o2_boost_remaining",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "O2 Boost remaining (s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "pres",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "airway pressure (cmH2O)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "flow",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "flow (L/min)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "vol",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "volume (mL)",
       "factor": 1,
       "rounding": 1
     },
