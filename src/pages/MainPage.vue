@@ -39,6 +39,7 @@ import LoopChart from "@/components/host/LoopChart.vue";
 import Monitor from "@/components/host/Monitor.vue";
 import VentilatorScope from "@/components/host/VentilatorScope.vue";
 import DocViewer from "@/components/host/DocViewer.vue";
+import Sle6000Screen from "@/components/host/sle6000/Sle6000Screen.vue";
 import { listLessons } from "@/lessons/index";
 import { t as tl } from "@/lessons/i18n";
 import { useLayoutStore } from "@/stores/layout";
@@ -69,7 +70,8 @@ const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
 // Panels that aren't finished yet: hidden on the deployed site, still shown
 // under `npm run dev` so they can be worked on. Remove a name here to release
 // its panel.
-const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler"]);
+// sle6000: the device replica, phase 1 of 5 (invasive conventional modes only)
+const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler", "sle6000"]);
 const showPanel = (name: string) => import.meta.env.DEV || !UNFINISHED_PANELS.has(name);
 const tour = useTour();
 // first visit (no manual progress stored yet): offer the getting-started tour
@@ -469,6 +471,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <Tab v-if="showPanel('builder')" value="builder" data-tour="tab.viz.builder" v-tooltip.top="'Patient builder'" aria-label="Patient builder">
               <i class="pi pi-user-plus"></i>
             </Tab>
+            <Tab v-if="showPanel('sle6000')" value="sle6000" data-tour="tab.viz.sle6000" v-tooltip.top="'SLE6000 ventilator'" aria-label="SLE6000 ventilator">
+              <i class="pi pi-tablet"></i>
+            </Tab>
             <Tab value="docs" data-tour="tab.viz.docs" v-tooltip.top="'Documentation'" aria-label="Documentation">
               <i class="pi pi-book"></i>
             </Tab>
@@ -488,6 +493,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </TabPanel>
             <TabPanel v-if="showPanel('builder')" value="builder">
               <PatientBuilderPanel />
+            </TabPanel>
+            <TabPanel v-if="showPanel('sle6000')" value="sle6000">
+              <Sle6000Screen />
             </TabPanel>
             <TabPanel value="docs">
               <DocViewer />

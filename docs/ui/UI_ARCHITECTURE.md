@@ -99,7 +99,7 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 │ (left ¼)      │ (center ½)                                    │ (right ¼)                    │
 │               │                                               │                              │
 │ editor        │ diagram | chart | loop | chat | builder | docs│ monitoring | monitor |       │
-│ ventilator    │                                               │   ventilator                 │
+│ ventilator    │ (+ sle6000, dev builds)                       │   ventilator                 │
 │ ecls          │ Diagram · RealtimeChart · LoopChart ·         │ (NumericReadoutPanel ×N,     │
 │ resuscitation │ ChatPanel · PatientBuilderPanel · DocViewer   │  dashboard switcher,         │
 │ pregnancy     │                                               │  compact/trend prefs,        │
@@ -112,7 +112,7 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 | Column | Tab values | Components | Doc |
 |---|---|---|---|
 | Left (`controlTab`) | `editor` `ventilator` `ecls` `resuscitation`¹ `pregnancy`¹ `scaler`¹ `events` | `ModelEditor`, `VentilatorPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
-| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `builder` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `PatientBuilderPanel`, `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md), [PatientBuilder](./PatientBuilder.md) |
+| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `builder` `sle6000` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `PatientBuilderPanel`, `Sle6000Screen` (dev builds only for now), `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md), [PatientBuilder](./PatientBuilder.md) |
 | Right (`monitorTab`) | `monitoring` `monitor` `ventilator` | `NumericReadoutPanel` (×group), `Monitor`, `VentilatorScope` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
 
 ¹ Unfinished: hidden in production builds, shown under `npm run dev` (`UNFINISHED_PANELS` in `MainPage.vue`).

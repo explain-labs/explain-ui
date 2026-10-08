@@ -10,6 +10,7 @@
 | `LoopChart.vue` | X-Y loop host (PV loop): pick an x and a y series; presets, CSV. Drives one `LoopRenderer` |
 | `Monitor.vue` | Bedside-monitor host: six fixed waveform lanes + slow-stream numerics. Drives a `MonitorRenderer` |
 | `VentilatorScope.vue` | Ventilator graphics: Paw/Flow/Volume lanes. Reuses `MonitorRenderer` with vent signals |
+| `sle6000/Sle6000Screen.vue` | SLE6000 ventilator replica (center pane): the device's touchscreen, driving the engine's `Sle6000` model. Drives a `Sle6000Renderer` |
 | `Diagram.vue` | PixiJS circulation diagram + editor toolbar/inspector. Lazily mounts `DiagramRenderer`; bridges live edits to the engine |
 
 Supporting: `src/composables/useChartParams.ts` (model/param catalog + presets) and `src/stores/diagram.ts` (publishes the live diagram renderer to the bot pipeline).
@@ -60,6 +61,47 @@ Both build a `MonitorRenderer` from a `LANES: MonitorLane[]` array and split fas
 - **Re-watch on rebuild:** `watch(modelReady, ...)` re-issues `watchProps`/`watchSlow` because each engine `build()` resets the `DataCollector` watchlist.
 
 `Monitor.vue` lanes: ECG, SpO₂ pre/post, ABP (post-ductal AD, max/min with mean sub), Resp, CO₂; signals are the `Monitor.signals.*` purpose-built waveforms, numerics are `Monitor.*` slow values. `VentilatorScope.vue` reuses the same renderer with Paw/Flow/Volume lanes off `Ventilator.pres`/`flow`/`vol` and PIP/PEEP/MV/Vt numerics (Vt scaled L→mL). Each has a **sweep** window select → `setWindow`.
+
+## sle6000/ — the SLE6000 ventilator screen
+
+An on-screen replica of the SLE6000 touchscreen (IFU V2.0 §21; see the engine's
+[`Sle6000`](../../explain-engine/docs/Sle6000.md) doc). It sits in the center pane as the `sle6000` tab,
+which is in `UNFINISHED_PANELS` (dev builds only) until the HFO phase lands. The tab shows a notice with
+a load button when the patient's ventilator is not an `Sle6000`.
+
+- **Frame.** `Sle6000Screen.vue` lays the device out on a fixed 1024 × 768 frame, CSS-scaled to the
+  pane width. It has:
+  - the information bar: mode button, messages, lock, pause, clock;
+  - the button column: Additional Parameters and Manual Breath. Alarms, Utilities and Layout are
+    disabled for now;
+  - the waveforms;
+  - the monitored values;
+  - the parameter row with +/− and Confirm.
+- **Settings table.** `sleUi.ts` imports the settings table from the engine
+  (`@explain/device_models/sle6000_params`), so ranges, resolutions, per-mode rows and interlocks
+  have one source. It adds the display parts: decimals, labels such as PIP MAX / VTV Target, the
+  monitored-value groups, and the slow paths.
+- **`ParamTile.vue`.** One parameter control: an SVG 270° arc gauge, coloured by type (time blue,
+  pressure orange, O2 green, sensitivity white). Its states are available, selected (white) and
+  preview (black). A tap selects it. A hold emits `hold`: 2 s switches on an Off function (VTV, RR
+  Backup, P Support), and 3 s on O2 toggles O2 Boost.
+- **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
+  1 s hold switches between them.
+- **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons and the 10/15 mm circuit picker.
+  HFO and non-invasive are shown disabled.
+- **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: blue traces on
+  white, grey header strips, a y-axis that snaps to round ranges (grows at once, shrinks a sweep
+  later), and a pause (`setPaused`). It uses the same column store as `MonitorRenderer`, plus
+  `setCssScale` so the canvas backs the real pixel size inside the scaled frame.
+
+**Write rule.** Edits are local until Confirm: `pending` settings, `previewMode`, `pendingCircuit`.
+Confirm sends one `call("Ventilator.sle_apply", [settings])`, so every change goes through the
+engine's clamping and interlocks. The screen never `setProp`s.
+- Manual Breath calls `sle_manual_breath`, and O2 Boost calls `sle_o2_boost`.
+- The settings read off the slow stream (`Ventilator.sle_*`). The values just sent overlay them until
+  two slow samples have arrived.
+- Timeouts follow the device: a selected parameter is discarded after 15 s, a panel or preview after
+  120 s, and the additional row closes after 120 s.
 
 ## Diagram.vue — editor & live re-bind
 
