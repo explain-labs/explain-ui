@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
-import { WAVES, WAVE_LABEL, LOOP_LABEL, type SleLayout, type WaveName, type LoopKind } from "./sleUi";
+import { WAVES, WAVE_LABEL, LOOP_LABEL, copyLayout, type SleLayout, type WaveName, type LoopKind } from "./sleUi";
+import { TREND_DEFS, TREND_IDS } from "./sleTrends";
 
 // The Layout panel (IFU §21.1.8, pp 145-146), dark like the Mode panel: the Waveforms / Loops /
 // Trends layouts as tabs, each with its options. The tab picked is the layout that Confirm
 // applies; nothing changes before. Waveforms: up to two of the three waveforms off, filled or
 // lines. Loops: the waveform on top, the primary loop (V/P default) and the secondary loop (F/V
-// default). Trends come in a later phase.
+// default). Trends: four display lines of up to two trends (first blue, second yellow; the same
+// trend may be shown twice) and a background grid (pp 146-148).
 const props = defineProps<{ layout: SleLayout }>();
 const emit = defineEmits<{ (e: "confirm", layout: SleLayout): void; (e: "close"): void }>();
 
-const draft = reactive<SleLayout>({ ...props.layout, waves: [...props.layout.waves] });
+const draft = reactive<SleLayout>(copyLayout(props.layout));
+const trendName = (id: string | null) => (id ? TREND_DEFS[id].label : "Off");
+const TREND_CHOICES: (string | null)[] = [null, ...TREND_IDS];
 const LOOP_KINDS: LoopKind[] = ["VP", "FV", "FP"];
 
 function toggleWave(w: WaveName) {
@@ -26,7 +30,7 @@ const changed = computed(() => JSON.stringify(draft) !== JSON.stringify(props.la
     <div class="sle-panel-tabs">
       <button :class="{ on: draft.kind === 'waveforms' }" @click="draft.kind = 'waveforms'">Waveforms</button>
       <button :class="{ on: draft.kind === 'loops' }" @click="draft.kind = 'loops'">Loops</button>
-      <button disabled title="Trends: a later phase">Trends</button>
+      <button :class="{ on: draft.kind === 'trends' }" @click="draft.kind = 'trends'">Trends</button>
       <button class="close" aria-label="Close" @click="emit('close')">✕</button>
     </div>
 
@@ -44,6 +48,25 @@ const changed = computed(() => JSON.stringify(draft) !== JSON.stringify(props.la
         </button>
       </div>
       <div class="hint">Two of the three waveforms can be turned off.</div>
+    </div>
+
+    <div v-else-if="draft.kind === 'trends'" class="body">
+      <div v-for="(line, i) in draft.trends" :key="i" class="row">
+        <div class="cap">Display line {{ i + 1 }}</div>
+        <select v-model="line[0]" class="pick first" :aria-label="`Display line ${i + 1} first trend`">
+          <option v-for="id in TREND_CHOICES" :key="'a' + id" :value="id">{{ trendName(id) }}</option>
+        </select>
+        <select v-model="line[1]" class="pick second" :aria-label="`Display line ${i + 1} second trend`">
+          <option v-for="id in TREND_CHOICES" :key="'b' + id" :value="id">{{ trendName(id) }}</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="cap">Background</div>
+        <button class="opt" :class="{ sel: draft.trendGrid }" @click="draft.trendGrid = !draft.trendGrid">
+          {{ draft.trendGrid ? "On" : "Off" }}
+        </button>
+      </div>
+      <div class="hint">The first trend of a line is drawn blue, the second yellow on its own scale.</div>
     </div>
 
     <div v-else class="body">
@@ -69,7 +92,7 @@ const changed = computed(() => JSON.stringify(draft) !== JSON.stringify(props.la
     </div>
 
     <div class="foot">
-      <button class="confirm" :disabled="!changed" aria-label="Confirm layout" @click="emit('confirm', { ...draft, waves: [...draft.waves] })">
+      <button class="confirm" :disabled="!changed" aria-label="Confirm layout" @click="emit('confirm', copyLayout(draft))">
         ✓
       </button>
     </div>
@@ -140,6 +163,22 @@ const changed = computed(() => JSON.stringify(draft) !== JSON.stringify(props.la
 .opt.sel {
   background: #f2f2f2;
   color: #1d1e21;
+}
+.pick {
+  width: 170px;
+  height: 40px;
+  background: #4a4d52;
+  color: #f2f2f2;
+  border: 2px solid #1d1e21;
+  border-radius: 6px;
+  font-size: 15px;
+  padding: 0 8px;
+}
+.pick.first {
+  border-left: 6px solid #80c8e8;
+}
+.pick.second {
+  border-left: 6px solid #e0e090;
 }
 .hint {
   font-size: 11px;

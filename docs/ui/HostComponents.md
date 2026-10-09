@@ -100,8 +100,7 @@ and is the app's only ventilator UI.
 - **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
   1 s hold switches between them.
 - **`LayoutPanel.vue`** (IFU §21.1.8 to 21.1.9, pp 145–146; the vendor brochure's Loops screen).
-  The Waveforms / Loops / Trends layouts (Trends disabled), applied on Confirm and kept per viewer
-  in `localStorage`.
+  The Waveforms / Loops / Trends layouts, applied on Confirm and kept per viewer in `localStorage`.
   - **Waveforms:** up to two of pressure / flow / volume off, and Filled on or off
     (`Sle6000Renderer.setHidden` / `setFilled`).
   - **Loops:** one waveform on top, a primary loop (V/P default) on the left and a secondary loop
@@ -112,6 +111,20 @@ and is the app's only ventilator UI.
     - The saved loop is drawn white over the active teal ones, with a date/time stamp, and is
       kept for the session.
   - Without breaths (HFOV) the loops show a rolling 1 s trail, broken at each oscillation.
+  - **Trends** (IFU §21.1.9.2–21.1.9.4; the brochure's Trends capture): four display lines of up
+    to two trends each (the first light blue, the second pale yellow on its own scale), with the
+    capture's defaults PIP/PEEP, O2/MAP, Vte/Vmin and Resistance/Compliance, and an optional
+    background grid. They are drawn by `SleTrendRenderer`.
+    - **Controls column:** Zoom / Cursor / Scroll, plus the cursor or latest time and "Current
+      Zoom". The shared +/− buttons act on the active control.
+      - Zoom steps are 15, 30 min, 1 h (default), 2, 4, 6, 9, 12 and 24 h.
+      - The cursor moves 1/60 of the window per press, and wraps to the next window.
+      - Scroll moves half a window per press, and follows live data again at the end.
+    - **History.** `sle6000/sleTrends.ts` keeps the session's 1 Hz slow-stream samples, up to 24 h
+      of model time, in typed ring buffers. It is fed from `rts` (realtime) and `data_slow` (after
+      a fast-forward), so fast-forwarding fills the trends with no gap.
+    - **Time axis.** Model time, labelled from the first stored sample. SIQ is listed but not
+      modelled.
 - **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons (CPAP to SIMV, HFOV, HFOV+CMV)
   and the 10/15 mm circuit picker. Non-invasive is shown disabled.
 - **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: coloured traces

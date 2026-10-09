@@ -154,16 +154,19 @@ export const SLOW_PATHS = [
 
 // ---- Layout (IFU §21.1.8, pp 145-146) ----------------------------------------------------------
 // Waveforms: up to two of the three waveforms off, filled or lines. Loops: one waveform, a primary
-// loop (V/P default) and a secondary loop (F/V default). Trends come in a later phase.
+// loop (V/P default) and a secondary loop (F/V default). Trends: four display lines of up to two
+// trends each (defaults as on the brochure's Trends capture), with an optional background grid.
 export type WaveName = "pressure" | "flow" | "volume";
 export type LoopKind = "VP" | "FV" | "FP";
 export interface SleLayout {
-  kind: "waveforms" | "loops";
+  kind: "waveforms" | "loops" | "trends";
   waves: WaveName[]; // Waveforms layout: the channels shown
   filled: boolean;
   loopWave: WaveName; // Loops layout: the waveform on top
   primary: LoopKind;
   secondary: LoopKind;
+  trends: [string | null, string | null][]; // trend ids (sleTrends.ts), null = Off
+  trendGrid: boolean;
 }
 export const WAVES: WaveName[] = ["pressure", "flow", "volume"];
 export const WAVE_LABEL: Record<WaveName, string> = { pressure: "Pressure", flow: "Flow", volume: "Volume" };
@@ -175,6 +178,13 @@ export const DEFAULT_LAYOUT: SleLayout = {
   loopWave: "pressure",
   primary: "VP",
   secondary: "FV",
+  trends: [
+    ["pip", "peep"],
+    ["o2", "map"],
+    ["vte", "vmin"],
+    ["r", "c"],
+  ],
+  trendGrid: false,
 };
 
 // the axes of each loop (cmH2O -> mbar for pressure; flow l/min; volume ml)
@@ -209,14 +219,21 @@ const LAYOUT_KEY = "sle6000.layout";
 export function loadLayout(): SleLayout {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (!raw) return { ...DEFAULT_LAYOUT };
+    if (!raw) return copyLayout(DEFAULT_LAYOUT);
     const l = { ...DEFAULT_LAYOUT, ...JSON.parse(raw) } as SleLayout;
     l.waves = l.waves.filter((w) => WAVES.includes(w));
     if (!l.waves.length) l.waves = [...DEFAULT_LAYOUT.waves];
+    const trends = Array.isArray(l.trends) && l.trends.length === 4 ? l.trends : DEFAULT_LAYOUT.trends;
+    l.trends = trends.map((t) => [t[0] ?? null, t[1] ?? null]); // own copy, never the defaults' arrays
     return l;
   } catch {
-    return { ...DEFAULT_LAYOUT };
+    return copyLayout(DEFAULT_LAYOUT);
   }
+}
+
+/** A deep copy (the layout holds arrays the panel edits). */
+export function copyLayout(l: SleLayout): SleLayout {
+  return { ...l, waves: [...l.waves], trends: l.trends.map((t) => [t[0], t[1]] as [string | null, string | null]) };
 }
 export function saveLayout(l: SleLayout) {
   try {

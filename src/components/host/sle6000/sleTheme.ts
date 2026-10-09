@@ -27,6 +27,9 @@ export const SLE_THEME = {
   // loops (IFU p146): the active loops blue-teal, a saved loop white
   loopActive: "#a8c8cc",
   loopSaved: "#f2f2f2",
+  // trends (sampled from the brochure's Trends capture): first trend light blue, second pale yellow
+  trend1: "#80c8e8",
+  trend2: "#e0e090",
   alarmLimit: "#ef5a2a", // alarm-limit lines on the pressure channel (alarms, a later phase)
   // tile arcs by parameter type
   arc: { time: "#90d0f0", pressure: "#e88028", o2: "#84c428", sens: "#f2f2f2" } as Record<string, string>,
