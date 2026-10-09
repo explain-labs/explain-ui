@@ -9426,6 +9426,29 @@ be lower than the set ΔP; here the servo holds the circuit pressure, so it matc
 
 ## Not modelled yet, and assumptions
 
+- **Pressure response (12 ms).**
+  - The delivered pressure follows its target with a first-order response,
+    `pres_response_tau = 0.012 s` (`PRES_RESPONSE_TAU` in `Sle6000.js`). This applies to the PEEP
+    to PIP ramp, the fall back to PEEP, and CPAP.
+  - On the device, pressure is made by the jets at the exhalation block and read at the Y-piece
+    past the limbs, with a pressure loop of finite speed. The base `Ventilator` without it is
+    ideal: it holds the circuit on target within a step and drops to PEEP in about 16 ms. That
+    makes the PV loop box-shaped.
+  - The manual gives no figure. The value is calibrated on a reference PV loop of a healthy 3.5 kg
+    neonate on 14/4 (term_neonate, CMV 14/4, Ti 0.4 s, breathing off):
+
+    | | ideal, Rise 0.04 | 12 ms, Rise 0.1 | reference |
+    |---|---|---|---|
+    | volume in at 90 % of PIP | 11 % | 24 % | ≈ 26 % |
+    | volume left when back at PEEP + 10 % | 93 % | 84 % | ≈ 84 % |
+    | Vt | 33.2 ml | 32.1 ml | 38 ml (its compliance ≈ 1.07 ml/cmH2O/kg against the model's 1.0) |
+
+- **Rise time.**
+  - The scenarios start with Rise **0.1 s** (`"sle_rise": 0.1`, a usual clinical starting value
+    for a term neonate). The device's factory default of 0.04 s (p165) stays in `SLE_PARAMS`.
+  - Together with the pressure response it brings the ventilated scenarios' PaCO2 up about
+    1 mmHg: cdh_severe 63.8, cdh_moderate 51.7, cdh_lv_dysfunction 52.9, pphn 46.2.
+
 - **Pneumatics.** The device's valveless jet principle (forward and reverse jets, p158) is
   approximated by the generic demand servo with an open expiratory limb. That reproduces the
   pressure waveforms, not the jet flows. The 8 l/min continuous flow (p24) is not modelled.
@@ -10692,6 +10715,7 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `hfo_freq` | Hz | HFOV frequency (default 10) |
 | `hfo_insp_fraction` | fraction | HFOV inspiratory fraction of the cycle: 0.33 = I:E 1:2 (default), 0.5 = 1:1 |
 | `hfo_bias_flow` | L/min | HFOV continuous fresh-gas (bias) flow (default 10) |
+| `pres_response_tau` | s | First-order response of the delivered pressure to its target in `pressure_control` and `cpap_control` (0 = ideal, the default; the Sle6000 uses 0.012) |
 | `hfo_volume_guarantee` | bool | HFOV volume targeting: servo the amplitude to `hfo_tidal_volume_target` (default false) |
 | `hfo_tidal_volume_target` | L | HFOV expired volume per oscillation to aim for (default 0.002) |
 | `hfo_amplitude_max_cmh2o` | cmH₂O | HFOV volume targeting: the amplitude limit (default 40) |
@@ -10860,6 +10884,19 @@ captured into `_pip_meas` for the mechanics read-outs.
   > into a ~0.46 s effort). During CPR, compressions also pumped the lungs empty through that exit,
   > so rescue breaths reached only about half the set PIP. With the demand valve, PS triggers 34
   > of 38 efforts at ~0.15–0.2 s, and synchronized PC goes from 10 to 28 triggered breaths/min.
+
+### Pressure response (`_respond`)
+
+With `pres_response_tau > 0`, the pressure target of `pressure_control` (the PEEP to PIP ramp, and
+PEEP in expiration) and the CPAP level pass through a first-order filter before the demand servo
+and the PEEP reservoir see them:
+
+`f += (target − f) · min(1, dt / τ)`
+
+A real ventilator's valves or jets and its pressure loop have a finite speed, and its sensor sits
+at the Y-piece. Without the filter the circuit tracks the target within a step, and the PV loop
+comes out as a sharp-cornered box. VC and HFO do not use it; they reset the filter state. See
+[Sle6000](./Sle6000.md) for the 12 ms value and its calibration.
 
 ### `_pressure_servo(target)` (demand valve)
 
@@ -23763,6 +23800,13 @@ import { SLE_PARAMS, SLE_MODES, SLE_HFO_MODES, sle_defaults, sle_clamp, sle_inte
 
 const MBAR_TO_CMH2O = 1.01972;
 const HFO_BIAS_FLOW = 8.0; // l/min, the continuous flow (p24); an assumption for HFO
+// The response of the delivered (Y-piece) pressure to its target: the jets at the exhalation block
+// and their pressure loop are not instantaneous, and the pressure is read at the Y-piece past the
+// limbs. The manual gives no figure, so this is an assumption, calibrated on a reference PV loop of
+// a healthy 3.5 kg neonate on 14/4 (a first-order response with Rise time 0.1 s):
+//   volume in at 90 % of PIP: 11 % ideal (Rise 0.04) -> ~25 % (reference ~26 %)
+//   volume left when the pressure is back at PEEP + 10 %: 93 % ideal -> ~84 % (reference ~84 %)
+const PRES_RESPONSE_TAU = 0.012; // s
 
 export class Sle6000 extends Ventilator {
   // static properties
@@ -24126,6 +24170,7 @@ export class Sle6000 extends Ventilator {
     const r_mbar = this.sle_circuit === 15 ? 2.0 : 6.0; // mbar/(l/s)
     this.exp_valve_resistance = (r_mbar * MBAR_TO_CMH2O) / 1.35951; // mmHg·s/L
     this.insp_flow = this.sle_circuit === 15 ? 40.0 : 20.0; // l/min
+    this.pres_response_tau = PRES_RESPONSE_TAU;
   }
 
   _calc_o2_boost() {
@@ -24320,6 +24365,7 @@ export class Ventilator extends BaseModelClass {
     this.peep_cmh2o = 3;
     this.ps_cmh2o = 10; // pressure support level ABOVE peep (PS mode only)
     this.rise_time = 0.1; // s, PEEP -> PIP ramp of the pressure target in PC/PRVC/PS (0 = fastest)
+    this.pres_response_tau = 0.0; // s, first-order response of the delivered pressure to its target (0 = ideal)
     this.hfo_map_cmh2o = 10; // HFOV mean airway pressure
     this.hfo_amplitude_cmh2o = 25; // HFOV peak-to-peak pressure swing at the circuit
     this.hfo_freq = 10; // HFOV frequency (Hz)
@@ -24422,6 +24468,7 @@ export class Ventilator extends BaseModelClass {
     this._manual_breath = false;
     this._humidifier_applied = false;
     this._servo_gain = 0.8; // fraction of the circuit pressure error corrected per step
+    this._p_target_f = null; // mmHg, the pressure target after the response filter (pres_response_tau)
     this._pip_working = null; // cmH2O, volume-targeted working pressure (PRVC / volume guarantee)
     this._pip_working_mode = ""; // mode the working pressure was initialised for
     this._vt_gain = 0.5; // fraction of the tidal-volume error corrected per breath
@@ -25085,7 +25132,7 @@ export class Ventilator extends BaseModelClass {
       // square and the flow decelerates as the lung fills — as on a real PC/PS ventilator.
       const ramp =
         this.rise_time > 0.0 ? Math.min(1.0, this._insp_time_counter / this.rise_time) : 1.0;
-      this._pressure_servo(this._peep + (this._pip - this._peep) * ramp);
+      this._pressure_servo(this._respond(this._peep + (this._pip - this._peep) * ramp));
 
       if (this._vent_ettube.flow > 0) {
         this._insp_tidal_volume_counter += this._vent_ettube.flow * this._t;
@@ -25101,9 +25148,9 @@ export class Ventilator extends BaseModelClass {
       this._vent_exp_valve.no_flow = false;
       this._vent_exp_valve.no_back_flow = true;
       this._vent_exp_valve.r_for = this.calc_exp_valve_resistance();
-      this._vent_gasout.vol =
-        this._peep / this._vent_gasout.el_base + this._vent_gasout.u_vol;
-      this._pressure_servo(this._peep);
+      const p_exp = this._respond(this._peep);
+      this._vent_gasout.vol = p_exp / this._vent_gasout.el_base + this._vent_gasout.u_vol;
+      this._pressure_servo(p_exp);
 
       if (this._vent_ettube.flow < 0) {
         this._exp_tidal_volume_counter += this._vent_ettube.flow * this._t;
@@ -25111,7 +25158,21 @@ export class Ventilator extends BaseModelClass {
     }
   }
 
+  _respond(target) {
+    // the delivered pressure follows its target with a first-order response (pres_response_tau):
+    // a real ventilator's valves or jets and its pressure loop have a finite speed, and its sensor
+    // sits at the Y-piece, past the limbs. This rounds the corners of the pressure waveform (and of
+    // the PV loop) at the start of inspiration and of expiration. 0 keeps the ideal ventilator.
+    if (this._p_target_f === null || !(this.pres_response_tau > 0.0)) {
+      this._p_target_f = target;
+      return target;
+    }
+    this._p_target_f += (target - this._p_target_f) * Math.min(1.0, this._t / this.pres_response_tau);
+    return this._p_target_f;
+  }
+
   volume_control() {
+    this._p_target_f = null; // the pressure response is not used in VC
     // Volume control: deliver a ~constant inspiratory flow by re-solving the insp valve resistance
     // each step (r_for = dP / q_target pins flow while the lung fills), until the set tidal volume
     // is reached; then hold (inspiratory pause, handled in time_cycling) and cycle to expiration.
@@ -25169,15 +25230,16 @@ export class Ventilator extends BaseModelClass {
     // with breathing off it holds pressure but delivers no tidal volume (as in reality).
 
     // inspiratory valve: servo the circuit at the CPAP level, delivering the patient's
-    // inspiratory demand (up to insp_flow) instead of letting the pressure dip
-    this._pressure_servo(this._peep);
+    // inspiratory demand (up to insp_flow) instead of letting the pressure dip. The level passes
+    // the pressure response, so the circuit settles back to CPAP after a backup breath.
+    const p_cpap = this._respond(this._peep);
+    this._pressure_servo(p_cpap);
 
     // expiratory valve: open, reservoir pinned at CPAP so the circuit floats at CPAP
     this._vent_exp_valve.no_flow = false;
     this._vent_exp_valve.no_back_flow = true;
     this._vent_exp_valve.r_for = this.calc_exp_valve_resistance();
-    this._vent_gasout.vol =
-      this._peep / this._vent_gasout.el_base + this._vent_gasout.u_vol;
+    this._vent_gasout.vol = p_cpap / this._vent_gasout.el_base + this._vent_gasout.u_vol;
 
     // spontaneous-breath monitoring: close out a breath at each spontaneous inspiration start
     // (Breathing.ncc_insp === 1 marks the first step of a new spontaneous inspiration)
@@ -25234,6 +25296,7 @@ export class Ventilator extends BaseModelClass {
   }
 
   hfov_control() {
+    this._p_target_f = null; // the pressure response is not used in HFO
     // High-frequency oscillation: the circuit pressure follows a base level plus an oscillation of
     // peak-to-peak amplitude at hfo_freq. The positive half-sine lasts hfo_insp_fraction of the
     // cycle with amplitude A*(1 - fi), the negative one the rest with amplitude A*fi, so the mean is
@@ -25600,6 +25663,7 @@ export class Ventilator extends BaseModelClass {
     this._rate_avg = 0.0;
     this._manual_breath = false;
     this._pip_working = null;
+    this._p_target_f = null;
     this._hfo_phase = 0.0;
     this._hfo_p_max = -1e9;
     this._hfo_p_min = 1e9;
