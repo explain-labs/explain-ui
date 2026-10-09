@@ -77,7 +77,8 @@ and is the app's only ventilator UI.
   - the information bar: mode button, messages, lock, pause, clock;
   - the button column: Additional Parameters and Manual Breath. In HFOV, Manual Breath becomes
     **Sigh** and an **Oscillation Pause** button (with its 60 s countdown) sits above Additional
-    Parameters, as on the vendor HFOV screen. Alarms, Utilities and Layout are disabled for now;
+    Parameters, as on the vendor HFOV screen. Layout opens the Layout panel; Alarms and Utilities
+    are disabled for now;
   - the mode name with its sub-labels (VTV, and Sigh in HFOV), lit when on;
   - the waveforms;
   - the monitored values;
@@ -98,11 +99,25 @@ and is the app's only ventilator UI.
   `display` / `ends` show a list setting by name.
 - **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
   1 s hold switches between them.
+- **`LayoutPanel.vue`** (IFU §21.1.8 to 21.1.9, pp 145–146; the vendor brochure's Loops screen).
+  The Waveforms / Loops / Trends layouts (Trends disabled), applied on Confirm and kept per viewer
+  in `localStorage`.
+  - **Waveforms:** up to two of pressure / flow / volume off, and Filled on or off
+    (`Sle6000Renderer.setHidden` / `setFilled`).
+  - **Loops:** one waveform on top, a primary loop (V/P default) on the left and a secondary loop
+    (F/V default) on the right, each a `SleLoopRenderer`. The capture buttons follow the manual:
+    - Save leads to Keep / Discard.
+    - Keep leads to Save New / Hide / Discard.
+    - Hide leads to Save New / Show / Delete.
+    - The saved loop is drawn white over the active teal ones, with a date/time stamp, and is
+      kept for the session.
+  - Without breaths (HFOV) the loops show a rolling 1 s trail, broken at each oscillation.
 - **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons (CPAP to SIMV, HFOV, HFOV+CMV)
   and the 10/15 mm circuit picker. Non-invasive is shown disabled.
-- **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: blue traces on
-  white, grey header strips, a y-axis that snaps to round ranges (grows at once, shrinks a sweep
-  later), and a pause (`setPaused`). It uses the same column store as `MonitorRenderer`, plus
+- **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: coloured traces
+  on black, filled or lines (`setFilled`), dark header strips, a y-axis that snaps to round ranges
+  (grows at once, shrinks a sweep later), channels that can be hidden (`setHidden`), and a pause
+  (`setPaused`). It uses the same column store as `MonitorRenderer`, plus
   `setCssScale` so the canvas backs the real pixel size inside the scaled frame.
 
 **Colours.** The IFU draws the screen as grey line art, but the device has SLE's dark, low-glare

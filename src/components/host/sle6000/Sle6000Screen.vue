@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useExplain } from "@/composables/useExplain";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { Sle6000Renderer, type SleChannel } from "@/render/Sle6000Renderer";
+import { SleLoopRenderer } from "@/render/SleLoopRenderer";
+import type { LoopPoints } from "@/render/sleLoopBuffer";
 import ParamTile from "./ParamTile.vue";
 import MonitoredValues from "./MonitoredValues.vue";
 import ModePanel from "./ModePanel.vue";
+import LayoutPanel from "./LayoutPanel.vue";
 import {
   PARAMS,
   MODES,
@@ -17,6 +20,11 @@ import {
   interlocks,
   clampParam,
   formatParam,
+  WAVES,
+  LOOPS,
+  loadLayout,
+  saveLayout,
+  type SleLayout,
 } from "./sleUi";
 import { SLE_THEME as T, SLE_CSS_VARS } from "./sleTheme";
 
@@ -73,7 +81,7 @@ let sentAge = 0;
 const previewMode = ref<string | null>(null);
 const pendingCircuit = ref<number | null>(null);
 const selected = ref<string | null>(null);
-const panel = ref<"mode" | null>(null);
+const panel = ref<"mode" | "layout" | null>(null);
 const showExtra = ref(false);
 const doubleColumn = ref(true); // as on the device photos; a 1 s hold switches to single
 const locked = ref(false);
@@ -160,6 +168,15 @@ function confirm() {
   discard();
   showExtra.value = false;
 }
+function openLayout() {
+  if (panel.value === "layout") {
+    discard();
+    return;
+  }
+  discard();
+  panel.value = "layout";
+  touch();
+}
 function openMode() {
   if (panel.value === "mode") {
     discard();
@@ -218,7 +235,71 @@ function togglePause() {
     }, 1000);
   }
 }
-watch(pausedLeft, (v) => renderer?.setPaused(v > 0));
+watch(pausedLeft, (v) => {
+  renderer?.setPaused(v > 0);
+  loopA?.setPaused(v > 0);
+  loopB?.setPaused(v > 0);
+});
+
+// ---- layout (IFU §21.1.8): waveforms or loops ------------------------------------------------
+const layout = ref<SleLayout>(loadLayout());
+const loopsOn = computed(() => layout.value.kind === "loops");
+const loopAEl = ref<HTMLDivElement | null>(null);
+const loopBEl = ref<HTMLDivElement | null>(null);
+let loopA: SleLoopRenderer | null = null;
+let loopB: SleLoopRenderer | null = null;
+function applyLayout() {
+  const l = layout.value;
+  const shownWaves = l.kind === "loops" ? [l.loopWave] : l.waves;
+  renderer?.setHidden(WAVES.map((w, i) => (shownWaves.includes(w) ? -1 : i)).filter((i) => i >= 0));
+  renderer?.setFilled(l.filled);
+  loopA?.setConfig(LOOPS[l.primary]);
+  loopB?.setConfig(LOOPS[l.secondary]);
+  setSaved(null);
+  capture.value = "none";
+}
+function confirmLayout(l: SleLayout) {
+  layout.value = l;
+  saveLayout(l);
+  discard();
+  nextTick(applyLayout);
+}
+
+// loop capture (IFU §21.1.9.1): Save -> Keep / Discard; Keep -> Save New / Hide / Discard;
+// Hide -> Save New / Show / Delete. Saved loops are white, kept for the session.
+const capture = ref<"none" | "pending" | "kept" | "hidden">("none");
+const savedAt = ref("");
+let saved: { a: LoopPoints | null; b: LoopPoints | null } | null = null;
+function setSaved(s: typeof saved) {
+  loopA?.setSaved(s?.a ?? null);
+  loopB?.setSaved(s?.b ?? null);
+}
+function saveLoops() {
+  const a = loopA?.snapshot() ?? null;
+  const b = loopB?.snapshot() ?? null;
+  if (!a && !b) return;
+  saved = { a, b };
+  const d = new Date();
+  savedAt.value = `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" })}  ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  setSaved(saved);
+  capture.value = "pending";
+}
+function keepLoops() {
+  capture.value = "kept";
+}
+function hideLoops() {
+  setSaved(null);
+  capture.value = "hidden";
+}
+function showLoops() {
+  setSaved(saved);
+  capture.value = "kept";
+}
+function dropLoops() {
+  saved = null;
+  setSaved(null);
+  capture.value = "none";
+}
 
 // lock (p154): lock with a press, unlock with a 1 s hold
 let lockTimer: ReturnType<typeof setTimeout> | null = null;
@@ -287,7 +368,8 @@ const PALETTE = {
   zero: T.zero,
   sweep: T.sweep,
 };
-const FAST_PATHS = CHANNELS.map((c) => c.signal);
+// the loops' breath edges (inspiration counter) and HFO cycle edges (oscillator phase)
+const FAST_PATHS = [...CHANNELS.map((c) => c.signal), "Ventilator.ncc_insp", "Ventilator._hfo_phase"];
 
 function rewatch() {
   watchProps(FAST_PATHS);
@@ -299,6 +381,8 @@ watch(modelReady, (ready) => {
     discard();
     sent.value = null;
     renderer?.clear();
+    loopA?.clear();
+    loopB?.clear();
   }
 });
 
@@ -306,20 +390,29 @@ let clockTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   renderer = new Sle6000Renderer(wave.value!, CHANNELS, PALETTE, 6);
   addRenderer(renderer);
+  const loopColors = { active: T.loopActive, saved: T.loopSaved };
+  loopA = new SleLoopRenderer(loopAEl.value!, LOOPS[layout.value.primary], PALETTE, loopColors);
+  loopB = new SleLoopRenderer(loopBEl.value!, LOOPS[layout.value.secondary], PALETTE, loopColors);
+  addRenderer(loopA);
+  addRenderer(loopB);
+  applyLayout();
   rewatch();
   ro = new ResizeObserver(() => {
     const w = host.value?.clientWidth ?? W;
     scale.value = Math.max(0.3, Math.min(1.25, w / W));
     renderer?.setCssScale(scale.value);
+    loopA?.setCssScale(scale.value);
+    loopB?.setCssScale(scale.value);
   });
   ro.observe(host.value!);
   clockTimer = setInterval(() => (now.value = new Date()), 1000);
 });
 onBeforeUnmount(() => {
   ro?.disconnect();
-  if (renderer) {
-    removeRenderer(renderer);
-    renderer.dispose();
+  for (const r of [renderer, loopA, loopB]) {
+    if (!r) continue;
+    removeRenderer(r);
+    r.dispose();
   }
   for (const t of [idle, extraTimer, lockTimer]) if (t) clearTimeout(t);
   for (const t of [pauseTimer, clockTimer]) if (t) clearInterval(t);
@@ -367,7 +460,7 @@ onBeforeUnmount(() => {
       <button class="sle-side" :class="{ on: panel === 'mode' }" style="top: 104px" @click="openMode">Mode</button>
       <button class="sle-side" style="top: 150px" disabled title="Alarms come in a later phase">Alarms</button>
       <button class="sle-side" style="top: 196px" disabled title="Not modelled">Utilities</button>
-      <button class="sle-side" style="top: 242px" disabled title="Loops and trends come in a later phase">Layout</button>
+      <button class="sle-side" :class="{ on: panel === 'layout' }" style="top: 242px" @click="openLayout">Layout</button>
       <button
         v-if="rowMode && MODES[rowMode].extra.length"
         class="sle-extra-btn"
@@ -385,11 +478,41 @@ onBeforeUnmount(() => {
 
       <!-- waveforms -->
       <div class="sle-wave">
-        <div ref="wave" class="sle-wave-canvas"></div>
+        <div ref="wave" class="sle-wave-canvas" :class="{ top: loopsOn }"></div>
+        <!-- loops layout (IFU p146): primary loop left, secondary right with the capture buttons -->
+        <div v-show="loopsOn" class="sle-loops">
+          <div ref="loopAEl" class="sle-loop primary"></div>
+          <div class="sle-loop-side">
+            <div class="sle-capture">
+              <div class="btns">
+                <template v-if="capture === 'none'">
+                  <button @click="saveLoops">Save</button>
+                </template>
+                <template v-else-if="capture === 'pending'">
+                  <button @click="keepLoops">Keep</button>
+                  <button @click="dropLoops">Discard</button>
+                </template>
+                <template v-else-if="capture === 'kept'">
+                  <button @click="saveLoops">Save New</button>
+                  <button @click="hideLoops">Hide</button>
+                  <button @click="dropLoops">Discard</button>
+                </template>
+                <template v-else>
+                  <button @click="saveLoops">Save New</button>
+                  <button @click="showLoops">Show</button>
+                  <button @click="dropLoops">Delete</button>
+                </template>
+              </div>
+              <div class="stamp">{{ capture === "none" ? "" : savedAt }}</div>
+            </div>
+            <div ref="loopBEl" class="sle-loop secondary"></div>
+          </div>
+        </div>
         <div v-if="!ventilating && isSle && !panel" class="sle-standby">
           <div>Standby: Patient not ventilated</div>
           <button @click="openMode">Start / Resume Ventilation</button>
         </div>
+        <LayoutPanel v-if="panel === 'layout'" :layout="layout" @confirm="confirmLayout" @close="discard" />
         <ModePanel
           v-if="panel === 'mode'"
           :current="liveMode"
@@ -667,6 +790,57 @@ button:disabled {
   position: absolute;
   inset: 0;
   background: var(--sle-screen);
+}
+.sle-wave-canvas.top {
+  bottom: auto;
+  height: 150px;
+}
+.sle-loops {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 154px;
+  bottom: 0;
+  display: flex;
+  gap: 6px;
+  background: var(--sle-screen);
+}
+.sle-loop.primary {
+  flex: 0 0 60%;
+  height: 100%;
+}
+.sle-loop-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sle-loop.secondary {
+  flex: 1;
+  min-height: 0;
+}
+.sle-capture {
+  padding: 6px 4px 4px;
+}
+.sle-capture .btns {
+  display: flex;
+  gap: 6px;
+}
+.sle-capture button {
+  flex: 1;
+  height: 34px;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
+  border-radius: 5px;
+  font-size: 13px;
+}
+.sle-capture .stamp {
+  height: 14px;
+  margin-top: 4px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--sle-label);
 }
 .sle-standby {
   position: absolute;

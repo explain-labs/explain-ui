@@ -9,6 +9,7 @@
 | `types.ts` | Shell-side TypeScript mirrors of the bus shapes: `ChartFrame`, `AnimFrame`, `AnimComponent`, `AnimLayout`, `ChannelsPayload`, and the `RendererAdapter` contract |
 | `ChartRenderer.ts` | uPlot adapter for the fast chart channel — rolling-window strip chart, 1–2 series, shared/split axes, lock/auto Y, area fill, CSV snapshot |
 | `LoopRenderer.ts` | Raw-canvas X-Y "loop" plotter (e.g. PV loop): one chart signal against another parametrically; polyline, not uPlot |
+| `SleLoopRenderer.ts` | SLE6000 loop (V/P, F/V, F/P): one signal against another per breath. Breath edges come from `Ventilator.ncc_insp` and HFO cycle edges from `Ventilator._hfo_phase` (`sleLoopBuffer.ts`, unit-tested). It overlays the last 3 breaths fading, a white saved loop, and axes snapped to round ranges |
 | `MonitorRenderer.ts` | Bedside-monitor sweep renderer — stacked waveform lanes with a shared sweep head + big slow-stream numerics gutter. Used by `Monitor.vue` |
 | `DiagramRenderer.ts` | PixiJS v8 adapter for the sprite circulation diagram (viewer + editor): compartments scaled by volume, tinted by `to2`; connectors with streaming flow dots |
 | `diagramConstants.ts` | Shared editor constants: `PICTOS`, `PATH_TYPES`, `LAYOUT_PATCH_WHITELIST` |

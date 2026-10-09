@@ -51,6 +51,7 @@ export class Sle6000Renderer implements RendererAdapter {
   private headCol = -1;
   private range: [number, number][] = []; // current y-range per channel
   private hidden = new Set<number>();
+  private filledOn = true; // the Waveforms layout's "Filled" option
   private cssScale = 1; // the screen frame is CSS-scaled; draw at the real pixel size
   private pal: SlePalette;
 
@@ -92,6 +93,12 @@ export class Sle6000Renderer implements RendererAdapter {
   /** Leave channels (by index) out; the rest share the height. */
   setHidden(indices: number[]) {
     this.hidden = new Set(indices);
+    this.draw();
+  }
+
+  /** Fill the channels that have a fill colour (the layout's "Filled" option), or lines only. */
+  setFilled(on: boolean) {
+    this.filledOn = on;
     this.draw();
   }
 
@@ -273,7 +280,7 @@ export class Sle6000Renderer implements RendererAdapter {
       let end = c;
       while (end + 1 < this.plotW && fl[end + 1]) end++;
       if (end > c) {
-        if (ch.fill) {
+        if (ch.fill && this.filledOn) {
           ctx.beginPath();
           ctx.moveTo(sx(c), base);
           for (let k = c; k <= end; k++) ctx.lineTo(sx(k), sy(col[k]));

@@ -21,6 +21,9 @@ export const SLE_THEME = {
   axis: "#6b6e73",
   zero: "#3a3c41",
   sweep: "#e53935", // red sweep head
+  // loops (IFU p146): the active loops blue-teal, a saved loop white
+  loopActive: "#8fd0c6",
+  loopSaved: "#f2f2f2",
   alarmLimit: "#ef5a2a", // alarm-limit lines on the pressure channel (alarms, a later phase)
   // tile arcs by parameter type
   arc: { time: "#4fc3f7", pressure: "#f6a531", o2: "#7ed321", sens: "#f2f2f2" } as Record<string, string>,
