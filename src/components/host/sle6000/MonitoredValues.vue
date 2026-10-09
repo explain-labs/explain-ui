@@ -6,10 +6,13 @@ import { monGroups, type MonValue } from "./sleUi";
 // on black, right-aligned, each with a small grey "label (unit)" under it, in dark group boxes.
 // Single column (8 values) or double column (16, as on the photos); touch and hold 1 s to switch.
 // The sets follow the mode (conventional, HFOV, HFOV+CMV); an empty cell keeps the device's layout.
+// Sizes from a ward photo of the device (HFO, double column): the boxes share the column height by
+// their number of rows, values about 36 px (single) / 32 px (double), captions 13 px.
 const props = defineProps<{ values: Record<string, unknown>; double: boolean; active: boolean; mode: string | null }>();
 const emit = defineEmits<{ (e: "toggle"): void }>();
 
 const groups = computed(() => monGroups(props.mode, props.double));
+const rows = (g: unknown[]) => (props.double ? Math.ceil(g.length / 2) : g.length);
 function show(m: MonValue): string {
   const v = props.values[m.path];
   if (!props.active || typeof v !== "number" || !Number.isFinite(v)) return "---";
@@ -31,7 +34,7 @@ function cancel() {
 
 <template>
   <div class="sle-mon" @pointerdown="down" @pointerup="cancel" @pointerleave="cancel" @pointercancel="cancel">
-    <div v-for="(g, gi) in groups" :key="gi" class="sle-mon-group" :class="{ double }">
+    <div v-for="(g, gi) in groups" :key="gi" class="sle-mon-group" :class="{ double }" :style="{ flexGrow: rows(g) }">
       <template v-for="(m, i) in g" :key="(m?.path ?? 'gap') + i">
         <div v-if="m" class="sle-mon-cell">
           <div class="sle-mon-val">{{ show(m) }}</div>
@@ -53,8 +56,11 @@ function cancel() {
   font-family: Arial, Helvetica, sans-serif;
 }
 .sle-mon-group {
+  flex: 1 1 0;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
   background: var(--sle-panel);
   border: 1px solid #000;
   border-radius: 6px;
@@ -68,18 +74,19 @@ function cancel() {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  padding: 3px 0 2px;
+  justify-content: center;
+  padding: 2px 0;
 }
 .sle-mon-val {
-  font-size: 28px;
+  font-size: 36px;
   line-height: 1.05;
   color: #f2f2f2;
 }
 .sle-mon-group.double .sle-mon-val {
-  font-size: 20px;
+  font-size: 32px;
 }
 .sle-mon-cap {
-  font-size: 10px;
+  font-size: 13px;
   font-style: italic;
   color: #d8d8d8; /* light on the grey box, as on the captures */
 }
