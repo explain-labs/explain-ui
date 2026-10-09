@@ -82,7 +82,7 @@ and is the app's only ventilator UI.
   - the mode name with its sub-labels (VTV, and Sigh in HFOV), lit when on;
   - the waveforms;
   - the monitored values;
-  - the parameter row with +/− and Confirm.
+  - the parameter row with +/− (stacked, + above −, in the row as on the device) and Confirm.
 - **Settings table.** `sleUi.ts` imports the settings table from the engine
   (`@explain/device_models/sle6000_params`), so ranges, resolutions, per-mode rows and interlocks
   have one source. It adds the display parts:

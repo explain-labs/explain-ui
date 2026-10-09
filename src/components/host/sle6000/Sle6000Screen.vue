@@ -660,7 +660,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- main parameter row -->
-      <div class="sle-row main">
+      <div class="sle-row main" :class="{ seven: row('main').length > 6 }">
         <template v-for="(n, i) in row('main')" :key="'m' + i">
           <ParamTile
             v-if="n"
@@ -684,7 +684,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
-      <!-- +/- for the selected parameter, and Confirm -->
+      <!-- +/- for the selected parameter (+ above −, in the parameter row as on the device), and Confirm -->
       <div v-if="selected" class="sle-plusminus">
         <button aria-label="Increase" @click="nudge(1)">+</button>
         <button aria-label="Decrease" @click="nudge(-1)">−</button>
@@ -1035,6 +1035,11 @@ button:disabled {
   width: 108px;
   height: 108px;
 }
+/* HFOV+CMV has seven parameters: narrower tiles leave room for the +/- column before Confirm */
+.sle-row.main.seven :deep(.sle-tile),
+.sle-row.main.seven .sle-gap {
+  width: 94px;
+}
 .sle-mon-col {
   position: absolute;
   left: 770px;
@@ -1044,15 +1049,16 @@ button:disabled {
 }
 .sle-plusminus {
   position: absolute;
-  left: 770px;
-  top: 600px;
+  left: 788px;
+  top: 654px;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   z-index: 6;
 }
 .sle-plusminus button {
-  width: 56px;
-  height: 46px;
+  width: 106px;
+  height: 52px;
   background: var(--sle-button);
   color: var(--sle-text);
   border: 1px solid #000;
