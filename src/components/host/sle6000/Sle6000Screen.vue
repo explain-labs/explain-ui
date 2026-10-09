@@ -4,6 +4,17 @@ import { useExplain } from "@/composables/useExplain";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { Sle6000Renderer, type SleChannel } from "@/render/Sle6000Renderer";
 import { SleLoopRenderer } from "@/render/SleLoopRenderer";
+import { SleTrendRenderer } from "@/render/SleTrendRenderer";
+import {
+  sleTrendStore,
+  TREND_PATHS,
+  DEFAULT_ZOOM,
+  stepZoom,
+  zoomLabel,
+  stepCursor,
+  clockText,
+  onTrendAppend,
+} from "./sleTrends";
 import type { LoopPoints } from "@/render/sleLoopBuffer";
 import ParamTile from "./ParamTile.vue";
 import MonitoredValues from "./MonitoredValues.vue";
@@ -37,7 +48,9 @@ import { SLE_THEME as T, SLE_CSS_VARS } from "./sleTheme";
 // validated by the device's own ranges and interlocks. Settings and monitored values come off the
 // 1 Hz slow stream, waveforms off the fast stream (never Vue-reactive).
 
-const { watch: watchProps, watchSlow, slowValues, modelState, modelReady, isRunning, call } = useExplain();
+const { model, watch: watchProps, watchSlow, slowValues, modelState, modelReady, isRunning, call } = useExplain();
+// the session's 1 Hz trend history, fed from the slow stream and fast-forwards (sleTrends.ts)
+const trendStore = sleTrendStore(model);
 const { addRenderer, removeRenderer } = useRealtimeBus();
 
 const W = 1024;
@@ -240,11 +253,13 @@ watch(pausedLeft, (v) => {
   renderer?.setPaused(v > 0);
   loopA?.setPaused(v > 0);
   loopB?.setPaused(v > 0);
+  trendR?.setPaused(v > 0);
 });
 
-// ---- layout (IFU §21.1.8): waveforms or loops ------------------------------------------------
+// ---- layout (IFU §21.1.8): waveforms, loops or trends ------------------------------------------
 const layout = ref<SleLayout>(loadLayout());
 const loopsOn = computed(() => layout.value.kind === "loops");
+const trendsOn = computed(() => layout.value.kind === "trends");
 const loopAEl = ref<HTMLDivElement | null>(null);
 const loopBEl = ref<HTMLDivElement | null>(null);
 let loopA: SleLoopRenderer | null = null;
@@ -258,7 +273,73 @@ function applyLayout() {
   loopB?.setConfig(LOOPS[l.secondary]);
   setSaved(null);
   capture.value = "none";
+  trendCtl.value = null;
+  pushTrendView();
 }
+
+// ---- trends (IFU §21.1.9.4, pp 148-149): Zoom / Cursor / Scroll on the +/- buttons -------------
+const trendEl = ref<HTMLDivElement | null>(null);
+let trendR: SleTrendRenderer | null = null;
+const zoomS = ref(DEFAULT_ZOOM);
+const endT = ref<number | null>(null); // window end (model s); null = live, following new data
+const cursorT = ref<number | null>(null); // null = no cursor (the value box shows the latest)
+const trendCtl = ref<"zoom" | "cursor" | "scroll" | null>(null);
+const trendTick = ref(0); // bumped on every view push, so the clock text follows new samples
+// the latest window end: the newest sample, or one zoom after the first while the history is short
+// (so the trends fill in from the left)
+function liveTrendEnd(): number {
+  const first = trendStore.firstTime() ?? 0;
+  return Math.max(trendStore.lastTime() ?? 0, first + zoomS.value);
+}
+function trendWindow(): [number, number] {
+  const t1 = endT.value ?? liveTrendEnd();
+  return [t1 - zoomS.value, t1];
+}
+function pushTrendView() {
+  const [t0, t1] = trendWindow();
+  trendTick.value++;
+  trendR?.setView({ t0, t1, cursorT: cursorT.value, lines: layout.value.trends, grid: layout.value.trendGrid });
+}
+// new samples (realtime or a fast-forward) move the live window and the clock
+const offTrendAppend = onTrendAppend(() => {
+  if (trendsOn.value && endT.value === null) pushTrendView();
+});
+function pickTrendCtl(c: "zoom" | "cursor" | "scroll") {
+  trendCtl.value = trendCtl.value === c ? null : c;
+  // the cursor starts on the latest sample in the window (not past the data at the window end)
+  if (trendCtl.value === "cursor" && cursorT.value === null) {
+    cursorT.value = Math.min(trendWindow()[1], trendStore.lastTime() ?? trendWindow()[1]);
+  }
+  selected.value = null;
+  pushTrendView();
+}
+function trendNudge(dir: number) {
+  const first = trendStore.firstTime() ?? 0;
+  const last = trendStore.lastTime() ?? 0;
+  if (trendCtl.value === "zoom") {
+    const end = trendWindow()[1];
+    zoomS.value = stepZoom(zoomS.value, dir);
+    if (endT.value !== null) endT.value = Math.max(end, first + zoomS.value);
+  } else if (trendCtl.value === "cursor") {
+    const win = trendWindow();
+    const r = stepCursor(cursorT.value ?? win[1], win, dir);
+    cursorT.value = Math.min(Math.max(r.cursorT, first), last);
+    if (r.shift) endT.value = Math.min(win[1] + r.shift, liveTrendEnd());
+  } else if (trendCtl.value === "scroll") {
+    // half a window per press through the stored history; back at the end it follows live
+    const end = trendWindow()[1] + (dir * zoomS.value) / 2;
+    endT.value = end >= last ? null : Math.max(end, first + zoomS.value);
+  }
+  if (endT.value !== null && endT.value >= liveTrendEnd()) endT.value = null;
+  pushTrendView();
+}
+// the clock counts model time from the first stored sample (scenarios carry their own model time)
+// the cursor time, or the latest sample (live)
+const trendTimeText = computed(() => {
+  void trendTick.value;
+  const t = cursorT.value ?? trendStore.lastTime() ?? 0;
+  return clockText(t - (trendStore.firstTime() ?? 0));
+});
 watch(liveMode, (m) => renderer?.setFilled(layout.value.filled && !isHfo(m)));
 function confirmLayout(l: SleLayout) {
   layout.value = l;
@@ -377,7 +458,7 @@ const FAST_PATHS = [...CHANNELS.map((c) => c.signal), "Ventilator.ncc_insp", "Ve
 
 function rewatch() {
   watchProps(FAST_PATHS);
-  watchSlow(SLOW_PATHS);
+  watchSlow([...SLOW_PATHS, ...TREND_PATHS]);
 }
 watch(modelReady, (ready) => {
   if (ready) {
@@ -396,6 +477,7 @@ onMounted(() => {
   renderer.setMark(TRIGGER_MARK, ([trig, mand, insp]) => trig > 0.5 && mand < 0.5 && insp > 0.5, T.triggered);
   addRenderer(renderer);
   const loopColors = { active: T.loopActive, saved: T.loopSaved };
+  trendR = new SleTrendRenderer(trendEl.value!, trendStore, PALETTE, { first: T.trend1, second: T.trend2 });
   loopA = new SleLoopRenderer(loopAEl.value!, LOOPS[layout.value.primary], PALETTE, loopColors);
   loopB = new SleLoopRenderer(loopBEl.value!, LOOPS[layout.value.secondary], PALETTE, loopColors);
   addRenderer(loopA);
@@ -407,6 +489,7 @@ onMounted(() => {
     scale.value = Math.max(0.3, Math.min(1.25, w / W));
     renderer?.setCssScale(scale.value);
     loopA?.setCssScale(scale.value);
+    trendR?.setCssScale(scale.value);
     loopB?.setCssScale(scale.value);
   });
   ro.observe(host.value!);
@@ -414,6 +497,8 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   ro?.disconnect();
+  trendR?.dispose();
+  offTrendAppend();
   for (const r of [renderer, loopA, loopB]) {
     if (!r) continue;
     removeRenderer(r);
@@ -483,7 +568,18 @@ onBeforeUnmount(() => {
 
       <!-- waveforms -->
       <div class="sle-wave">
-        <div ref="wave" class="sle-wave-canvas" :class="{ top: loopsOn }"></div>
+        <div ref="wave" class="sle-wave-canvas" :class="{ top: loopsOn, off: trendsOn }"></div>
+        <!-- trends layout (IFU pp 146-149): four display lines and the Zoom / Cursor / Scroll column -->
+        <div v-show="trendsOn" class="sle-trends">
+          <div ref="trendEl" class="sle-trends-canvas"></div>
+          <div class="sle-trend-ctl">
+            <button :class="{ on: trendCtl === 'zoom' }" @click="pickTrendCtl('zoom')">Zoom</button>
+            <button :class="{ on: trendCtl === 'cursor' }" @click="pickTrendCtl('cursor')">Cursor</button>
+            <button :class="{ on: trendCtl === 'scroll' }" @click="pickTrendCtl('scroll')">Scroll</button>
+            <div class="t">{{ trendTimeText }}</div>
+            <div class="z">Current Zoom<br />{{ zoomLabel(zoomS) }}</div>
+          </div>
+        </div>
         <!-- loops layout (IFU p146): primary loop left, secondary right with the capture buttons -->
         <div v-show="loopsOn" class="sle-loops">
           <div ref="loopAEl" class="sle-loop primary"></div>
@@ -592,6 +688,10 @@ onBeforeUnmount(() => {
       <div v-if="selected" class="sle-plusminus">
         <button aria-label="Increase" @click="nudge(1)">+</button>
         <button aria-label="Decrease" @click="nudge(-1)">−</button>
+      </div>
+      <div v-else-if="trendsOn && trendCtl" class="sle-plusminus">
+        <button :aria-label="`${trendCtl} plus`" @click="trendNudge(1)">+</button>
+        <button :aria-label="`${trendCtl} minus`" @click="trendNudge(-1)">−</button>
       </div>
       <button v-if="dirty" class="sle-confirm" aria-label="Confirm" @click="confirm">✓</button>
 
@@ -795,6 +895,48 @@ button:disabled {
   position: absolute;
   inset: 0;
   background: var(--sle-screen);
+}
+.sle-wave-canvas.off {
+  display: none;
+}
+.sle-trends {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  background: var(--sle-screen);
+}
+.sle-trends-canvas {
+  flex: 1;
+  min-width: 0;
+}
+.sle-trend-ctl {
+  width: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 120px 4px 0;
+  align-items: stretch;
+  text-align: center;
+}
+.sle-trend-ctl button {
+  height: 40px;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
+  border-radius: 5px;
+  font-size: 14px;
+}
+.sle-trend-ctl button.on {
+  background: var(--sle-text);
+  color: #000;
+}
+.sle-trend-ctl .t {
+  font-size: 13px;
+  color: var(--sle-text);
+}
+.sle-trend-ctl .z {
+  font-size: 11px;
+  color: var(--sle-label);
 }
 .sle-wave-canvas.top {
   bottom: auto;
