@@ -6,7 +6,7 @@ import ToggleSwitch from "primevue/toggleswitch";
 import Panel from "primevue/panel";
 import { useExplain } from "@/composables/useExplain";
 
-// Bespoke ECLS (ECMO) console, modelled on VentilatorPanel. Control writes go
+// Bespoke ECLS (ECMO) console. Control writes go
 // straight to engine props via setProp() — the Ecls model has no setter
 // functions; calc_model() picks up changes each tick (it re-derives gas
 // composition when gas_fio2/gas_fico2 change, and toggles its sub-circuit's

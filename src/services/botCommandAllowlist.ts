@@ -6,8 +6,7 @@
 // told it can do something the webapp would then refuse. To widen the bot's
 // reach, add an entry here and regenerate the catalog — nothing else.
 //
-// v1 is a deliberate vertical slice: ventilator on/off + a few vent params +
-// start/stop the sim. Broaden one model-type at a time.
+// Broaden one model-type at a time.
 
 import { commonTaskAllowEntries } from "./commonTasks";
 
@@ -33,123 +32,9 @@ export interface AllowEntry {
 }
 
 export const COMMAND_ALLOWLIST: AllowEntry[] = [
-  // --- Ventilator (mechanical ventilation device) ---
-  {
-    op: "call",
-    model: "Ventilator",
-    target: "switch_ventilator",
-    note: "turn mechanical ventilation on/off (arg: boolean)",
-  },
-  { op: "call", model: "Ventilator", target: "set_fio2", note: "set inspired O2 fraction (0.21–1.0)" },
-  {
-    op: "call",
-    model: "Ventilator",
-    target: "set_ettube_diameter",
-    note: "set endotracheal tube diameter (mm)",
-  },
-  {
-    op: "call",
-    model: "Ventilator",
-    target: "set_ettube_length",
-    note: "set endotracheal tube length (mm)",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "vent_mode",
-    note: "ventilation mode (PC/PRVC/VC/PS/SIMV/CPAP/HFOV)",
-  },
-  { op: "setProp", model: "Ventilator", target: "vent_rate", note: "ventilator rate (/min)" },
-  { op: "setProp", model: "Ventilator", target: "insp_time", note: "inspiration time (s)" },
-  { op: "setProp", model: "Ventilator", target: "tidal_volume", note: "target tidal volume (mL)" },
-  { op: "setProp", model: "Ventilator", target: "pip_cmh2o", note: "peak inspiratory pressure (cmH2O)" },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "pip_cmh2o_max",
-    note: "pressure limit of PRVC and volume guarantee; pop-off in VC (cmH2O)",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "volume_guarantee",
-    note: "volume guarantee on/off in PC, PS or SIMV (servo the pressure to tidal_volume, up to pip_cmh2o_max)",
-  },
-  { op: "setProp", model: "Ventilator", target: "rise_time", note: "pressure rise time, PC/PRVC/PS (s)" },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "insp_pause",
-    note: "end-inspiratory pause, PC/PRVC/VC (s); gives plateau pressure, static compliance, resistance",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "leak_size",
-    note: "leak around an uncuffed ET tube, equivalent gap (mm; ~0.5-1.25 neonate, 1-3 adult; 0 = none)",
-  },
-  { op: "setProp", model: "Ventilator", target: "hfo_map_cmh2o", note: "HFOV mean airway pressure (cmH2O)" },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "hfo_amplitude_cmh2o",
-    note: "HFOV amplitude, peak-to-peak (cmH2O); more amplitude clears more CO2",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "hfo_freq",
-    note: "HFOV frequency (Hz); higher frequency gives smaller Vt and LESS CO2 clearance",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "ps_cmh2o",
-    note: "pressure support above PEEP, PS mode and SIMV spontaneous breaths (cmH2O; 0 = unsupported in SIMV)",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "peep_cmh2o",
-    note: "positive end-expiratory pressure (cmH2O); doubles as the CPAP level in CPAP mode",
-  },
-  { op: "setProp", model: "Ventilator", target: "insp_flow", note: "inspiratory/bias flow (L/min)" },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "synchronized",
-    note: "synchronized (patient-triggered) ventilation on/off",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "trigger_volume_perc",
-    note: "breath trigger volume (% of tidal volume)",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "trigger_mode",
-    note: "patient trigger type: 'volume' (% of tidal volume) or 'flow' (trigger_flow at the tube)",
-  },
-  { op: "setProp", model: "Ventilator", target: "trigger_flow", note: "flow trigger threshold (L/min)" },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "term_sens_perc",
-    note: "PS termination: the breath ends when inspiratory flow falls below this % of its peak",
-  },
-  {
-    op: "setProp",
-    model: "Ventilator",
-    target: "backup_rate",
-    note: "CPAP apnoea backup rate (/min, 0 = off): breaths at pip_cmh2o / insp_time during apnoea",
-  },
-  { op: "call", model: "Ventilator", target: "trigger_breath", note: "trigger a single manual breath (no args)" },
-
-  // --- SLE6000 (only when the scenario's Ventilator is model_type Sle6000, e.g. term_neonate_sle6000;
-  // its settings go through sle_set, which validates them as the device does; the generic setProps
-  // above are not in the Sle6000 interface, so they are rejected there) ---
+  // --- Ventilator: the SLE6000 (model_type Sle6000, every scenario up to 30 kg). Its settings go
+  // through sle_set, which validates them as the device does. The adult scenarios keep the generic
+  // ventilator, which has no bot commands (its setters aren't in the Sle6000 interface either) ---
   {
     op: "call",
     model: "Ventilator",

@@ -18,14 +18,14 @@ prose too — explain what you're doing and why; the blocks are stripped from th
 the user reads and rendered as action cards instead.
 
 ````
-Sure — I'll start mechanical ventilation and set a rate of 40.
+Sure — I'll start the SLE6000 in CMV and set a rate of 40.
 
 ```explain-command
-{"op":"call","model":"Ventilator","target":"switch_ventilator","args":[true],"reason":"start ventilation"}
+{"op":"call","model":"Ventilator","target":"sle_start","args":["CMV"],"reason":"start ventilation in CMV"}
 ```
 
 ```explain-command
-{"op":"setProp","model":"Ventilator","target":"vent_rate","value":40,"reason":"set rate to 40/min"}
+{"op":"call","model":"Ventilator","target":"sle_set","args":["rr",40],"reason":"set rate to 40/min"}
 ```
 ````
 
@@ -35,8 +35,8 @@ One JSON object per block. Fields by `op`:
 
 | `op` | required fields | meaning |
 |------|-----------------|---------|
-| `call` | `model`, `target`, `args` (array) | invoke a model function (e.g. `switch_ventilator`) |
-| `setProp` | `model`, `target`, `value` | set a model property (e.g. `vent_rate`); optional `it`/`at` (see Scheduling) |
+| `call` | `model`, `target`, `args` (array) | invoke a model function (e.g. `sle_start`) |
+| `setProp` | `model`, `target`, `value` | set a model property (e.g. `heart_rate_ref`); optional `it`/`at` (see Scheduling) |
 | `event` | `name`, `changes` (array) | build a **named, saved event** of timed property changes (see Scheduling) |
 | `start` | — | start the realtime simulation loop |
 | `stop` | — | stop the realtime simulation loop |

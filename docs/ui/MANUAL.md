@@ -63,6 +63,6 @@ The manual is related to [LESSONS](./LESSONS.md), but the two do different jobs.
 4. Monitoring dashboards *(done)*: reading cards, toolbar, dashboards, groups, the group editor.
 5. Model editor *(done)*: picking a model, sections, field types, factors, functions, refresh, keeping/undoing.
 6. Common tasks *(done)*: categories, −/+ and step size, reset, watching the effect, the bot.
-7. Ventilator *(done)*: switch, modes, settings, ET tube, synchronisation, measured values, graphs.
+7. Ventilator: the generic-panel tour was removed with that panel (the ventilator is now the SLE6000 replica); an SLE6000 tour is still to be written.
 8. ECLS *(done)*: running/clamping, pump and oxygenator devices, sweep gas, cannulas and sites (VA/VV), resistance factors, measurements, the circuit in the diagram.
 9. Resuscitation and pregnancy *(on hold: the panels are not ready yet)* · 10. Event scheduler *(done; the scaler is on hold: not finished yet)* · 11. AI bot *(done)*: questions, action cards, what it can do, Guided/Full, auto-apply, attachments, revert · 12. Saving and loading states *(done)*: what a state holds, cloud saves, My saved states, default state, scenarios vs states, developer snapshots.

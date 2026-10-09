@@ -98,22 +98,22 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 │ controlTab    │ vizTab                                        │ monitorTab                   │
 │ (left ¼)      │ (center ½)                                    │ (right ¼)                    │
 │               │                                               │                              │
-│ editor        │ diagram | chart | loop | chat | builder | docs│ monitoring | monitor |       │
-│ ventilator    │ (+ sle6000, dev builds)                       │   ventilator                 │
+│ editor        │ diagram | chart | loop | chat | builder |     │ monitoring | monitor         │
+│ tasks         │   sle6000 | docs                              │                              │
 │ ecls          │ Diagram · RealtimeChart · LoopChart ·         │ (NumericReadoutPanel ×N,     │
-│ resuscitation │ ChatPanel · PatientBuilderPanel · DocViewer   │  dashboard switcher,         │
-│ pregnancy     │                                               │  compact/trend prefs,        │
+│ resuscitation │ ChatPanel · PatientBuilderPanel ·             │  dashboard switcher,         │
+│ pregnancy     │ Sle6000Screen · DocViewer                     │  compact/trend prefs,        │
 │ scaler        │                                               │  manage/export) ·            │
-│ events        │                                               │ Monitor · VentilatorScope    │
+│ events        │                                               │ Monitor                      │
 ├───────────────┴──────────────────────────────────────────────┴──────────────────────────────┤
 └─ bottom bar ── COI/MODEL/STATUS · ▶/■ + fast-forward(calcSecs) · local-scenario loader · Save ┘
 ```
 
 | Column | Tab values | Components | Doc |
 |---|---|---|---|
-| Left (`controlTab`) | `editor` `ventilator` `ecls` `resuscitation`¹ `pregnancy`¹ `scaler`¹ `events` | `ModelEditor`, `VentilatorPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
-| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `builder` `sle6000` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `PatientBuilderPanel`, `Sle6000Screen` (dev builds only for now), `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md), [PatientBuilder](./PatientBuilder.md) |
-| Right (`monitorTab`) | `monitoring` `monitor` `ventilator` | `NumericReadoutPanel` (×group), `Monitor`, `VentilatorScope` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
+| Left (`controlTab`) | `editor` `tasks` `ecls` `resuscitation`¹ `pregnancy`¹ `scaler`¹ `events` | `ModelEditor`, `CommonTasksPanel`, `EclsPanel`, `ResuscitationPanel`, `PregnancyPanel`, `ScalerPanel`, `EventSchedulerPanel` | [ControlPanels](./ControlPanels.md) |
+| Center (`vizTab`) | `diagram` `chart` `loop` `chat` `builder` `sle6000` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `PatientBuilderPanel`, `Sle6000Screen` (the ventilator; no HFOV yet), `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md), [PatientBuilder](./PatientBuilder.md) |
+| Right (`monitorTab`) | `monitoring` `monitor` | `NumericReadoutPanel` (×group), `Monitor` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
 
 ¹ Unfinished: hidden in production builds, shown under `npm run dev` (`UNFINISHED_PANELS` in `MainPage.vue`).
 

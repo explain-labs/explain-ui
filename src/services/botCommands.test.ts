@@ -75,3 +75,18 @@ describe("validateCommand tune", () => {
     expect(tune([{ target: "pp", value: 20 }]).ok).toBe(false);
   });
 });
+
+describe("validateCommand ventilator (Guided scope)", () => {
+  const state = { models: { Ventilator: { name: "Ventilator", model_type: "Sle6000" } } };
+  const guided = (cmd: object) => validateCommand({ reason: "t", ...cmd } as any, state, "guided");
+
+  it("accepts the SLE6000 commands", () => {
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_start", args: ["CMV"] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_set", args: ["rr", 40] }).ok).toBe(true);
+  });
+
+  it("rejects the generic ventilator commands", () => {
+    expect(guided({ op: "setProp", model: "Ventilator", target: "vent_rate", value: 40 }).ok).toBe(false);
+    expect(guided({ op: "call", model: "Ventilator", target: "switch_ventilator", args: [true] }).ok).toBe(false);
+  });
+});
