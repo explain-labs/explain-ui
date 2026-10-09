@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **438 settable params**, **38 functions**
-(+ 49 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **438 settable params**, **40 functions**
+(+ 51 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -33,11 +33,13 @@ Snapshot: **45 model_types**, **438 settable params**, **38 functions**
 Active when the user selects **Guided** scope in the chat panel. Only these commands apply;
 anything else is rejected (the app suggests switching to Full). Full mode (below) is the default.
 
-- `call` `Ventilator.sle_start` — SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV)
-- `call` `Ventilator.sle_set` — SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%)
+- `call` `Ventilator.sle_start` — SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV/HFOV/HFOV+CMV)
+- `call` `Ventilator.sle_set` — SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%); HFO: freq (Hz), ie (1, 2 or 3 for I:E 1:1/1:2/1:3), map (mbar, HFOV), dp (Delta P, mbar), hfo_vtv (HFOV Vte target ml, 0 = off), sigh_rr (BPM, 0 = off), sigh_ti (s), sigh_p (mbar), hfo_activity (HFOV+CMV: 0 both phases, 1 expiration only)
 - `call` `Ventilator.sle_standby` — SLE6000: standby, stop ventilation (no args)
 - `call` `Ventilator.sle_manual_breath` — SLE6000: one manual breath (no args)
 - `call` `Ventilator.sle_o2_boost` — SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)
+- `call` `Ventilator.sle_sigh` — SLE6000 HFOV: one sigh at Sigh P for Sigh Ti (no args)
+- `call` `Ventilator.sle_osc_pause` — SLE6000 HFOV: oscillation pause at MAP for up to 60 s; call again to cancel (no args)
 - `setProp` `Heart.heart_rate_ref` — reference heart rate (bpm)
 - `setProp` `Heart.ans_sens` — autonomic sensitivity of the heart (0–1)
 - `setProp` `Ans.ans_active` — autonomic nervous system on/off
@@ -651,11 +653,13 @@ _setProp_:
 - `leak_size` — tube leak gap (mm) (number, mm, range 0–4) _(extra)_
 
 _call_:
-- `sle_start(mode (list, one of CPAP/CMV/PTV/PSV/SIMV))` — start / resume ventilation
+- `sle_start(mode (list, one of CPAP/CMV/PTV/PSV/SIMV/HFOV/HFOV+CMV))` — start / resume ventilation
 - `sle_standby()` — standby (stop ventilation)
-- `sle_set(name (list, one of rr/ti/peep/pip/rise/trig_sens/term_sens/rr_backup/p_support/vtv/o2); value (number))` — change a setting
+- `sle_set(name (list, one of rr/ti/peep/pip/rise/trig_sens/term_sens/rr_backup/p_support/vtv/o2/freq/ie/map/dp/hfo_vtv/sigh_rr/sigh_ti/sigh_p/hfo_activity); value (number))` — change a setting
 - `sle_manual_breath()` — manual breath
 - `sle_o2_boost(state (boolean))` — O2 Boost (+10 % for 2 min)
+- `sle_sigh()` — HFOV sigh (Sigh P for Sigh Ti)
+- `sle_osc_pause()` — HFOV oscillation pause (60 s, again to cancel)
 - `sle_set_circuit(diameter (number, mm, range 10–15))` — patient circuit (mm)
 - `set_ettube_diameter(ettube_diameter (number, mm))` — endotracheal tube diameter (mm)
 - `set_ettube_length(ettube_length (number, mm))` — endotracheal tube length (mm)

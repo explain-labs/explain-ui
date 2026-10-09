@@ -69,29 +69,37 @@ and is the app's only ventilator UI.
 - **Which scenarios.** Every scenario up to 30 kg uses an `Sle6000`.
 - **Adults.** The adult scenarios keep the generic `Ventilator`. For them the tab shows "Patient
   outside the SLE6000 range (0.3–30 kg)" over the screen.
-- **No HFOV yet.** HFOV has no control until the device's HFO phase lands. The generic
-  `VentilatorPanel` and `VentilatorScope` were removed.
+- **Modes.** The invasive conventional modes (phase 1) and the oscillatory modes HFOV and HFOV+CMV
+  (phase 2). The generic `VentilatorPanel` and `VentilatorScope` were removed.
 
 - **Frame.** `Sle6000Screen.vue` lays the device out on a fixed 1024 × 768 frame, CSS-scaled to the
   pane width. It has:
   - the information bar: mode button, messages, lock, pause, clock;
-  - the button column: Additional Parameters and Manual Breath. Alarms, Utilities and Layout are
-    disabled for now;
+  - the button column: Additional Parameters and Manual Breath. In HFOV, Manual Breath becomes
+    **Sigh** and an **Oscillation Pause** button (with its 60 s countdown) sits above Additional
+    Parameters, as on the vendor HFOV screen. Alarms, Utilities and Layout are disabled for now;
+  - the mode name with its sub-labels (VTV, and Sigh in HFOV), lit when on;
   - the waveforms;
   - the monitored values;
   - the parameter row with +/− and Confirm.
 - **Settings table.** `sleUi.ts` imports the settings table from the engine
   (`@explain/device_models/sle6000_params`), so ranges, resolutions, per-mode rows and interlocks
-  have one source. It adds the display parts: decimals, labels such as PIP MAX / VTV Target, the
-  monitored-value groups, and the slow paths.
+  have one source. It adds the display parts:
+  - decimals;
+  - labels such as PIP MAX / VTV Target, and ΔP Max / Vte Target in HFOV;
+  - list texts (`formatParam`: I:E "1:2", HFO Activity);
+  - the monitored-value groups per mode (`monGroups`: conventional, HFOV, HFOV+CMV; a `null` cell
+    keeps the device's layout);
+  - the slow paths.
 - **`ParamTile.vue`.** One parameter control: an SVG 270° arc gauge, coloured by type (time blue,
   pressure orange, O2 green, sensitivity white). Its states are available, selected (white) and
   preview (black). A tap selects it. A hold emits `hold`: 2 s switches on an Off function (VTV, RR
-  Backup, P Support), and 3 s on O2 toggles O2 Boost.
+  Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 toggles O2 Boost.
+  `display` / `ends` show a list setting by name.
 - **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
   1 s hold switches between them.
-- **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons and the 10/15 mm circuit picker.
-  HFO and non-invasive are shown disabled.
+- **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons (CPAP to SIMV, HFOV, HFOV+CMV)
+  and the 10/15 mm circuit picker. Non-invasive is shown disabled.
 - **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: blue traces on
   white, grey header strips, a y-axis that snaps to round ranges (grows at once, shrinks a sweep
   later), and a pause (`setPaused`). It uses the same column store as `MonitorRenderer`, plus

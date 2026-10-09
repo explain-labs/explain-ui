@@ -3,8 +3,11 @@
 import {
   SLE_PARAMS,
   SLE_MODES,
+  SLE_HFO_MODES,
   sle_step,
   sle_interlocks,
+  sle_clamp,
+  sle_format,
 } from "@explain/device_models/sle6000_params";
 
 export interface SleParam {
@@ -17,6 +20,8 @@ export interface SleParam {
   kind: string;
   off?: boolean;
   on?: number;
+  choices?: number[]; // a list setting: one of these, shown by `names`
+  names?: string[];
 }
 export interface SleMode {
   main: (string | null)[];
@@ -27,7 +32,19 @@ export interface SleMode {
 export const PARAMS = SLE_PARAMS as unknown as Record<string, SleParam>;
 export const MODES = SLE_MODES as unknown as Record<string, SleMode>;
 export const stepParam = sle_step as (name: string, value: number, dir: number) => number;
-export const interlocks = sle_interlocks as (s: Record<string, number>, mode: string) => Record<string, number>;
+export const interlocks = sle_interlocks as (
+  s: Record<string, number>,
+  mode: string,
+  changed?: string[],
+) => Record<string, number>;
+export const clampParam = sle_clamp as (name: string, value: number) => number;
+export const HFO_MODES = SLE_HFO_MODES as string[];
+export const isHfo = (mode: string | null | undefined) => !!mode && HFO_MODES.includes(mode);
+
+// the text on a tile: a list setting by its name, an Off function as "Off"
+export function formatParam(name: string, value: number, decimals: number): string {
+  return (sle_format as (n: string, v: number, d: number) => string)(name, value, decimals);
+}
 
 // decimals shown on a tile, from the finest resolution of the parameter
 export function decimalsOf(name: string): number {
@@ -35,9 +52,15 @@ export function decimalsOf(name: string): number {
   return res >= 1 ? 0 : res >= 0.1 ? 1 : 2;
 }
 
-// the tile label in a mode (CPAP for PEEP in CPAP, Ti Max in PSV; PIP MAX / VTV Target with VTV on)
+// the tile label in a mode (CPAP for PEEP in CPAP, Ti Max in PSV; PIP MAX / VTV Target with VTV
+// on; in HFOV ΔP Max / Vte Target with its VTV on, as on the device's HFOV screen)
 export function labelOf(name: string, mode: string, s: Record<string, number>): string {
   const base = MODES[mode]?.labels?.[name] ?? PARAMS[name].label;
+  if (mode === "HFOV" && s.hfo_vtv > 0) {
+    if (name === "dp") return "ΔP Max";
+    if (name === "hfo_vtv") return "Vte Target";
+  }
+  if (isHfo(mode)) return base;
   if (s.vtv > 0 && mode !== "CPAP" && name === "pip") return "PIP MAX"; // no VTV in CPAP
   if (s.vtv > 0 && name === "vtv") return "VTV Target";
   return base;
@@ -47,6 +70,7 @@ export function labelOf(name: string, mode: string, s: Record<string, number>): 
 export const SETTING_NAMES = Object.keys(PARAMS);
 
 // monitored values (IFU p175): key on the slow stream, label, unit, decimals
+export type MonCell = MonValue | null; // null: an empty cell (keeps the device's layout)
 export interface MonValue {
   path: string;
   label: string;
@@ -85,11 +109,45 @@ export const MON_DOUBLE: MonValue[][] = [
   ],
 ];
 
+// HFO (IFU p175; the layout of the vendor HFOV screenshot): per oscillation
+const ie = mv("mon_ie", "I:E", "", 1, (v) => `1:${v.toFixed(1)}`);
+export const MON_HFO_SINGLE: MonCell[][] = [
+  [mv("mon_map", "MAP", "mbar", 0), mv("mon_dp", "ΔP", "mbar", 0), mv("mon_vte", "Vte", "ml", 1), mv("mon_dco2", "DCO2", "", 0)],
+  [mv("mon_vmin", "Vmin", "l", 2), mv("mon_freq", "Freq", "Hz", 1)],
+  [mv("mon_leak", "Leak", "%", 0), mv("mon_o2", "O2", "%", 0)],
+];
+export const MON_HFO_DOUBLE: MonCell[][] = [
+  [null, mv("mon_o2", "O2", "%", 0)],
+  [null, mv("mon_dp", "ΔP", "mbar", 0), ie, mv("mon_map", "MAP", "mbar", 0)],
+  [mv("mon_vmin", "Vmin", "l", 2), mv("mon_vte", "Vte", "ml", 1), mv("mon_dco2", "DCO2", "", 0), mv("mon_leak", "Leak", "%", 0)],
+  [mv("mon_r", "R", "mbar/l/s", 0), null, mv("mon_c", "C", "ml/mbar", 1), null],
+];
+// HFOV+CMV: the breath values above the oscillation ones
+export const MON_HFOCMV_DOUBLE: MonCell[][] = [
+  [mv("mon_rr", "RR", "BPM", 0), mv("mon_o2", "O2", "%", 0), mv("mon_ti", "Ti", "s", 2), mv("mon_pip", "PIP", "mbar", 1)],
+  [mv("mon_dp", "ΔP", "mbar", 0), mv("mon_map", "MAP", "mbar", 0), ie, mv("mon_freq", "Freq", "Hz", 1)],
+  [mv("mon_vmin", "Vmin", "l", 2), mv("mon_vte", "Vte", "ml", 1), mv("mon_dco2", "DCO2", "", 0), mv("mon_leak", "Leak", "%", 0)],
+  [mv("mon_r", "R", "mbar/l/s", 0), null, mv("mon_c", "C", "ml/mbar", 1), null],
+];
+
+// the monitored-value groups for a mode
+export function monGroups(mode: string | null, double: boolean): MonCell[][] {
+  if (mode === "HFOV+CMV") return double ? MON_HFOCMV_DOUBLE : MON_HFO_SINGLE;
+  if (mode === "HFOV") return double ? MON_HFO_DOUBLE : MON_HFO_SINGLE;
+  return double ? MON_DOUBLE : MON_SINGLE;
+}
+
+const ALL_MON = [MON_SINGLE, MON_DOUBLE, MON_HFO_SINGLE, MON_HFO_DOUBLE, MON_HFOCMV_DOUBLE]
+  .flat(2)
+  .filter((m): m is MonValue => m !== null);
+
 export const SLOW_PATHS = [
   "Ventilator.sle_mode",
   "Ventilator.is_enabled",
   "Ventilator.o2_boost_remaining",
   "Ventilator.sle_circuit",
+  "Ventilator.hfo_pause_remaining",
+  "Ventilator.hfo_sigh_remaining",
   ...SETTING_NAMES.map((k) => `Ventilator.sle_${k}`),
-  ...new Set([...MON_SINGLE.flat(), ...MON_DOUBLE.flat()].map((m) => m.path)),
+  ...new Set(ALL_MON.map((m) => m.path)),
 ];

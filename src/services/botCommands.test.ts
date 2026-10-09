@@ -90,3 +90,15 @@ describe("validateCommand ventilator (Guided scope)", () => {
     expect(guided({ op: "call", model: "Ventilator", target: "switch_ventilator", args: [true] }).ok).toBe(false);
   });
 });
+
+describe("validateCommand SLE6000 HFO (Guided scope)", () => {
+  const state = { models: { Ventilator: { name: "Ventilator", model_type: "Sle6000" } } };
+  const guided = (cmd: object) => validateCommand({ reason: "t", ...cmd } as any, state, "guided");
+
+  it("accepts HFOV, its settings, Sigh and Oscillation Pause", () => {
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_start", args: ["HFOV"] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_set", args: ["dp", 20] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_sigh", args: [] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_osc_pause", args: [] }).ok).toBe(true);
+  });
+});
