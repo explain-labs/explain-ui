@@ -55,8 +55,8 @@ function cancel() {
 .sle-mon-group {
   display: grid;
   grid-template-columns: 1fr;
-  background: #0b0c0e;
-  border: 1px solid #3a3c41;
+  background: var(--sle-panel);
+  border: 1px solid #000;
   border-radius: 6px;
   padding: 2px 8px;
 }
@@ -81,6 +81,6 @@ function cancel() {
 .sle-mon-cap {
   font-size: 10px;
   font-style: italic;
-  color: #a9acb1;
+  color: #d8d8d8; /* light on the grey box, as on the captures */
 }
 </style>

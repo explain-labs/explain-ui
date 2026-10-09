@@ -1,32 +1,35 @@
 // SLE6000 "Lunar" interface colours. The IFU draws the screen as grey line art, but the device has
-// a dark, low-glare screen. These values are sampled by eye from vendor product photos, as SLE
-// publishes no palette: the GE HealthCare SLE6000 product page (a SIMV screen) and the Inspiration
-// Healthcare SLE6000 N/C/H brochure (SIMV + VTV and HFOV screens). The arc colours by parameter type
-// also follow the IFU text (p150), and the alarm colours IFU p206.
+// a dark, low-glare screen. SLE publishes no palette. The greys, traces and arcs are sampled
+// (pixel modes) from the screen captures in the SLE6000 brochure (SLE6000_screens.pdf: SIMV,
+// HFOV, NIPPV Tr., loops and trends screens); the rest by eye from the GE HealthCare product page
+// and the Inspiration Healthcare N/C/H brochure. The arc colours by parameter type also follow the
+// IFU text (p150), and the alarm colours IFU p206.
 
 export const SLE_THEME = {
   screen: "#000000", // screen background
-  panel: "#2b2d31", // overlays (mode panel), group boxes
-  button: "#4a4d52", // side buttons, tiles
-  buttonDark: "#3a3c41", // tile gradient bottom, channel header strips
-  disc: "#1c1d20", // inner disc behind a tile value
+  panel: "#4b4a4a", // monitored-value group boxes (one neutral grey on the captures)
+  button: "#4b4a4a", // side buttons, tiles
+  buttonDark: "#3a3939", // pressed / secondary greys
+  disc: "#4b4a4a", // inside a tile's arc ring: the tile grey (the ring itself is black)
   text: "#f2f2f2",
   label: "#a9acb1", // small labels (monitored-value captions, axis ticks)
-  // waveforms: pressure slate-teal filled, flow bright green line, volume teal filled
-  pressure: { line: "#9fbfba", fill: "#4d6f6b" },
-  flow: { line: "#3ddc4a", fill: null },
-  volume: { line: "#8fd0c6", fill: "#3f7d76" },
+  // waveforms: light teal-grey lines over a dark teal fill on all three channels (the green line on
+  // the captures' flow channel is the trigger-level marker, not the trace); unfilled in HFO
+  pressure: { line: "#a8c0c4", fill: "#3b5555" },
+  flow: { line: "#b0d0d0", fill: "#3b5555" },
+  volume: { line: "#a8c8cc", fill: "#3b5555" },
+  triggered: "#e8d040", // the inspiration of a patient-triggered breath, drawn yellow
   co2: { line: "#e6d84a", fill: "#6f6a24" }, // etCO2 is shown in yellow (brochure); later phase
-  header: "#3a3c41", // channel header strip
+  header: "#4a4a4a", // channel header strip
   axis: "#6b6e73",
   zero: "#3a3c41",
   sweep: "#e53935", // red sweep head
   // loops (IFU p146): the active loops blue-teal, a saved loop white
-  loopActive: "#8fd0c6",
+  loopActive: "#a8c8cc",
   loopSaved: "#f2f2f2",
   alarmLimit: "#ef5a2a", // alarm-limit lines on the pressure channel (alarms, a later phase)
   // tile arcs by parameter type
-  arc: { time: "#4fc3f7", pressure: "#f6a531", o2: "#7ed321", sens: "#f2f2f2" } as Record<string, string>,
+  arc: { time: "#90d0f0", pressure: "#e88028", o2: "#84c428", sens: "#f2f2f2" } as Record<string, string>,
   boost: "#e53935", // O2 Boost portion of the O2 arc (IFU p129)
   mute: "#f2c200", // alarm-mute button outline and bell
 };

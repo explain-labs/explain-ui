@@ -5,8 +5,10 @@ import type { ChartFrame, AnimFrame, ChannelsPayload, RendererAdapter } from "./
 // zero line, on black, a dark header strip per channel with its title, a y-axis with ticks on the
 // left, a zero line, and a sweep (red head) that overwrites the previous pass. Same column
 // store as MonitorRenderer (min/max envelope per column). The axes snap to round ranges that only
-// grow within a sweep and shrink back a sweep later, so they don't jump breath to breath. Never
-// Vue-reactive: registered with the RealtimeBus.
+// grow within a sweep and shrink back a sweep later, so they don't jump breath to breath. A mark
+// (setMark) draws the trace of the marked columns in another colour: the inspiration of a
+// patient-triggered breath in yellow, as on the device. Never Vue-reactive: registered with the
+// RealtimeBus.
 
 export interface SleChannel {
   signal: string; // chart slot path, e.g. "Ventilator.pres"
@@ -52,6 +54,9 @@ export class Sle6000Renderer implements RendererAdapter {
   private range: [number, number][] = []; // current y-range per channel
   private hidden = new Set<number>();
   private filledOn = true; // the Waveforms layout's "Filled" option
+  private mark: { signals: string[]; test: (v: number[]) => boolean; color: string } | null = null;
+  private markIdx: number[] = [];
+  private marked = new Uint8Array(0); // per column: marked
   private cssScale = 1; // the screen frame is CSS-scaled; draw at the real pixel size
   private pal: SlePalette;
 
@@ -76,6 +81,13 @@ export class Sle6000Renderer implements RendererAdapter {
   onRegistry(payload: ChannelsPayload) {
     this.slots = payload?.chart?.slots ?? [];
     this.idx = this.channels.map((c) => this.slots.indexOf(c.signal));
+    this.markIdx = this.mark ? this.mark.signals.map((m) => this.slots.indexOf(m)) : [];
+  }
+
+  /** Mark columns where `test` holds on the `signals` (one value each per sample), drawn in `color`. */
+  setMark(signals: string[], test: (v: number[]) => boolean, color: string) {
+    this.mark = { signals, test, color };
+    this.markIdx = signals.map((m) => this.slots.indexOf(m));
   }
 
   /** Freeze the traces (the device's pause button); frames are dropped while paused. */
@@ -104,6 +116,7 @@ export class Sle6000Renderer implements RendererAdapter {
 
   clear() {
     for (const f of this.filled) f.fill(0);
+    this.marked.fill(0);
     this.headCol = -1;
     this.draw();
   }
@@ -129,6 +142,10 @@ export class Sle6000Renderer implements RendererAdapter {
       const fresh = c !== prev;
       if (prev >= 0 && c < prev) this.endSweep(); // wrapped round
       const skipped = prev >= 0 && fresh ? (c - prev + this.plotW) % this.plotW - 1 : 0;
+      if (this.mark && this.markIdx.length && this.markIdx.every((i) => i >= 0)) {
+        const on = this.mark.test(this.markIdx.map((i) => rows[base + i])) ? 1 : 0;
+        this.marked[c] = fresh ? on : this.marked[c] | on;
+      } else if (fresh) this.marked[c] = 0;
       const gap = skipped > 0 && skipped < this.plotW / 2 ? skipped : 0;
       for (let ci = 0; ci < this.channels.length; ci++) {
         const si = this.idx[ci];
@@ -298,6 +315,29 @@ export class Sle6000Renderer implements RendererAdapter {
           ctx.lineTo(x, sy(col[k]));
         }
         ctx.stroke();
+        // marked columns over the line, in the mark colour
+        if (this.mark) {
+          ctx.strokeStyle = this.mark.color;
+          let k = c;
+          while (k <= end) {
+            if (!this.marked[k]) {
+              k++;
+              continue;
+            }
+            const k0 = Math.max(c, k - 1);
+            ctx.beginPath();
+            ctx.moveTo(sx(k0), sy(col[k0]));
+            while (k <= end && this.marked[k]) {
+              const x = sx(k);
+              ctx.lineTo(x, sy(mn[k]));
+              ctx.lineTo(x, sy(mx[k]));
+              ctx.lineTo(x, sy(col[k]));
+              k++;
+            }
+            ctx.stroke();
+          }
+          ctx.strokeStyle = ch.color;
+        }
       }
       c = end + 1;
     }
@@ -317,6 +357,7 @@ export class Sle6000Renderer implements RendererAdapter {
       this.colMin = this.channels.map(() => new Float64Array(plotW));
       this.colMax = this.channels.map(() => new Float64Array(plotW));
       this.filled = this.channels.map(() => new Uint8Array(plotW));
+      this.marked = new Uint8Array(plotW);
       this.headCol = -1;
     }
     this.draw();
