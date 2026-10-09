@@ -98,7 +98,9 @@ and is the app's only ventilator UI.
   Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 toggles O2 Boost.
   `display` / `ends` show a list setting by name.
 - **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
-  1 s hold switches between them.
+  1 s hold switches between them. Sized from a ward photo of the device: the group boxes share the
+  column height by their number of rows, and values are 36 px (single) / 32 px (double) with 13 px
+  captions.
 - **`LayoutPanel.vue`** (IFU §21.1.8 to 21.1.9, pp 145–146; the vendor brochure's Loops screen).
   The Waveforms / Loops / Trends layouts, applied on Confirm and kept per viewer in `localStorage`.
   - **Waveforms:** up to two of pressure / flow / volume off, and Filled on or off
