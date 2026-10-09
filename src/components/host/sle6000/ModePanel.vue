@@ -4,8 +4,8 @@ import { ref } from "vue";
 // The Mode panel (IFU p139, p151; dark like the rest of the device screen, an assumption as no
 // photo shows it open): an overlay with dark tabs (Invasive | Non-invasive |
 // Standby), the mode buttons and the patient-circuit selector. Picking a mode previews its
-// parameters along the bottom; nothing changes until Confirm. HFO and the non-invasive modes come
-// in later phases and are shown disabled.
+// parameters along the bottom; nothing changes until Confirm. The non-invasive modes come in a
+// later phase and are shown disabled.
 defineProps<{ current: string; preview: string | null; circuit: number }>();
 const emit = defineEmits<{
   (e: "select", mode: string): void;
@@ -14,8 +14,7 @@ const emit = defineEmits<{
 }>();
 
 const tab = ref<"invasive" | "standby">("invasive");
-const INVASIVE = ["CPAP", "CMV", "PTV", "PSV", "SIMV"];
-const LATER = ["HFOV", "HFOV+CMV"];
+const INVASIVE = ["CPAP", "CMV", "PTV", "PSV", "SIMV", "HFOV", "HFOV+CMV"];
 </script>
 
 <template>
@@ -37,7 +36,6 @@ const LATER = ["HFOV", "HFOV+CMV"];
         >
           {{ m }}
         </button>
-        <button v-for="m in LATER" :key="m" class="mode" disabled title="HFO modes: a later phase">{{ m }}</button>
       </div>
       <div class="circuits">
         <div class="cap">Patient Circuit</div>

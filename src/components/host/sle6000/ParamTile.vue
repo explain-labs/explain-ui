@@ -20,15 +20,17 @@ const props = withDefaults(
     canBeOff?: boolean; // value 0 shows "Off"
     holdMs?: number; // 0 = no hold gesture
     boost?: number | null; // O2 Boost level shown as a red arc segment
+    display?: string | null; // the text instead of the number (a list setting, e.g. I:E "1:2")
+    ends?: [string, string] | null; // the range-end labels instead of min/max
   }>(),
-  { state: "available", canBeOff: false, holdMs: 0, boost: null },
+  { state: "available", canBeOff: false, holdMs: 0, boost: null, display: null, ends: null },
 );
 const emit = defineEmits<{ (e: "tap"): void; (e: "hold"): void }>();
 
 const COLORS = SLE_THEME.arc;
 const BOOST = SLE_THEME.boost;
 const off = computed(() => props.canBeOff && props.value === 0);
-const text = computed(() => (off.value ? "Off" : props.value.toFixed(props.decimals)));
+const text = computed(() => (off.value ? "Off" : (props.display ?? props.value.toFixed(props.decimals))));
 const fmtEnd = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 
 // arc geometry in a 100 x 100 box: centre (50, 56), radius 28, from 135° clockwise over 270°
@@ -98,8 +100,8 @@ onBeforeUnmount(cancel);
       <path v-if="fillPath" :d="fillPath" class="fill" :style="{ stroke: COLORS[kind] }" />
       <path v-if="boostPath" :d="boostPath" class="fill" :style="{ stroke: BOOST }" />
       <text :x="CX" :y="CY + 6" class="value" :class="{ off }">{{ text }}</text>
-      <text :x="pt(135)[0] - 1" :y="90" class="end" text-anchor="start">{{ fmtEnd(min) }}</text>
-      <text :x="pt(45)[0] + 1" :y="90" class="end" text-anchor="end">{{ fmtEnd(max) }}</text>
+      <text :x="pt(135)[0] - 1" :y="90" class="end" text-anchor="start">{{ ends ? ends[0] : fmtEnd(min) }}</text>
+      <text :x="pt(45)[0] + 1" :y="90" class="end" text-anchor="end">{{ ends ? ends[1] : fmtEnd(max) }}</text>
       <text :x="CX" :y="98" class="unit">{{ unit }}</text>
     </svg>
   </div>

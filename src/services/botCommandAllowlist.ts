@@ -39,7 +39,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     op: "call",
     model: "Ventilator",
     target: "sle_start",
-    note: "SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV)",
+    note: "SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV/HFOV/HFOV+CMV)",
   },
   {
     op: "call",
@@ -47,11 +47,21 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     target: "sle_set",
     note:
       "SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), " +
-      "term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%)",
+      "term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%); " +
+      "HFO: freq (Hz), ie (1, 2 or 3 for I:E 1:1/1:2/1:3), map (mbar, HFOV), dp (Delta P, mbar), " +
+      "hfo_vtv (HFOV Vte target ml, 0 = off), sigh_rr (BPM, 0 = off), sigh_ti (s), sigh_p (mbar), " +
+      "hfo_activity (HFOV+CMV: 0 both phases, 1 expiration only)",
   },
   { op: "call", model: "Ventilator", target: "sle_standby", note: "SLE6000: standby, stop ventilation (no args)" },
   { op: "call", model: "Ventilator", target: "sle_manual_breath", note: "SLE6000: one manual breath (no args)" },
   { op: "call", model: "Ventilator", target: "sle_o2_boost", note: "SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)" },
+  { op: "call", model: "Ventilator", target: "sle_sigh", note: "SLE6000 HFOV: one sigh at Sigh P for Sigh Ti (no args)" },
+  {
+    op: "call",
+    model: "Ventilator",
+    target: "sle_osc_pause",
+    note: "SLE6000 HFOV: oscillation pause at MAP for up to 60 s; call again to cancel (no args)",
+  },
 
   // --- Hemodynamics + autonomic nervous system ---
   { op: "setProp", model: "Heart", target: "heart_rate_ref", note: "reference heart rate (bpm)" },

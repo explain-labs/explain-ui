@@ -7015,7 +7015,9 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "CMV",
             "PTV",
             "PSV",
-            "SIMV"
+            "SIMV",
+            "HFOV",
+            "HFOV+CMV"
           ],
           "custom_options": true,
           "default": "CMV"
@@ -7053,7 +7055,16 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "rr_backup",
             "p_support",
             "vtv",
-            "o2"
+            "o2",
+            "freq",
+            "ie",
+            "map",
+            "dp",
+            "hfo_vtv",
+            "sigh_rr",
+            "sigh_ti",
+            "sigh_p",
+            "hfo_activity"
           ],
           "custom_options": true,
           "default": "pip"
@@ -7090,6 +7101,22 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
           "default": true
         }
       ]
+    },
+    {
+      "caption": "HFOV sigh (Sigh P for Sigh Ti)",
+      "target": "sle_sigh",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": []
+    },
+    {
+      "caption": "HFOV oscillation pause (60 s, again to cancel)",
+      "target": "sle_osc_pause",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": []
     },
     {
       "caption": "patient circuit (mm)",
@@ -7207,6 +7234,87 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "basic",
       "readonly": true,
       "caption": "O2 (%)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_freq",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFO frequency (Hz)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_ie",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV I:E (1:x)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_map",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV MAP (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_dp",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFO Delta P (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_hfo_vtv",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV VTV target (ml, 0 = off)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_sigh_rr",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV Sigh RR (BPM, 0 = off)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_sigh_ti",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV Sigh Ti (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "sle_sigh_p",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV Sigh P (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_hfo_activity",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV+CMV HFO activity (0 both phases, 1 expiration)",
       "factor": 1,
       "rounding": 0
     },
@@ -7460,6 +7568,42 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "fresh gas flow (l/min)",
       "factor": 1,
       "rounding": 1
+    },
+    {
+      "target": "mon_dp",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "HFO measured Delta P (mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_dco2",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "HFO DCO2 (ml²/s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_freq",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "HFO frequency (Hz)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "hfo_pause_remaining",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "oscillation pause left (s)",
+      "factor": 1,
+      "rounding": 0
     },
     {
       "target": "o2_boost_remaining",

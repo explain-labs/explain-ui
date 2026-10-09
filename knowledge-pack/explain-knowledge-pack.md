@@ -9207,9 +9207,9 @@ manual is a copyrighted vendor document and is not in the repository. Page numbe
 to it.
 
 **Phase 1** covers the invasive conventional modes CPAP, CMV, PTV, PSV and SIMV, with volume
-targeting (VTV). These come in later phases:
-- HFOV, HFOV+CMV, sigh and oscillation pause
-- the non-invasive modes
+targeting (VTV). **Phase 2** adds the invasive oscillatory modes: HFOV, with VTV, sighs and
+oscillation pause, and HFOV+CMV (see [HFO](#hfo-phase-2)). These come in later phases:
+- the non-invasive modes, including nHFOV
 - alarms
 - OxyGenie
 
@@ -9233,9 +9233,6 @@ working.
   - The switched-on circuit (`VENT_*` parts enabled, `MOUTH_DS` closed) is still written into the
     JSON, by the generators' `applyVentilator`.
   - Without `sle_mode`, the device shows whatever the generic settings are doing.
-
-**HFOV.** HFOV is not in the device model yet (phase 2). The generic `set_hfov` still works
-underneath, but the app has no control for it until then.
 
 ## Settings (device units)
 
@@ -9271,10 +9268,12 @@ the other modes.
 
 | Method | Effect |
 |---|---|
-| `sle_apply(settings)` | The device's preview → Confirm. Clamps and snaps each given setting, keeps the others, applies the interlocks, then starts or switches the mode. `settings` may hold any of the keys above without the `sle_` prefix, plus `mode` (`Standby`/`CPAP`/`CMV`/`PTV`/`PSV`/`SIMV`) and `circuit` (10/15). |
+| `sle_apply(settings)` | The device's preview → Confirm. Clamps and snaps each given setting, keeps the others, applies the interlocks, then starts or switches the mode. `settings` may hold any of the keys above without the `sle_` prefix, plus `mode` (`Standby`/`CPAP`/`CMV`/`PTV`/`PSV`/`SIMV`/`HFOV`/`HFOV+CMV`) and `circuit` (10/15). |
 | `sle_set(name, value)` | `sle_apply({[name]: value})` |
 | `sle_start(mode)` / `sle_standby()` | Start/Resume ventilation, by default in the last mode; Standby switches the ventilator off |
-| `sle_manual_breath()` | One breath at the set PIP and Ti (p155) |
+| `sle_manual_breath()` | One breath at the set PIP and Ti (p155); every mode but HFOV |
+| `sle_sigh()` | HFOV Sigh: an oscillatory pause at Sigh P for Sigh Ti (p155) |
+| `sle_osc_pause()` | HFOV Oscillation Pause: oscillation stops at MAP for up to 60 s, a second press cancels (p155). `hfo_pause_remaining` counts down |
 | `sle_o2_boost(state)` | O2 Boost: set O2 + `sle_o2_boost_inc` (10 %) for 2 minutes, then back (p128). `o2_boost_remaining` counts down |
 | `sle_set_circuit(d)` | 10 or 15 mm patient circuit |
 
@@ -9286,6 +9285,7 @@ Switching the ventilator off by any route (`switch_ventilator(false)`) is the de
   `sle_*`, clamped to the device ranges. So the screen shows what the ventilator is doing, for
   example during CPR.
 - `PC` maps to CMV, or to PTV when synchronised. `PS` maps to PSV.
+- `set_hfov` maps to HFOV and `set_hfov_cmv` to HFOV+CMV.
 - The next `sle_apply` drives the generic ventilator from the device settings again.
 
 ## Modes → generic ventilator
@@ -9353,6 +9353,75 @@ gives no formula.
   pressure still rises there (a slow rise, or a stiff lung). It is `null` otherwise.
 - With the default 0.04 s rise it is usually `null`.
 
+## HFO (phase 2)
+
+The invasive oscillatory modes (pp 77–80, 125, 155, 160, 166). They run on the generic ventilator's
+oscillator ([Ventilator → High-frequency oscillation](./Ventilator.md#high-frequency-oscillation-hfov_control)).
+
+### Settings (p166)
+
+| Property | Setting | Range | Resolution | Default |
+|---|---|---|---|---|
+| `sle_freq` | Frequency (Hz) | 3–20 | 0.1 | 10 |
+| `sle_ie` | I:E (1:x) | 1:1, 1:2, 1:3 | list | 1:1 |
+| `sle_map` | MAP (mbar), HFOV | 0–45 | 1 | 5 |
+| `sle_dp` | ΔP / ΔP Max (mbar) | 4–180 | 1 | 4 |
+| `sle_hfo_vtv` | VTV / Vte Target (ml), HFOV | Off, 0.2–50 | 0.1 below 2, 0.2 below 10, then 1 (p125) | Off (2 when switched on) |
+| `sle_sigh_rr` | Sigh RR (BPM) | Off, 1–150 | 1 | Off (30 when switched on) |
+| `sle_sigh_ti` | Sigh Ti (s) | 0.1–3.0 | 0.01 | 0.40 |
+| `sle_sigh_p` | Sigh P (mbar) | 0–45 | 1 | 10 |
+| `sle_hfo_activity` | HFO Activity, HFOV+CMV | Insp+Exp (0), Exp (1) | list | Insp+Exp |
+
+**List settings.** The list-valued settings (`choices` in `SLE_PARAMS`, shown by `names`) step
+through their list with +/−.
+
+**Parameter memory.** The HFO VTV is a setting of its own (`sle_hfo_vtv`, 0.2–50 ml), so the
+conventional `sle_vtv` keeps its value. HFOV+CMV uses the conventional RR, Ti, PEEP and PIP.
+
+**Interlocks** (p78):
+- Sigh Ti leaves at least 0.1 s at the Sigh RR. When Sigh RR is the setting just changed, Sigh RR
+  gives way; otherwise Sigh Ti does.
+- Raising MAP past Sigh P drags Sigh P up with it. Lowering MAP leaves Sigh P where it is.
+- Sigh P can be set at most 15 mbar above MAP.
+
+### Modes
+
+| SLE mode | Generic mode | Notes |
+|---|---|---|
+| HFOV | `HFOV` | MAP, ΔP as the peak-to-peak amplitude, frequency, I:E 1:1 / 1:2 / 1:3 → `hfo_insp_fraction` 0.5 / 0.33 / 0.25 |
+| HFOV + VTV | `HFOV`, `hfo_volume_guarantee` | ΔP becomes ΔP Max; the working ΔP is trimmed on the average Vte of each 0.5 s, not cycle by cycle (p125) |
+| HFOV+CMV | `HFOV_CMV` | CMV breaths (RR, Ti, PEEP, PIP, rise) with the oscillation at ΔP and frequency in both phases, or in expiration only (HFO Activity) |
+
+- **Bias flow.** 8 l/min, the device's continuous flow (p24); in HFO this is an assumption.
+- **I:E in HFOV+CMV.** HFOV+CMV has no I:E setting; 1:1 is assumed.
+- **Manual Breath.** HFOV has none (its button is Sigh). HFOV+CMV keeps Manual Breath.
+- **Sigh.** `sle_sigh` and `sle_sigh_rr` hold the circuit at Sigh P for Sigh Ti.
+- **Oscillation Pause.** It holds the circuit at MAP; it does not combine with a sigh.
+
+### Monitored values in HFO (p175)
+
+Per oscillation instead of per breath:
+- `mon_vte` / `mon_vti`: τ 3 cycles.
+- `mon_dco2`: DCO2 = f·Vte² (ml²/s), τ 3 cycles.
+- `mon_map`: τ 5. In HFOV+CMV it is the per-breath mean instead.
+- `mon_dp`: measured ΔP, the peak-to-peak pressure.
+- `mon_freq`.
+- `mon_vmin`: Vte·f.
+- `mon_leak`.
+- `mon_c` = Vte / ΔP.
+- `mon_r` = ΔP / peak flow.
+- `mon_ie`: the set 1:x in HFOV; the measured Te/Ti of the breath in HFOV+CMV.
+
+**Measured vs set ΔP** (p125). The measured ΔP is the proximal peak-to-peak. On the device it can
+be lower than the set ΔP; here the servo holds the circuit pressure, so it matches the set one.
+
+**Screen layout.** The vendor screenshot of the HFOV screen (brochure) shows, in the double column:
+- O2
+- ΔP
+- I:E and MAP
+- Vmin, Vte, DCO2 and Leak
+- R and C
+
 ## Not modelled yet, and assumptions
 
 - **Pneumatics.** The device's valveless jet principle (forward and reverse jets, p158) is
@@ -9364,7 +9433,12 @@ gives no formula.
   internal compliance. The model uses the generic ventilator's trim (½ of the error per breath, at
   most 3 cmH₂O) and a 130 % limit.
 - **Pressure trigger.** The non-invasive modes and use without a flow sensor need one; it is not
-  modelled. Inspiratory hold and sigh are not modelled either.
+  modelled. Inspiratory hold and Sigh Hold are not modelled either.
+- **HFO.** The following are not modelled:
+  - leak compensation (35 %, p125)
+  - the frequency ↔ Vte target link (press and hold, p78)
+  - Sigh Hold, with the 5/10 s user preference
+  - the jet details of the HFO module (p158)
 
 ## Verification
 
@@ -9378,6 +9452,17 @@ gives no formula.
 - CPAP backup rate
 - O2 Boost
 - the 15 mm circuit
+- HFOV:
+  - MAP, ΔP, frequency, DCO2 and I:E delivered
+  - VTV convergence and switch-off
+  - setting clamps
+- Sigh, Oscillation Pause (hold, countdown and cancel), Sigh RR and the Sigh interlocks
+- HFOV+CMV:
+  - rate
+  - oscillation in both phases, and the Exp-only HFO Activity
+  - breath MAP
+  - manual breath
+  - the way back to CMV
 
 ```
 
@@ -10599,12 +10684,18 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `temp` | °C | Fresh-gas temperature (default 37) |
 | `ettube_diameter` | mm | ET-tube inner diameter (default 4); drives the `_ett_k1`/`_ett_k2` Rohrer coefficients |
 | `ettube_length` | mm | ET-tube length (default 110); scales resistance by `length/110` |
-| `vent_mode` | string | `PC` / `PRVC` / `VC` / `PS` / `CPAP` / `HFOV` (default `PRVC`) |
+| `vent_mode` | string | `PC` / `PRVC` / `VC` / `PS` / `SIMV` / `CPAP` / `HFOV` / `HFOV_CMV` (default `PRVC`) |
 | `hfo_map_cmh2o` | cmH₂O | HFOV mean airway pressure (default 10) |
 | `hfo_amplitude_cmh2o` | cmH₂O | HFOV peak-to-peak circuit pressure swing (default 25) |
 | `hfo_freq` | Hz | HFOV frequency (default 10) |
 | `hfo_insp_fraction` | fraction | HFOV inspiratory fraction of the cycle: 0.33 = I:E 1:2 (default), 0.5 = 1:1 |
 | `hfo_bias_flow` | L/min | HFOV continuous fresh-gas (bias) flow (default 10) |
+| `hfo_volume_guarantee` | bool | HFOV volume targeting: servo the amplitude to `hfo_tidal_volume_target` (default false) |
+| `hfo_tidal_volume_target` | L | HFOV expired volume per oscillation to aim for (default 0.002) |
+| `hfo_amplitude_max_cmh2o` | cmH₂O | HFOV volume targeting: the amplitude limit (default 40) |
+| `hfo_sigh_rate` | /min | Automatic HFOV sighs (0 = off) |
+| `hfo_sigh_time` / `hfo_sigh_cmh2o` | s / cmH₂O | Duration and held pressure of an HFOV sigh (default 0.4 s, 10) |
+| `hfo_activity` | string | `HFOV_CMV`: oscillate in `both` phases (default) or in expiration only (`exp`) |
 | `vent_rate` | breaths/min | Mechanical rate; in `PS` it is the backup/apnea rate (default 40) |
 | `tidal_volume` | L | Target tidal volume for `PRVC` and `VC` (default 0.015) |
 | `insp_time` | s | Inspiratory time (default 0.4) |
@@ -10654,6 +10745,8 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `leak_perc` | % | Per-breath leak at the tube flow sensor, `(Vti − Vte)/Vti` |
 | `pressure_limited` | bool | Volume-targeted modes: working pressure at `pip_cmh2o_max` while Vt is still below target (the "Vt low / Pmax reached" alarm condition) |
 | `map_meas` | cmH₂O | Mean airway pressure over the last breath; without breaths (CPAP, HFOV, apnoea) over 3 s blocks |
+| `hfo_amplitude_delivered` | cmH₂O | HFOV amplitude in use: the set one, or the working one with volume targeting |
+| `hfo_sigh_remaining` / `hfo_pause_remaining` | s | Time left of a running HFOV sigh / oscillation pause (0 = oscillating) |
 | `ti_meas` / `te_meas` | s | Measured inspiratory time of the last breath and the expiratory time before it |
 | `ie_ratio_meas` | – | `te_meas / ti_meas` (shown as 1:x) |
 | `rr_meas` | /min | Breath-averaged delivered rate; in CPAP the patient's rate while breathing |
@@ -10688,7 +10781,7 @@ cycling/triggering logic. Added for the pause / VC / measured-mechanics paths: `
    - `PS` → `flow_cycling()` then `pressure_control()`
    - `SIMV` → `simv_cycling()` then `pressure_control()`
    - `CPAP` → `cpap_cycling()` (`cpap_control()`, or a backup/manual breath)
-   - `HFOV` → `hfov_control()`
+   - `HFOV` / `HFOV_CMV` → `hfov_control()`
 4. Publish read-outs: airway `pres`, `flow` (ET-tube flow × 60), integrate `vol`, sample `co2` from
    `DS`, set `minute_volume` (using the breath-averaged measured rate whenever the patient can
    trigger; CPAP reports a spontaneous minute volume), advance the breath-interval counter, and refresh the ET-tube resistance. Compliance and
@@ -10925,8 +11018,33 @@ triggered and backup breaths per minute.
   - `hfo_dco2 = f·Vt²` (mL²/s)
   - `hfo_map_meas` and `hfo_amplitude_meas`
   - `p_peak`, `pip_delivered`, and `minute_volume = Vt·f·60`
-- **Not applicable.** There is no triggering, no VG, and no breath counters in HFOV. The leak and
-  the tube dead space still apply.
+- **Not applicable.** There is no triggering and no breath counters in HFOV. The leak (also
+  `leak_perc`, per cycle) and the tube dead space still apply.
+- **Volume targeting** (`hfo_volume_guarantee`, `set_hfo_volume_guarantee`).
+  - Expired volumes vary a lot cycle by cycle. So the working amplitude is trimmed on the
+    **average** expired volume of each 0.5 s block, not on every cycle.
+  - Vt rises roughly in proportion to the amplitude, so each block corrects half of the gap to
+    `amplitude · target / Vte`, by at most 3 cmH₂O.
+  - The working amplitude stays within 4 cmH₂O and `hfo_amplitude_max_cmh2o`; `pressure_limited`
+    flags a target that the limit stops.
+  - The set `hfo_amplitude_cmh2o` is never changed, so switching targeting off returns to it.
+  - On preterm_28wk, targeting converges in about 5 s.
+- **Sighs and oscillation pause** (HFOV only).
+  - `hfo_sigh()` stops the oscillation and holds the circuit at `hfo_sigh_cmh2o` for
+    `hfo_sigh_time`. `hfo_sigh_rate` repeats this automatically.
+  - `hfo_pause()` holds the circuit at MAP for up to 60 s; a second call cancels it.
+  - During a hold the per-cycle measurements are suspended, and the oscillation restarts at the
+    beginning of a cycle.
+- **HFOV_CMV** (`set_hfov_cmv`). The base level is a time-cycled breath instead of MAP: PIP for
+  `insp_time` (reached over `rise_time`), PEEP for the rest of `60/vent_rate`.
+  - The oscillation is added in both phases, or only in expiration with `hfo_activity = "exp"`.
+  - The breath keeps the usual bookkeeping:
+    - the `ncc_insp` / `ncc_exp` counters (Monitor)
+    - `rr_meas`
+    - `ti_meas` / `te_meas`
+    - the per-breath `map_meas`
+  - `trigger_breath()` gives an early breath.
+  - The per-cycle HFO read-outs run as in HFOV.
 - **Stepsize.** 0.5 ms gives ≥ 130 steps per cycle up to 15 Hz.
 
 **CO₂ clearance comes from the airway, not the device.** It relies on the series dead space with
@@ -11069,6 +11187,9 @@ the factor layers on `VENT_INSP_VALVE` / `VENT_ETTUBE` / `VENT_EXP_VALVE` are ge
 | `set_vc(peep, rate, tv, t_in, insp_flow, pip_max, insp_pause)` | Configure VC (`tv` in mL → L; `pip_max` is the pop-off ceiling; `insp_pause` clamped `< insp_time`) |
 | `set_psv(pip, peep, rate, t_in, insp_flow)` | Configure PS mode (`pip` absolute → `ps_cmh2o = pip − peep`; `rate` = backup rate; `t_in` = backup Ti and Ti max) |
 | `set_hfov(map, amplitude, freq, insp_fraction, bias_flow)` | Configure HFOV (cmH₂O, cmH₂O peak-to-peak, Hz, fraction, L/min) |
+| `set_hfo_volume_guarantee(state, vt, amp_max)` | HFOV volume targeting on/off; optional target `vt` (mL, expired per oscillation) and amplitude limit (cmH₂O); restarts the working amplitude |
+| `set_hfo_sigh(rate, t, pres)` / `hfo_sigh()` / `hfo_pause(state)` | Automatic HFOV sighs (/min, s, cmH₂O); one sigh now; oscillation pause at MAP (60 s, toggles) |
+| `set_hfov_cmv(pip, peep, rate, t_in, amplitude, freq, activity, bias_flow)` | CMV breaths with HFO superimposed (`activity` `both` or `exp`) |
 | `set_simv(pip, peep, rate, t_in, ps, insp_flow)` | Configure SIMV: mandatory breaths at `pip`/`rate`/`t_in`, spontaneous breaths supported by `ps` above PEEP (0 = unsupported) |
 | `set_volume_guarantee(state, tv, pip_max)` | Volume guarantee on/off for PC/PS/SIMV; optional target `tv` (mL) and pressure limit `pip_max` (cmH₂O); restarts the working pressure |
 | `set_cpap(cpap, insp_flow, backup_rate)` | Configure CPAP (`cpap` → `peep_cmh2o`; optional apnoea `backup_rate`, /min, 0 = off) |
@@ -23636,9 +23757,10 @@ export class Resuscitation extends BaseModelClass {
 
 ```javascript
 import { Ventilator } from "./Ventilator";
-import { SLE_PARAMS, SLE_MODES, sle_defaults, sle_clamp, sle_interlocks } from "./sle6000_params";
+import { SLE_PARAMS, SLE_MODES, SLE_HFO_MODES, sle_defaults, sle_clamp, sle_interlocks } from "./sle6000_params";
 
 const MBAR_TO_CMH2O = 1.01972;
+const HFO_BIAS_FLOW = 8.0; // l/min, the continuous flow (p24); an assumption for HFO
 
 export class Sle6000 extends Ventilator {
   // static properties
@@ -23648,7 +23770,8 @@ export class Sle6000 extends Ventilator {
    * The SLE6000 neonatal ventilator (SLE Ltd, IFU V2.0): the generic Ventilator driven through the
    * device's own modes, settings (mbar, with its ranges, resolutions and interlocks), patient
    * circuits and monitored values. Phase 1: the invasive conventional modes CPAP, CMV, PTV, PSV and
-   * SIMV, with volume targeting (VTV). It is the ventilator of every scenario up to 30 kg (the
+   * SIMV, with volume targeting (VTV). Phase 2: the invasive oscillatory modes HFOV (with VTV, sighs
+   * and oscillation pause) and HFOV+CMV. It is the ventilator of every scenario up to 30 kg (the
    * device's range); the scenario keeps the instance name "Ventilator", so the Monitor,
    * Resuscitation and every UI path that reads Ventilator.* keep working. A scenario can start
    * ventilating: is_enabled true plus sle_mode and the sle_* settings.
@@ -23657,7 +23780,7 @@ export class Sle6000 extends Ventilator {
     super(model_ref, name);
 
     // Independent properties: the device settings, in the device's units (see sle6000_params.js)
-    this.sle_mode = "Standby"; // Standby | CPAP | CMV | PTV | PSV | SIMV
+    this.sle_mode = "Standby"; // Standby | CPAP | CMV | PTV | PSV | SIMV | HFOV | HFOV+CMV
     const d = sle_defaults();
     this.sle_rr = d.rr; // BPM
     this.sle_ti = d.ti; // s (Ti Max in PSV)
@@ -23670,6 +23793,15 @@ export class Sle6000 extends Ventilator {
     this.sle_p_support = d.p_support; // mbar, SIMV pressure support level (0 = off)
     this.sle_vtv = d.vtv; // ml, volume target (0 = off)
     this.sle_o2 = d.o2; // %
+    this.sle_freq = d.freq; // Hz, HFO frequency
+    this.sle_ie = d.ie; // HFOV I:E, 1:x (1, 2 or 3)
+    this.sle_map = d.map; // mbar, HFOV mean airway pressure
+    this.sle_dp = d.dp; // mbar, HFO Delta P (ΔP Max with VTV on)
+    this.sle_hfo_vtv = d.hfo_vtv; // ml, HFOV volume target (0 = off)
+    this.sle_sigh_rr = d.sigh_rr; // BPM, HFOV sigh rate (0 = off)
+    this.sle_sigh_ti = d.sigh_ti; // s
+    this.sle_sigh_p = d.sigh_p; // mbar
+    this.sle_hfo_activity = d.hfo_activity; // HFOV+CMV: 0 = oscillation in both phases, 1 = expiration only
     this.sle_circuit = 10; // mm, patient circuit BC6188 (10) or BC6198 (15)
     this.sle_o2_boost_inc = 10; // %, O2 Boost increment (factory default, p128)
 
@@ -23691,6 +23823,9 @@ export class Sle6000 extends Ventilator {
     this.mon_ie = 0.0; // Te/Ti (shown as 1:x)
     this.mon_o2 = 21.0; // %, oxygen cell (first-order, 45 s response)
     this.mon_fg_flow = 0.0; // l/min, fresh gas flow
+    this.mon_dp = 0.0; // mbar, HFO measured Delta P (peak to peak at the proximal airway)
+    this.mon_dco2 = 0.0; // ml^2/s, HFO gas transport coefficient f * Vte^2, tau 3 cycles
+    this.mon_freq = 0.0; // Hz, HFO frequency
     this.o2_boost_remaining = 0.0; // s left of an O2 Boost (0 = none)
 
     // Local properties
@@ -23703,6 +23838,10 @@ export class Sle6000 extends Ventilator {
     this._c20_v_end = 0.0;
     this._last_mode = "CMV"; // the mode Start/Resume returns to
     this._in_apply = false; // inside sle_apply (its switch-on is not a generic one)
+    this._hfo_peak_flow = 0.0; // l/s, peak flow at the tube over the current oscillation
+    this._cmv_p_max = -1e9; // cmH2O, peak pressure of the current HFOV+CMV breath
+    this._cmv_was_insp = false;
+    this._cycle_crossed = false; // a CMV breath edge fell inside the current oscillation
   }
 
   init_model(args = {}) {
@@ -23734,7 +23873,7 @@ export class Sle6000 extends Ventilator {
     }
     if (settings.circuit === 10 || settings.circuit === 15) this.sle_circuit = settings.circuit;
     if (mode !== "Standby" && !(mode in SLE_MODES)) return;
-    const s = sle_interlocks(this._settings(), mode);
+    const s = sle_interlocks(this._settings(), mode, Object.keys(settings));
     for (const [k, v] of Object.entries(s)) this[`sle_${k}`] = v;
     this.sle_mode = mode;
     if (mode !== "Standby") this._last_mode = mode;
@@ -23796,9 +23935,30 @@ export class Sle6000 extends Ventilator {
     if (!this._in_apply) this._sync_from_generic();
   }
 
+  set_hfov(...args) {
+    super.set_hfov(...args);
+    if (!this._in_apply) this._sync_from_generic();
+  }
+
+  set_hfov_cmv(...args) {
+    super.set_hfov_cmv(...args);
+    if (!this._in_apply) this._sync_from_generic();
+  }
+
   sle_manual_breath() {
-    // one breath at the set PIP and Ti (p155); every phase-1 mode offers it
-    if (this.sle_mode !== "Standby") this.trigger_breath();
+    // one breath at the set PIP and Ti (p155); every mode but HFOV offers it (HFOV has Sigh)
+    if (this.sle_mode !== "Standby" && this.sle_mode !== "HFOV") this.trigger_breath();
+  }
+
+  sle_sigh() {
+    // HFOV Sigh (p155): an oscillatory pause at the set Sigh P for the set Sigh Ti
+    if (this.sle_mode === "HFOV") this.hfo_sigh();
+  }
+
+  sle_osc_pause() {
+    // HFOV Oscillation Pause (p155): oscillation stops at the set MAP for up to 60 s; pressing
+    // again cancels it
+    if (this.sle_mode === "HFOV") this.hfo_pause();
   }
 
   sle_o2_boost(state = true) {
@@ -23839,7 +23999,7 @@ export class Sle6000 extends Ventilator {
 
     // VTV: PIP becomes PIP Max and the working pressure is servoed on Vte (p126); off restores the
     // set PIP, which the volume targeting never changes
-    const vtv = this.sle_vtv > 0.0 && mode !== "CPAP";
+    const vtv = this.sle_vtv > 0.0 && mode !== "CPAP" && !SLE_HFO_MODES.includes(mode);
     const vg_was = this.volume_guarantee;
     this.volume_guarantee = vtv;
     if (vtv) {
@@ -23877,13 +24037,60 @@ export class Sle6000 extends Ventilator {
         }
         this.vent_mode = "SIMV";
         break;
+      case "HFOV": {
+        // continuous oscillation around MAP (p77); VTV servoes the working ΔP on the average Vte,
+        // ΔP becoming ΔP Max (p125). The bias flow is the device's continuous flow (p24).
+        this.hfo_map_cmh2o = this.sle_map * MBAR_TO_CMH2O;
+        this.hfo_amplitude_cmh2o = this.sle_dp * MBAR_TO_CMH2O;
+        this.hfo_freq = this.sle_freq;
+        this.hfo_insp_fraction = 1.0 / (1.0 + this.sle_ie);
+        this.hfo_bias_flow = HFO_BIAS_FLOW;
+        const hfo_vtv = this.sle_hfo_vtv > 0.0;
+        const target = this.sle_hfo_vtv / 1000.0;
+        if (hfo_vtv && (!this.hfo_volume_guarantee || Math.abs(this.hfo_tidal_volume_target - target) > 1e-9)) {
+          this.set_hfo_volume_guarantee(true, this.sle_hfo_vtv, this.hfo_amplitude_cmh2o);
+        }
+        this.hfo_volume_guarantee = hfo_vtv;
+        this.hfo_amplitude_max_cmh2o = this.hfo_amplitude_cmh2o;
+        this.hfo_sigh_rate = this.sle_sigh_rr;
+        this.hfo_sigh_time = this.sle_sigh_ti;
+        this.hfo_sigh_cmh2o = this.sle_sigh_p * MBAR_TO_CMH2O;
+        if (this.vent_mode !== "HFOV") this._hfo_start();
+        this.vent_mode = "HFOV";
+        break;
+      }
+      case "HFOV+CMV": {
+        // CMV breaths with the oscillation in both phases or in expiration only (p80, HFO Activity)
+        this.vent_rate = this.sle_rr;
+        this.hfo_amplitude_cmh2o = this.sle_dp * MBAR_TO_CMH2O;
+        this.hfo_freq = this.sle_freq;
+        this.hfo_insp_fraction = 0.5;
+        this.hfo_bias_flow = HFO_BIAS_FLOW;
+        this.hfo_activity = this.sle_hfo_activity === 1 ? "exp" : "both";
+        this.hfo_volume_guarantee = false;
+        if (this.vent_mode !== "HFOV_CMV") this._hfo_start();
+        this.vent_mode = "HFOV_CMV";
+        break;
+      }
     }
+  }
+
+  _hfo_start() {
+    // entering an oscillatory mode: a fresh oscillation and monitor
+    this._hfo_phase = 0.0;
+    this._hfo_breath_t = 0.0;
+    this._hfo_sigh_timer = 0.0;
+    this.hfo_sigh_remaining = 0.0;
+    this.hfo_pause_remaining = 0.0;
+    this._breath_interval_counter = 0.0;
+    this._rate_avg = 0.0;
+    this._reset_monitor();
   }
 
   _sync_from_generic() {
     // mirror the generic mode and settings into the device's, clamped to its ranges; the generic
     // ventilator keeps running as set (no _apply_mode), so a device-range clamp only shows
-    const modes = { PC: this.synchronized ? "PTV" : "CMV", PS: "PSV", SIMV: "SIMV", CPAP: "CPAP" };
+    const modes = { PC: this.synchronized ? "PTV" : "CMV", PS: "PSV", SIMV: "SIMV", CPAP: "CPAP", HFOV: "HFOV", HFOV_CMV: "HFOV+CMV" };
     const mode = modes[this.vent_mode];
     if (!mode || !this.is_enabled) return;
     const set = (k, v) => {
@@ -23894,6 +24101,15 @@ export class Sle6000 extends Ventilator {
     set("peep", this.peep_cmh2o / MBAR_TO_CMH2O);
     set("pip", (mode === "PSV" ? this.peep_cmh2o + this.ps_cmh2o : this.pip_cmh2o) / MBAR_TO_CMH2O);
     set("o2", this.fio2 * 100.0);
+    if (mode === "HFOV" || mode === "HFOV+CMV") {
+      set("freq", this.hfo_freq);
+      set("dp", this.hfo_amplitude_cmh2o / MBAR_TO_CMH2O);
+    }
+    if (mode === "HFOV") {
+      set("map", this.hfo_map_cmh2o / MBAR_TO_CMH2O);
+      set("ie", 1.0 / Math.max(this.hfo_insp_fraction, 0.01) - 1.0);
+    }
+    if (mode === "HFOV+CMV") this.sle_hfo_activity = this.hfo_activity === "exp" ? 1 : 0;
     this.sle_mode = mode;
     this._last_mode = mode;
   }
@@ -23945,6 +24161,17 @@ export class Sle6000 extends Ventilator {
     const q_fg = this._vent_insp_valve && !this._vent_insp_valve.no_flow ? this._vent_insp_valve.flow * 60.0 : 0.0;
     this.mon_fg_flow = ema(this.mon_fg_flow, q_fg, 1.0);
     this.mon_rr = this.rr_meas;
+    if (this._hfo_mode()) this._hfo_peak_flow = Math.max(this._hfo_peak_flow, Math.abs(this._vent_ettube?.flow ?? 0.0));
+    // HFOV+CMV: PIP is the peak of the CMV breath (its inspiration, oscillation included)
+    if (this.vent_mode === "HFOV_CMV") {
+      if (this._inspiration !== this._cmv_was_insp) this._cycle_crossed = true;
+      if (this._inspiration) this._cmv_p_max = Math.max(this._cmv_p_max, this.pres);
+      else if (this._cmv_was_insp) {
+        this.mon_pip = this._cmv_p_max / MBAR_TO_CMH2O;
+        this._cmv_p_max = -1e9;
+      }
+      this._cmv_was_insp = this._inspiration;
+    }
     this.mon_trig = this.trig_per_min;
 
     // C20/C sample: pressure and inspired volume at 80 % of the set Ti
@@ -24002,6 +24229,41 @@ export class Sle6000 extends Ventilator {
     this._mon_init = true;
   }
 
+  _hfo_cycle_end(f) {
+    // HFO monitored values per oscillation (p175): Vte and DCO2 tau 3 cycles, MAP tau 5, ΔP the
+    // peak-to-peak pressure, R = ΔP / peak flow, C = Vte / ΔP; Vmin from Vte and the frequency
+    const peak_flow = this._hfo_peak_flow;
+    this._hfo_peak_flow = 0.0;
+    // HFOV+CMV: a cycle across a breath edge carries the PEEP-PIP step, so ΔP, C and R come from
+    // the cycles inside one phase only
+    const clean = !this._cycle_crossed;
+    this._cycle_crossed = false;
+    super._hfo_cycle_end(f);
+    const first = !this._mon_init;
+    const filt = (x, v, n) => (first ? v : x + (v - x) / n);
+    const vte = Math.max(this.exp_tidal_volume, 0.0) * 1000.0;
+    const dp = this.hfo_amplitude_meas / MBAR_TO_CMH2O;
+    this.mon_vte = filt(this.mon_vte, vte, 3);
+    this.mon_vti = filt(this.mon_vti, this.insp_tidal_volume * 1000.0, 3);
+    this.mon_dco2 = filt(this.mon_dco2, f * vte * vte, 3);
+    // MAP: per oscillation in HFOV, per breath (the CMV breath) in HFOV+CMV
+    const map = this.vent_mode === "HFOV_CMV" ? this.map_meas : this.hfo_map_meas;
+    this.mon_map = filt(this.mon_map, map / MBAR_TO_CMH2O, 5);
+    if (clean) this.mon_dp = dp;
+    if (this.vent_mode === "HFOV") this.mon_pip = this.p_peak / MBAR_TO_CMH2O;
+    this.mon_freq = f;
+    this.mon_vmin = (this.mon_vte * f * 60.0) / 1000.0;
+    this.mon_leak = filt(this.mon_leak, this.leak_perc, 10);
+    if (clean && dp > 0.0 && vte > 0.0) this.mon_c = filt(this.mon_c, vte / dp, 3);
+    if (clean && peak_flow > 0.0) this.mon_r = filt(this.mon_r, dp / peak_flow, 3);
+    this.mon_ie = this.vent_mode === "HFOV" ? 1.0 / this.hfo_insp_fraction - 1.0 : this.ie_ratio_meas;
+    if (this.vent_mode === "HFOV_CMV") {
+      this.mon_ti = this.ti_meas;
+      this.mon_te = this.te_meas;
+    }
+    this._mon_init = true;
+  }
+
   _end_inspiration() {
     // the end-inspiratory pressure and volume for C20/C
     this._c20_p_end = this.pres;
@@ -24013,7 +24275,7 @@ export class Sle6000 extends Ventilator {
     this._mon_init = false;
     this._leak_hist = [];
     this._vte_hist = [];
-    for (const k of ["mon_pip", "mon_peep", "mon_map", "mon_vte", "mon_vti", "mon_vmin", "mon_leak", "mon_rr", "mon_c", "mon_r", "mon_ti", "mon_te", "mon_ie", "mon_fg_flow"]) this[k] = 0.0;
+    for (const k of ["mon_pip", "mon_peep", "mon_map", "mon_vte", "mon_vti", "mon_vmin", "mon_leak", "mon_rr", "mon_c", "mon_r", "mon_ti", "mon_te", "mon_ie", "mon_fg_flow", "mon_dp", "mon_dco2", "mon_freq"]) this[k] = 0.0;
     this.mon_trig = 0;
     this.mon_c20c = null;
   }
@@ -24061,6 +24323,13 @@ export class Ventilator extends BaseModelClass {
     this.hfo_freq = 10; // HFOV frequency (Hz)
     this.hfo_insp_fraction = 0.33; // HFOV inspiratory fraction of the cycle (0.33 = I:E 1:2, 0.5 = 1:1)
     this.hfo_bias_flow = 10; // HFOV continuous fresh-gas (bias) flow (L/min)
+    this.hfo_volume_guarantee = false; // HFOV: servo the amplitude to hfo_tidal_volume_target (limit hfo_amplitude_max_cmh2o)
+    this.hfo_tidal_volume_target = 0.002; // L, HFOV expired volume per oscillation to aim for
+    this.hfo_amplitude_max_cmh2o = 40; // HFOV volume targeting: the amplitude limit
+    this.hfo_sigh_rate = 0; // /min, HFOV sighs (an oscillatory pause at hfo_sigh_cmh2o for hfo_sigh_time); 0 = off
+    this.hfo_sigh_time = 0.4; // s, duration of an HFOV sigh
+    this.hfo_sigh_cmh2o = 10; // cmH2O, pressure held during an HFOV sigh
+    this.hfo_activity = "both"; // HFOV_CMV: oscillate in "both" phases or in expiration only ("exp")
     this.leak_size = 0.0; // mm, equivalent diameter of the gap around an uncuffed tube (0 = no leak)
     this.exp_valve_resistance = 0.0; // mmHg·s/L, expiratory limb + valve (0 = auto, by circuit size)
     this.volume_guarantee = false; // PC/PS: servo the working pressure to tidal_volume (limit pip_cmh2o_max)
@@ -24100,6 +24369,9 @@ export class Ventilator extends BaseModelClass {
     this.hfo_dco2 = 0.0; // mL^2/s, HFOV gas transport coefficient f * Vt^2
     this.hfo_map_meas = 0.0; // cmH2O, measured mean circuit pressure in HFOV
     this.hfo_amplitude_meas = 0.0; // cmH2O, measured peak-to-peak circuit pressure in HFOV
+    this.hfo_amplitude_delivered = 0.0; // cmH2O, the amplitude in use (the working one with volume targeting)
+    this.hfo_sigh_remaining = 0.0; // s left of the running HFOV sigh (0 = none)
+    this.hfo_pause_remaining = 0.0; // s left of an oscillation pause (0 = oscillating)
     this.map_meas = 0.0; // cmH2O, mean circuit pressure over the last breath (or 3 s block without breaths)
     this.ti_meas = 0.0; // s, measured inspiratory time of the last ventilator breath
     this.te_meas = 0.0; // s, measured expiratory time before the last ventilator breath
@@ -24159,6 +24431,16 @@ export class Ventilator extends BaseModelClass {
     this._hfo_p_sum = 0.0;
     this._hfo_n = 0;
     this._hfo_sink_margin = 10.0; // cmH2O, expiratory sink held this far below the trough
+    this._hfo_amp_working = null; // cmH2O, volume-targeted working amplitude
+    this._hfo_vg_vol = 0.0; // L, expired volume summed over the current targeting block
+    this._hfo_vg_n = 0; // oscillations in the current targeting block
+    this._hfo_vg_time = 0.0; // s, length of the current targeting block
+    this._hfo_vg_block = 0.5; // s, the amplitude is trimmed on the average Vte of each block
+    this._hfo_vg_gain = 0.5; // fraction of the amplitude correction applied per block
+    this._hfo_vg_max_step = 3.0; // cmH2O, max amplitude change per block
+    this._hfo_amp_min = 4.0; // cmH2O, lowest working amplitude
+    this._hfo_sigh_timer = 0.0; // s since the last automatic sigh
+    this._hfo_breath_t = 0.0; // s into the current HFOV_CMV breath cycle
     this._breathing_model = null;
     this._peak_flow = 0.0;
     this._prev_et_tube_flow = 0.0;
@@ -24256,7 +24538,7 @@ export class Ventilator extends BaseModelClass {
     if (
       this.vent_mode === "PS" ||
       this.vent_mode === "SIMV" ||
-      (this.synchronized && this.vent_mode !== "CPAP" && this.vent_mode !== "HFOV")
+      (this.synchronized && this.vent_mode !== "CPAP" && !this._hfo_mode())
     ) {
       this.triggering();
     }
@@ -24293,7 +24575,7 @@ export class Ventilator extends BaseModelClass {
       this.cpap_cycling();
     }
 
-    if (this.vent_mode === "HFOV") {
+    if (this._hfo_mode()) {
       this.hfov_control();
     }
 
@@ -24303,7 +24585,7 @@ export class Ventilator extends BaseModelClass {
     this.co2 = this._model_engine.models["DS"]?.pco2 ?? this.co2;
     // CPAP reports a spontaneous minute volume from cpap_control (patient's own rate), so don't
     // overwrite it here with the mechanical vent_rate
-    if (this.vent_mode !== "CPAP" && this.vent_mode !== "HFOV") {
+    if (this.vent_mode !== "CPAP" && !this._hfo_mode()) {
       // whenever the patient can trigger (PS, or a synchronized time-cycled mode) the delivered
       // rate can differ from the set vent_rate, so report the (breath-averaged) measured rate
       // there and the set rate for the purely mandatory modes
@@ -24945,15 +25227,66 @@ export class Ventilator extends BaseModelClass {
     }
   }
 
+  _hfo_mode() {
+    return this.vent_mode === "HFOV" || this.vent_mode === "HFOV_CMV";
+  }
+
   hfov_control() {
-    // High-frequency oscillation: the circuit pressure follows MAP plus an oscillation of
-    // peak-to-peak hfo_amplitude_cmh2o at hfo_freq. The positive half-sine lasts hfo_insp_fraction of
-    // the cycle with amplitude A*(1 - fi), the negative one the rest with amplitude A*fi, so the mean
-    // is exactly MAP at any I:E. Expiration is ACTIVE (an oscillator pulls gas out): the expiratory
-    // valve opens to a sink held below the trough, and a continuous bias flow washes the circuit.
+    // High-frequency oscillation: the circuit pressure follows a base level plus an oscillation of
+    // peak-to-peak amplitude at hfo_freq. The positive half-sine lasts hfo_insp_fraction of the
+    // cycle with amplitude A*(1 - fi), the negative one the rest with amplitude A*fi, so the mean is
+    // exactly the base level at any I:E. Expiration is ACTIVE (an oscillator pulls gas out): the
+    // expiratory valve opens to a sink held below the trough, and a continuous bias flow washes the
+    // circuit. In HFOV the base level is the MAP; in HFOV_CMV it is a time-cycled breath (PIP for
+    // insp_time, PEEP for the rest), with the oscillation in both phases or in expiration only.
+    const cmv = this.vent_mode === "HFOV_CMV";
     const f = Math.max(this.hfo_freq, 0.5);
     const fi = Math.min(Math.max(this.hfo_insp_fraction, 0.2), 0.8);
-    const a = Math.max(this.hfo_amplitude_cmh2o, 0.0);
+
+    // the amplitude in use: the set one, or the volume-targeted working one
+    let a = Math.max(this.hfo_amplitude_cmh2o, 0.0);
+    if (this.hfo_volume_guarantee) {
+      if (this._hfo_amp_working === null) this._hfo_amp_working = this._clamp_hfo_amplitude(a);
+      a = this._hfo_amp_working;
+    } else {
+      this._hfo_amp_working = null;
+    }
+    this.hfo_amplitude_delivered = a;
+
+    // HFOV holds: a sigh (at hfo_sigh_cmh2o) or an oscillation pause (at MAP) stop the oscillation
+    if (!cmv) {
+      if (this.hfo_sigh_rate > 0.0) {
+        this._hfo_sigh_timer += this._t;
+        if (this._hfo_sigh_timer >= 60.0 / this.hfo_sigh_rate) {
+          this._hfo_sigh_timer = 0.0;
+          if (this.hfo_pause_remaining <= 0.0) this.hfo_sigh();
+        }
+      }
+      if (this.hfo_sigh_remaining > 0.0) this.hfo_sigh_remaining = Math.max(0.0, this.hfo_sigh_remaining - this._t);
+      else if (this.hfo_pause_remaining > 0.0) this.hfo_pause_remaining = Math.max(0.0, this.hfo_pause_remaining - this._t);
+      if (this.hfo_sigh_remaining > 0.0 || this.hfo_pause_remaining > 0.0) {
+        const hold = this.hfo_sigh_remaining > 0.0 ? this.hfo_sigh_cmh2o : this.hfo_map_cmh2o;
+        this.pip_delivered = hold;
+        this._hfo_hold(hold / 1.35951);
+        return;
+      }
+    } else {
+      this.hfo_sigh_remaining = 0.0;
+      this.hfo_pause_remaining = 0.0;
+    }
+
+    // base level
+    let base = this.hfo_map_cmh2o;
+    let oscillate = true;
+    let trough_base = base;
+    if (cmv) {
+      base = this._hfo_cmv_breath_clock();
+      oscillate = this.hfo_activity !== "exp" || this._expiration;
+      trough_base = this.peep_cmh2o;
+      this.pip_delivered = this.pip_cmh2o;
+    } else {
+      this.pip_delivered = this.hfo_map_cmh2o + a * (1.0 - fi);
+    }
 
     this._hfo_phase += this._t * f;
     if (this._hfo_phase >= 1.0) {
@@ -24961,15 +25294,15 @@ export class Ventilator extends BaseModelClass {
       this._hfo_cycle_end(f);
     }
     const th = this._hfo_phase;
-    const w =
-      th < fi
+    const w = !oscillate
+      ? 0.0
+      : th < fi
         ? a * (1.0 - fi) * Math.sin((Math.PI * th) / fi)
         : -a * fi * Math.sin((Math.PI * (th - fi)) / (1.0 - fi));
-    const target = (this.hfo_map_cmh2o + w) / 1.35951; // mmHg above atmospheric
-    this.pip_delivered = this.hfo_map_cmh2o + a * (1.0 - fi);
+    const target = (base + w) / 1.35951; // mmHg above atmospheric
 
     // expiratory sink (the piston's pull), below the trough of the waveform
-    const sink = (this.hfo_map_cmh2o - a * fi - this._hfo_sink_margin) / 1.35951;
+    const sink = (trough_base - a * fi - this._hfo_sink_margin) / 1.35951;
     this._vent_gasout.vol = sink / this._vent_gasout.el_base + this._vent_gasout.u_vol;
     this._bidirectional_servo(target, this.pres_atm + sink, this.hfo_bias_flow / 60.0);
 
@@ -24982,6 +25315,107 @@ export class Ventilator extends BaseModelClass {
     if (p < this._hfo_p_min) this._hfo_p_min = p;
     this._hfo_p_sum += p;
     this._hfo_n += 1;
+  }
+
+  _hfo_hold(target) {
+    // a sigh or oscillation pause: the circuit is held at `target` (mmHg above atmospheric), the
+    // oscillation restarts from the beginning of a cycle afterwards
+    const sink = target - this._hfo_sink_margin / 1.35951;
+    this._vent_gasout.vol = sink / this._vent_gasout.el_base + this._vent_gasout.u_vol;
+    this._bidirectional_servo(target, this.pres_atm + sink, this.hfo_bias_flow / 60.0);
+    this._hfo_phase = 0.0;
+    this._insp_tidal_volume_counter = 0.0;
+    this._exp_tidal_volume_counter = 0.0;
+    this._hfo_p_max = -1e9;
+    this._hfo_p_min = 1e9;
+    this._hfo_p_sum = 0.0;
+    this._hfo_n = 0;
+    this.vol = 0.0;
+  }
+
+  _hfo_cmv_breath_clock() {
+    // HFOV_CMV: the time-cycled breath under the oscillation. Returns the base pressure (cmH2O): PIP
+    // for insp_time (reached over rise_time), PEEP for the rest of 60/vent_rate. Keeps the breath
+    // bookkeeping the other modes have (ncc counters for the Monitor, rate, Ti/Te, per-breath MAP).
+    const period = 60.0 / Math.max(this.vent_rate, 1.0);
+    this._hfo_breath_t += this._t;
+    this.exp_time = Math.max(period - this.insp_time, this._min_exp_time);
+    if (this._inspiration && this._hfo_breath_t >= this.insp_time) {
+      this.ti_meas = this._insp_time_counter;
+      this._te_counter = 0.0;
+      this._inspiration = false;
+      this._expiration = true;
+      this.ncc_exp = -1;
+    }
+    if (this._expiration && (this._hfo_breath_t >= period || this._manual_breath_due())) {
+      this.te_meas = this._te_counter;
+      this.ie_ratio_meas = this.ti_meas > 0.0 ? this.te_meas / this.ti_meas : 0.0;
+      this._close_map_block();
+      if (this._breath_interval_counter > 0.0) {
+        const interval_avg =
+          this._rate_avg > 0.0
+            ? 60.0 / this._rate_avg + 0.25 * (this._breath_interval_counter - 60.0 / this._rate_avg)
+            : this._breath_interval_counter;
+        this._rate_avg = 60.0 / interval_avg;
+      }
+      this._breath_interval_counter = 0.0;
+      this._hfo_breath_t = 0.0;
+      this._insp_time_counter = 0.0;
+      this._manual_breath = false;
+      this._inspiration = true;
+      this._expiration = false;
+      this.ncc_insp = -1;
+    }
+    if (this._inspiration) {
+      this._insp_time_counter += this._t;
+      this.ncc_insp += 1;
+      const rise = this.rise_time > 0.0 ? Math.min(1.0, this._insp_time_counter / this.rise_time) : 1.0;
+      return this.peep_cmh2o + (this.pip_cmh2o - this.peep_cmh2o) * rise;
+    }
+    this.ncc_exp += 1;
+    return this.peep_cmh2o;
+  }
+
+  _clamp_hfo_amplitude(a) {
+    return Math.max(this._hfo_amp_min, Math.min(this.hfo_amplitude_max_cmh2o, a));
+  }
+
+  _hfo_volume_targeting(cycle_time) {
+    // HFOV volume targeting: expired volumes vary a lot cycle by cycle, so the amplitude is trimmed
+    // on the average expired volume of each _hfo_vg_block (not every cycle). Vt rises about in
+    // proportion to the amplitude, so the correction aims at amplitude * target / Vte, a fraction
+    // (_hfo_vg_gain) at a time and at most _hfo_vg_max_step per block, within [4, max].
+    this._hfo_vg_vol += Math.max(this.exp_tidal_volume, 0.0);
+    this._hfo_vg_n += 1;
+    this._hfo_vg_time += cycle_time;
+    if (this._hfo_vg_time < this._hfo_vg_block) return;
+    const vte = this._hfo_vg_vol / this._hfo_vg_n;
+    this._hfo_vg_vol = 0.0;
+    this._hfo_vg_n = 0;
+    this._hfo_vg_time = 0.0;
+    const a = this._hfo_amp_working;
+    const target = this.hfo_tidal_volume_target;
+    const err = target - vte;
+    this.pressure_limited = err > 0.05 * target && a >= this.hfo_amplitude_max_cmh2o - 1e-9;
+    if (Math.abs(err) <= 0.02 * target) return;
+    let step = vte > 0.0 ? this._hfo_vg_gain * (a * target / vte - a) : this._hfo_vg_max_step;
+    step = Math.max(-this._hfo_vg_max_step, Math.min(this._hfo_vg_max_step, step));
+    this._hfo_amp_working = this._clamp_hfo_amplitude(a + step);
+  }
+
+  hfo_sigh() {
+    // one HFOV sigh now: the oscillation pauses at hfo_sigh_cmh2o for hfo_sigh_time
+    if (this.vent_mode !== "HFOV" || this.hfo_sigh_remaining > 0.0) return;
+    this.hfo_pause_remaining = 0.0;
+    this.hfo_sigh_remaining = Math.max(this.hfo_sigh_time, 0.0);
+  }
+
+  hfo_pause(state = null) {
+    // oscillation pause at MAP for up to 60 s; calling it again (or with false) cancels it
+    if (this.vent_mode !== "HFOV") return;
+    const on = state === null ? !(this.hfo_pause_remaining > 0.0) : !!state;
+    this.hfo_pause_remaining = on ? 60.0 : 0.0;
+    if (on) this.hfo_sigh_remaining = 0.0;
   }
 
   _hfo_cycle_end(f) {
@@ -24998,6 +25432,8 @@ export class Ventilator extends BaseModelClass {
       this.hfo_amplitude_meas = this._hfo_p_max - this._hfo_p_min;
       this.p_peak = this._hfo_p_max;
     }
+    this._calc_leak_perc();
+    if (this.hfo_volume_guarantee && this._hfo_amp_working !== null) this._hfo_volume_targeting(1.0 / f);
     this._insp_tidal_volume_counter = 0.0;
     this._exp_tidal_volume_counter = 0.0;
     // the volume trace restarts each oscillation, as it does at each breath in the other modes;
@@ -25125,6 +25561,9 @@ export class Ventilator extends BaseModelClass {
     this.hfo_dco2 = 0.0;
     this.hfo_map_meas = 0.0;
     this.hfo_amplitude_meas = 0.0;
+    this.hfo_amplitude_delivered = 0.0;
+    this.hfo_sigh_remaining = 0.0;
+    this.hfo_pause_remaining = 0.0;
     this.map_meas = 0.0;
     this.ti_meas = 0.0;
     this.te_meas = 0.0;
@@ -25164,6 +25603,12 @@ export class Ventilator extends BaseModelClass {
     this._hfo_p_min = 1e9;
     this._hfo_p_sum = 0.0;
     this._hfo_n = 0;
+    this._hfo_amp_working = null;
+    this._hfo_vg_vol = 0.0;
+    this._hfo_vg_n = 0;
+    this._hfo_vg_time = 0.0;
+    this._hfo_sigh_timer = 0.0;
+    this._hfo_breath_t = 0.0;
     this._vc_vol_target = this.tidal_volume;
     this._te_counter = 0.0;
     this._peak_exp_flow = 0.0;
@@ -25413,6 +25858,46 @@ export class Ventilator extends BaseModelClass {
     this.vent_mode = "HFOV";
   }
 
+  set_hfo_volume_guarantee(state = true, vt = null, amp_max = null) {
+    // HFOV volume targeting: vt in mL per oscillation (expired), amp_max the amplitude limit
+    this.hfo_volume_guarantee = state;
+    if (vt !== null) this.hfo_tidal_volume_target = vt / 1000.0;
+    if (amp_max !== null) this.hfo_amplitude_max_cmh2o = amp_max;
+    this._hfo_amp_working = null; // restart from the set amplitude
+    this._hfo_vg_vol = 0.0;
+    this._hfo_vg_n = 0;
+    this._hfo_vg_time = 0.0;
+  }
+
+  set_hfo_sigh(rate = 0.0, t = 0.4, pres = 10.0) {
+    // automatic HFOV sighs: rate (/min, 0 = off), duration (s) and pressure (cmH2O)
+    this.hfo_sigh_rate = Math.max(0.0, rate);
+    this.hfo_sigh_time = t;
+    this.hfo_sigh_cmh2o = pres;
+    this._hfo_sigh_timer = 0.0;
+  }
+
+  set_hfov_cmv(pip = 15.0, peep = 5.0, rate = 30.0, t_in = 0.4, amplitude = 10.0, freq = 10.0, activity = "both", bias_flow = 10.0) {
+    // CMV breaths (PIP/PEEP, rate, Ti) with HFO superimposed in both phases or in expiration only
+    this.pip_cmh2o = pip;
+    this.pip_cmh2o_max = pip;
+    this.peep_cmh2o = peep;
+    this.vent_rate = rate;
+    this.insp_time = t_in;
+    this.hfo_amplitude_cmh2o = amplitude;
+    this.hfo_freq = freq;
+    this.hfo_activity = activity === "exp" ? "exp" : "both";
+    this.hfo_bias_flow = bias_flow;
+    this._hfo_phase = 0.0;
+    this._hfo_breath_t = 0.0;
+    if (this.vent_mode !== "HFOV_CMV") {
+      // the delivered rate restarts with the first breath (no carry-over from a breathless HFOV)
+      this._breath_interval_counter = 0.0;
+      this._rate_avg = 0.0;
+    }
+    this.vent_mode = "HFOV_CMV";
+  }
+
   set_cpap(cpap = 5.0, insp_flow = 8.0, backup_rate = null) {
     // `backup_rate` (/min, 0 = off) delivers time-cycled breaths at pip_cmh2o/insp_time in apnoea;
     // left as it is when not given
@@ -25434,7 +25919,8 @@ export class Ventilator extends BaseModelClass {
   trigger_breath() {
     // manual breath: ignored during inspiration (as on a real ventilator — it used to restart the
     // running breath), otherwise delivered once the minimal expiratory time has passed. Works in
-    // every mode except HFOV (in CPAP as a time-cycled breath at PIP, see cpap_cycling).
+    // every mode except HFOV (in CPAP as a time-cycled breath at PIP, see cpap_cycling; in HFOV_CMV
+    // as an early breath of the CMV clock).
     if (!this._inspiration) this._manual_breath = true;
   }
 }
@@ -25452,7 +25938,8 @@ export class Ventilator extends BaseModelClass {
 // below the first bound moves by the first resolution. `off` marks a function that can be switched
 // off (value 0) and `on` the value it starts from when switched on (p150, "Turning ON a parameter").
 // `kind` sets the arc colour of the tile (p150): time = blue, pressure = orange, o2 = green,
-// sens = white.
+// sens = white. A `choices` parameter is a list (stored as one of its numbers, shown by `names`): its
+// +/- steps through the list.
 
 export const SLE_PARAMS = {
   rr: { label: "RR", unit: "BPM", min: 1, max: 150, steps: [[Infinity, 1]], def: 30, kind: "time" }, // p163
@@ -25466,6 +25953,16 @@ export const SLE_PARAMS = {
   p_support: { label: "P Support", unit: "mbar", min: 0, max: 65, steps: [[Infinity, 1]], def: 0, off: true, on: 8, kind: "pressure" }, // p164
   vtv: { label: "VTV", unit: "ml", min: 1, max: 300, steps: [[10, 0.2], [100, 1], [Infinity, 5]], def: 0, off: true, on: 3, kind: "pressure" }, // p163
   o2: { label: "O2", unit: "%", min: 21, max: 100, steps: [[Infinity, 1]], def: 21, kind: "o2" }, // p165
+  // HFO (p166)
+  freq: { label: "Frequency", unit: "Hz", min: 3, max: 20, steps: [[Infinity, 0.1]], def: 10, kind: "time" },
+  ie: { label: "I:E", unit: "Ratio", min: 1, max: 3, steps: [[Infinity, 1]], def: 1, kind: "time", choices: [1, 2, 3], names: ["1:1", "1:2", "1:3"] },
+  map: { label: "MAP", unit: "mbar", min: 0, max: 45, steps: [[Infinity, 1]], def: 5, kind: "pressure" },
+  dp: { label: "ΔP", unit: "mbar", min: 4, max: 180, steps: [[Infinity, 1]], def: 4, kind: "pressure" },
+  hfo_vtv: { label: "VTV", unit: "ml", min: 0.2, max: 50, steps: [[2, 0.1], [10, 0.2], [Infinity, 1]], def: 0, off: true, on: 2, kind: "pressure" }, // pp 125, 166
+  sigh_rr: { label: "Sigh RR", unit: "BPM", min: 1, max: 150, steps: [[Infinity, 1]], def: 0, off: true, on: 30, kind: "time" },
+  sigh_ti: { label: "Sigh Ti", unit: "Seconds", min: 0.1, max: 3.0, steps: [[Infinity, 0.01]], def: 0.4, kind: "time" },
+  sigh_p: { label: "Sigh P", unit: "mbar", min: 0, max: 45, steps: [[Infinity, 1]], def: 10, kind: "pressure" },
+  hfo_activity: { label: "HFO Activity", unit: "", min: 0, max: 1, steps: [[Infinity, 1]], def: 0, kind: "sens", choices: [0, 1], names: ["Insp+Exp", "Exp"] }, // p155
 };
 
 // invasive conventional modes (phase 1). `main` is the bottom row left to right (O2 always last),
@@ -25488,7 +25985,13 @@ export const SLE_MODES = {
     main: ["rr", "ti", "peep", "pip", "vtv", "o2"],
     extra: [null, "rise", "p_support", "trig_sens", "term_sens"],
   },
+  // HFO (pp 78-80): the additional row of HFOV has an empty P Support slot
+  HFOV: { main: ["freq", "ie", "map", "dp", "hfo_vtv", "o2"], extra: ["sigh_rr", "sigh_ti", null, "sigh_p"] },
+  "HFOV+CMV": { main: ["rr", "ti", "freq", "peep", "pip", "dp", "o2"], extra: ["hfo_activity"] },
 };
+
+// the oscillatory modes
+export const SLE_HFO_MODES = ["HFOV", "HFOV+CMV"];
 
 export const SLE_MODE_NAMES = Object.keys(SLE_MODES);
 
@@ -25508,6 +26011,10 @@ export function sle_resolution(name, value) {
 // one +/- press: dir = +1 or -1. Off functions go 0 -> off; a press below min switches them off.
 export function sle_step(name, value, dir) {
   const p = SLE_PARAMS[name];
+  if (p.choices) {
+    const i = Math.max(0, p.choices.indexOf(sle_clamp(name, value)));
+    return p.choices[Math.min(p.choices.length - 1, Math.max(0, i + (dir > 0 ? 1 : -1)))];
+  }
   if (p.off && value === 0) return dir > 0 ? p.on : 0;
   const res = dir > 0 ? sle_resolution(name, value) : sle_resolution(name, value - 1e-6);
   const next = value + dir * res;
@@ -25519,6 +26026,7 @@ export function sle_step(name, value, dir) {
 export function sle_clamp(name, value) {
   const p = SLE_PARAMS[name];
   if (!Number.isFinite(value)) return p.def;
+  if (p.choices) return p.choices.reduce((a, b) => (Math.abs(b - value) < Math.abs(a - value) ? b : a));
   if (p.off && value <= 0) return 0;
   let v = Math.min(p.max, Math.max(p.min, value));
   const res = sle_resolution(name, v);
@@ -25526,11 +26034,33 @@ export function sle_clamp(name, value) {
   return Number(Math.min(p.max, Math.max(p.min, v)).toFixed(4));
 }
 
+// the display text of a value (a list parameter by its name)
+export function sle_format(name, value, decimals = 1) {
+  const p = SLE_PARAMS[name];
+  if (p.choices) return p.names[Math.max(0, p.choices.indexOf(sle_clamp(name, value)))];
+  if (p.off && value === 0) return "Off";
+  return Number(value).toFixed(decimals);
+}
+
 // the device interlocks (pp 163-169), applied to a whole settings object for `mode`:
 // Ti leaves at least 0.1 s of expiration at the (backup) rate, rise time <= Ti, PEEP <= PIP,
-// P Support <= PIP
-export function sle_interlocks(s, mode) {
+// P Support <= PIP. HFOV (p78): Sigh Ti leaves 0.1 s at the Sigh RR (whichever was changed gives
+// way to the other), Sigh P follows MAP up and can be set at most 15 mbar above it. `changed`
+// lists the settings just edited.
+export function sle_interlocks(s, mode, changed = []) {
   const out = { ...s };
+  if (mode === "HFOV") {
+    if (out.sigh_rr > 0) {
+      if (changed.includes("sigh_rr") && !changed.includes("sigh_ti")) {
+        out.sigh_rr = Math.min(out.sigh_rr, Math.floor(60 / (out.sigh_ti + 0.1)));
+      } else {
+        out.sigh_ti = Math.min(out.sigh_ti, sle_floor_res("sigh_ti", 60 / out.sigh_rr - 0.1));
+      }
+    }
+    if (out.sigh_p < out.map) out.sigh_p = out.map;
+    if (changed.includes("sigh_p")) out.sigh_p = Math.min(out.sigh_p, out.map + 15, SLE_PARAMS.sigh_p.max);
+    return out;
+  }
   // CPAP times only its backup breaths; in PTV/PSV the RR is the rate of the mandatory breaths that
   // cover apnoea (the manual's RR Backup tile in those modes duplicates it, so it is not modelled)
   const rate = mode === "CPAP" ? out.rr_backup : out.rr;
@@ -25543,7 +26073,7 @@ export function sle_interlocks(s, mode) {
 
 function sle_floor_res(name, value) {
   const res = sle_resolution(name, value);
-  return Math.max(SLE_PARAMS[name].min, Math.floor(value / res + 1e-9) * res);
+  return Number(Math.max(SLE_PARAMS[name].min, Math.floor(value / res + 1e-9) * res).toFixed(4));
 }
 
 ```
@@ -34956,7 +35486,9 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "CMV",
             "PTV",
             "PSV",
-            "SIMV"
+            "SIMV",
+            "HFOV",
+            "HFOV+CMV"
           ],
           "custom_options": true,
           "default": "CMV"
@@ -34994,7 +35526,16 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "rr_backup",
             "p_support",
             "vtv",
-            "o2"
+            "o2",
+            "freq",
+            "ie",
+            "map",
+            "dp",
+            "hfo_vtv",
+            "sigh_rr",
+            "sigh_ti",
+            "sigh_p",
+            "hfo_activity"
           ],
           "custom_options": true,
           "default": "pip"
@@ -35031,6 +35572,22 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
           "default": true
         }
       ]
+    },
+    {
+      "caption": "HFOV sigh (Sigh P for Sigh Ti)",
+      "target": "sle_sigh",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": []
+    },
+    {
+      "caption": "HFOV oscillation pause (60 s, again to cancel)",
+      "target": "sle_osc_pause",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": []
     },
     {
       "caption": "patient circuit (mm)",
@@ -35148,6 +35705,87 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "basic",
       "readonly": true,
       "caption": "O2 (%)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_freq",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFO frequency (Hz)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_ie",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV I:E (1:x)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_map",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV MAP (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_dp",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFO Delta P (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_hfo_vtv",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV VTV target (ml, 0 = off)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "sle_sigh_rr",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV Sigh RR (BPM, 0 = off)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_sigh_ti",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV Sigh Ti (s)",
+      "factor": 1,
+      "rounding": 2
+    },
+    {
+      "target": "sle_sigh_p",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV Sigh P (mbar)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_hfo_activity",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "HFOV+CMV HFO activity (0 both phases, 1 expiration)",
       "factor": 1,
       "rounding": 0
     },
@@ -35401,6 +36039,42 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "fresh gas flow (l/min)",
       "factor": 1,
       "rounding": 1
+    },
+    {
+      "target": "mon_dp",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "HFO measured Delta P (mbar)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "mon_dco2",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "HFO DCO2 (ml²/s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_freq",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "HFO frequency (Hz)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "hfo_pause_remaining",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "oscillation pause left (s)",
+      "factor": 1,
+      "rounding": 0
     },
     {
       "target": "o2_boost_remaining",
@@ -36406,8 +37080,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **438 settable params**, **38 functions**
-(+ 49 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **438 settable params**, **40 functions**
+(+ 51 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -36415,11 +37089,13 @@ Snapshot: **45 model_types**, **438 settable params**, **38 functions**
 Active when the user selects **Guided** scope in the chat panel. Only these commands apply;
 anything else is rejected (the app suggests switching to Full). Full mode (below) is the default.
 
-- `call` `Ventilator.sle_start` — SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV)
-- `call` `Ventilator.sle_set` — SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%)
+- `call` `Ventilator.sle_start` — SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV/HFOV/HFOV+CMV)
+- `call` `Ventilator.sle_set` — SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%); HFO: freq (Hz), ie (1, 2 or 3 for I:E 1:1/1:2/1:3), map (mbar, HFOV), dp (Delta P, mbar), hfo_vtv (HFOV Vte target ml, 0 = off), sigh_rr (BPM, 0 = off), sigh_ti (s), sigh_p (mbar), hfo_activity (HFOV+CMV: 0 both phases, 1 expiration only)
 - `call` `Ventilator.sle_standby` — SLE6000: standby, stop ventilation (no args)
 - `call` `Ventilator.sle_manual_breath` — SLE6000: one manual breath (no args)
 - `call` `Ventilator.sle_o2_boost` — SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)
+- `call` `Ventilator.sle_sigh` — SLE6000 HFOV: one sigh at Sigh P for Sigh Ti (no args)
+- `call` `Ventilator.sle_osc_pause` — SLE6000 HFOV: oscillation pause at MAP for up to 60 s; call again to cancel (no args)
 - `setProp` `Heart.heart_rate_ref` — reference heart rate (bpm)
 - `setProp` `Heart.ans_sens` — autonomic sensitivity of the heart (0–1)
 - `setProp` `Ans.ans_active` — autonomic nervous system on/off
@@ -37033,11 +37709,13 @@ _setProp_:
 - `leak_size` — tube leak gap (mm) (number, mm, range 0–4) _(extra)_
 
 _call_:
-- `sle_start(mode (list, one of CPAP/CMV/PTV/PSV/SIMV))` — start / resume ventilation
+- `sle_start(mode (list, one of CPAP/CMV/PTV/PSV/SIMV/HFOV/HFOV+CMV))` — start / resume ventilation
 - `sle_standby()` — standby (stop ventilation)
-- `sle_set(name (list, one of rr/ti/peep/pip/rise/trig_sens/term_sens/rr_backup/p_support/vtv/o2); value (number))` — change a setting
+- `sle_set(name (list, one of rr/ti/peep/pip/rise/trig_sens/term_sens/rr_backup/p_support/vtv/o2/freq/ie/map/dp/hfo_vtv/sigh_rr/sigh_ti/sigh_p/hfo_activity); value (number))` — change a setting
 - `sle_manual_breath()` — manual breath
 - `sle_o2_boost(state (boolean))` — O2 Boost (+10 % for 2 min)
+- `sle_sigh()` — HFOV sigh (Sigh P for Sigh Ti)
+- `sle_osc_pause()` — HFOV oscillation pause (60 s, again to cancel)
 - `sle_set_circuit(diameter (number, mm, range 10–15))` — patient circuit (mm)
 - `set_ettube_diameter(ettube_diameter (number, mm))` — endotracheal tube diameter (mm)
 - `set_ettube_length(ettube_length (number, mm))` — endotracheal tube length (mm)

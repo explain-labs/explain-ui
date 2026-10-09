@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { MON_SINGLE, MON_DOUBLE, type MonValue } from "./sleUi";
+import { monGroups, type MonValue } from "./sleUi";
 
 // The monitored-values column (IFU p151; look from the device photos, see sleTheme.ts): white values
 // on black, right-aligned, each with a small grey "label (unit)" under it, in dark group boxes.
 // Single column (8 values) or double column (16, as on the photos); touch and hold 1 s to switch.
-const props = defineProps<{ values: Record<string, unknown>; double: boolean; active: boolean }>();
+// The sets follow the mode (conventional, HFOV, HFOV+CMV); an empty cell keeps the device's layout.
+const props = defineProps<{ values: Record<string, unknown>; double: boolean; active: boolean; mode: string | null }>();
 const emit = defineEmits<{ (e: "toggle"): void }>();
 
-const groups = computed(() => (props.double ? MON_DOUBLE : MON_SINGLE));
+const groups = computed(() => monGroups(props.mode, props.double));
 function show(m: MonValue): string {
   const v = props.values[m.path];
   if (!props.active || typeof v !== "number" || !Number.isFinite(v)) return "---";
@@ -31,10 +32,13 @@ function cancel() {
 <template>
   <div class="sle-mon" @pointerdown="down" @pointerup="cancel" @pointerleave="cancel" @pointercancel="cancel">
     <div v-for="(g, gi) in groups" :key="gi" class="sle-mon-group" :class="{ double }">
-      <div v-for="m in g" :key="m.path + m.label" class="sle-mon-cell">
-        <div class="sle-mon-val">{{ show(m) }}</div>
-        <div class="sle-mon-cap">{{ m.unit ? `${m.label} (${m.unit})` : m.label }}</div>
-      </div>
+      <template v-for="(m, i) in g" :key="(m?.path ?? 'gap') + i">
+        <div v-if="m" class="sle-mon-cell">
+          <div class="sle-mon-val">{{ show(m) }}</div>
+          <div class="sle-mon-cap">{{ m.unit ? `${m.label} (${m.unit})` : m.label }}</div>
+        </div>
+        <div v-else class="sle-mon-cell"></div>
+      </template>
     </div>
   </div>
 </template>

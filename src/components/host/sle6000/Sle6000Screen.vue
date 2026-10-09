@@ -6,13 +6,25 @@ import { Sle6000Renderer, type SleChannel } from "@/render/Sle6000Renderer";
 import ParamTile from "./ParamTile.vue";
 import MonitoredValues from "./MonitoredValues.vue";
 import ModePanel from "./ModePanel.vue";
-import { PARAMS, MODES, SLOW_PATHS, SETTING_NAMES, decimalsOf, labelOf, stepParam, interlocks } from "./sleUi";
+import {
+  PARAMS,
+  MODES,
+  SLOW_PATHS,
+  SETTING_NAMES,
+  decimalsOf,
+  labelOf,
+  stepParam,
+  interlocks,
+  clampParam,
+  formatParam,
+} from "./sleUi";
 import { SLE_THEME as T, SLE_CSS_VARS } from "./sleTheme";
 
 // On-screen replica of the SLE6000 touchscreen (IFU V2.0 §21, pp 138-155), drawn as a 1024 x 768
 // frame scaled to the pane: information bar, button column, three waveforms, monitored values and
 // the parameter row with +/- and Confirm. It drives the engine's Sle6000 model (instance
-// "Ventilator") only through sle_apply / sle_manual_breath / sle_o2_boost, so every change is
+// "Ventilator") only through sle_apply / sle_manual_breath / sle_sigh / sle_osc_pause / sle_o2_boost,
+// so every change is
 // validated by the device's own ranges and interlocks. Settings and monitored values come off the
 // 1 Hz slow stream, waveforms off the fast stream (never Vue-reactive).
 
@@ -50,6 +62,8 @@ const live = computed(() => {
 });
 const liveCircuit = computed(() => Number(read("sle_circuit") ?? 10));
 const boostLeft = computed(() => Number(read("o2_boost_remaining") ?? 0));
+const oscPauseLeft = computed(() => Number(read("hfo_pause_remaining") ?? 0));
+const sighing = computed(() => Number(read("hfo_sigh_remaining") ?? 0) > 0);
 const ventilating = computed(() => liveMode.value !== "Standby");
 
 // ---- local edit state -----------------------------------------------------------------------
@@ -73,7 +87,7 @@ const rowMode = computed(() => {
 });
 const shown = computed(() => {
   const s = { ...live.value, ...(sent.value ?? {}), ...pending };
-  return rowMode.value ? interlocks(s, rowMode.value) : s;
+  return rowMode.value ? interlocks(s, rowMode.value, Object.keys(pending)) : s;
 });
 const dirty = computed(
   () => Object.keys(pending).length > 0 || previewMode.value !== null || pendingCircuit.value !== null,
@@ -126,7 +140,10 @@ function hold(name: string) {
   }
   // Off functions switch on with their start value (p150)
   if (PARAMS[name].off && shown.value[name] === 0) {
-    pending[name] = PARAMS[name].on ?? PARAMS[name].min;
+    // HFO VTV switches on at the last measured Vte (p166)
+    const vte = Number(read("mon_vte"));
+    pending[name] =
+      name === "hfo_vtv" && vte > 0 ? clampParam(name, vte) : (PARAMS[name].on ?? PARAMS[name].min);
     selected.value = name;
     touch();
   }
@@ -166,9 +183,26 @@ function toggleExtra() {
   if (extraTimer) clearTimeout(extraTimer);
   if (showExtra.value) extraTimer = setTimeout(() => (showExtra.value = false), 120_000);
 }
+// the bottom-left button: Manual Breath, or Sigh in HFOV (p155)
+const hfov = computed(() => ventilating.value && liveMode.value === "HFOV");
 function manualBreath() {
-  if (ventilating.value) call("Ventilator.sle_manual_breath", []);
+  if (!ventilating.value) return;
+  call(hfov.value ? "Ventilator.sle_sigh" : "Ventilator.sle_manual_breath", []);
 }
+function oscPause() {
+  if (hfov.value) call("Ventilator.sle_osc_pause", []);
+}
+// a list setting shows its name, e.g. I:E "1:2"; HFO Activity labels its two ends
+const displayOf = (n: string) => (PARAMS[n].choices ? formatParam(n, shown.value[n], 0) : null);
+const endsOf = (n: string): [string, string] | null => (n === "hfo_activity" ? ["I+E", "E"] : null);
+// the sub-labels under the mode name (lit when on), as on the device screens
+const subLabels = computed(() => {
+  const m = previewMode.value ?? liveMode.value;
+  const s = shown.value;
+  if (m === "HFOV") return [{ t: "VTV", on: s.hfo_vtv > 0 }, { t: "Sigh", on: s.sigh_rr > 0 }];
+  if (m === "CPAP" || m === "HFOV+CMV" || m === "Standby") return [];
+  return ventilating.value || previewMode.value ? [{ t: "VTV", on: s.vtv > 0 }] : [];
+});
 
 // pause/play (p154): freeze the graphics for 120 s
 let pauseTimer: ReturnType<typeof setInterval> | null = null;
@@ -209,6 +243,7 @@ const message = computed(() => {
   if (locked.value && lockHint.value) return "Screen is locked. To unlock, press and hold for 1 second";
   if (pausedLeft.value > 0) return `Graphics Section paused ${pausedLeft.value} secs`;
   if (!isRunning.value) return "Simulation stopped: settings apply when it runs";
+  if (oscPauseLeft.value > 0) return `Oscillation Paused ${Math.ceil(oscPauseLeft.value)} secs`;
   if (boostLeft.value > 0) return `O2 Boost in Progress ${mmss(boostLeft.value)}`;
   if (!ventilating.value) return "Standby: Patient not ventilated";
   return "";
@@ -301,8 +336,10 @@ onBeforeUnmount(() => {
         </svg>
       </button>
       <div class="sle-modename">
-        <div>{{ previewMode ?? liveMode }}</div>
-        <div class="sub">{{ ventilating && shown.vtv > 0 && liveMode !== "CPAP" ? "VTV" : "" }}</div>
+        <div :class="{ long: (previewMode ?? liveMode).length > 6 }">{{ previewMode ?? liveMode }}</div>
+        <div class="sub">
+          <span v-for="l in subLabels" :key="l.t" :class="{ lit: l.on }">{{ l.t }}</span>
+        </div>
       </div>
       <!-- information bar -->
       <div class="sle-info">
@@ -339,7 +376,12 @@ onBeforeUnmount(() => {
       >
         Additional Parameters
       </button>
-      <button class="sle-manual" :disabled="!ventilating" @click="manualBreath">Manual Breath</button>
+      <button v-if="hfov" class="sle-oscpause" :class="{ on: oscPauseLeft > 0 }" @click="oscPause">
+        Oscillation Pause<span v-if="oscPauseLeft > 0"> {{ Math.ceil(oscPauseLeft) }}s</span>
+      </button>
+      <button class="sle-manual" :class="{ on: hfov && sighing }" :disabled="!ventilating" @click="manualBreath">
+        {{ hfov ? "Sigh" : "Manual Breath" }}
+      </button>
 
       <!-- waveforms -->
       <div class="sle-wave">
@@ -372,6 +414,8 @@ onBeforeUnmount(() => {
               :state="tileState(n)"
               :can-be-off="!!PARAMS[n].off"
               :hold-ms="PARAMS[n].off ? 2000 : 0"
+              :display="displayOf(n)"
+              :ends="endsOf(n)"
               @tap="tap(n)"
               @hold="hold(n)"
             />
@@ -382,7 +426,13 @@ onBeforeUnmount(() => {
 
       <!-- monitored values -->
       <div class="sle-mon-col">
-        <MonitoredValues :values="latest" :double="doubleColumn" :active="ventilating" @toggle="doubleColumn = !doubleColumn" />
+        <MonitoredValues
+          :values="latest"
+          :double="doubleColumn"
+          :active="ventilating"
+          :mode="ventilating ? liveMode : null"
+          @toggle="doubleColumn = !doubleColumn"
+        />
       </div>
 
       <!-- main parameter row -->
@@ -401,6 +451,8 @@ onBeforeUnmount(() => {
             :can-be-off="!!PARAMS[n].off"
             :hold-ms="n === 'o2' ? 3000 : PARAMS[n].off ? 2000 : 0"
             :boost="n === 'o2' && boostLeft > 0 ? Math.min(100, shown.o2 + 10) : null"
+            :display="displayOf(n)"
+            :ends="endsOf(n)"
             @tap="tap(n)"
             @hold="hold(n)"
           />
@@ -477,10 +529,23 @@ button:disabled {
   font-size: 20px;
   line-height: 1.1;
 }
+.sle-modename .long {
+  font-size: 15px;
+  line-height: 24px;
+}
 .sle-modename .sub {
   font-size: 11px;
   color: var(--sle-label);
   height: 13px;
+  display: flex;
+  gap: 12px;
+}
+.sle-modename .sub span {
+  opacity: 0.45;
+}
+.sle-modename .sub span.lit {
+  opacity: 1;
+  color: var(--sle-text);
 }
 .sle-info {
   position: absolute;
@@ -555,6 +620,7 @@ button:disabled {
   opacity: 0.5;
 }
 .sle-extra-btn,
+.sle-oscpause,
 .sle-manual {
   position: absolute;
   left: 8px;
@@ -577,6 +643,15 @@ button:disabled {
 .sle-manual {
   top: 654px;
   height: 108px;
+}
+.sle-oscpause {
+  top: 482px;
+  height: 52px;
+}
+.sle-oscpause.on,
+.sle-manual.on {
+  background: var(--sle-text);
+  color: #000;
 }
 .sle-manual:disabled {
   opacity: 0.5;
