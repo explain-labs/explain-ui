@@ -40,7 +40,7 @@ wiring → gotchas), adapted for Vue units. Cross-links into the engine docs use
 | Doc | What it covers |
 |---|---|
 | [RenderLayer](./RenderLayer.md) | `src/render/`: the `RendererAdapter` contract, the typed buffers (`ChartFrame`/`AnimFrame`), the channels handshake + SAB-vs-postMessage transport, and the four renderers (`ChartRenderer` uPlot, `LoopRenderer`, `MonitorRenderer`, `DiagramRenderer` Pixi). |
-| [HostComponents](./HostComponents.md) | `src/components/host/`: `RealtimeChart`, `LoopChart`, `Monitor`, `VentilatorScope`, `Diagram` — the mount → `addRenderer` → `dispose` lifecycle, series selection, CSV export, and the diagram editor + live re-bind. |
+| [HostComponents](./HostComponents.md) | `src/components/host/`: `RealtimeChart`, `LoopChart`, `Monitor`, `Sle6000Screen`, `Diagram` — the mount → `addRenderer` → `dispose` lifecycle, series selection, CSV export, and the diagram editor + live re-bind. |
 
 ## Controls & readouts
 

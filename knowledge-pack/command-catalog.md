@@ -25,7 +25,7 @@ Rules of thumb:
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
 Snapshot: **45 model_types**, **438 settable params**, **38 functions**
-(+ 76 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+(+ 49 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -33,33 +33,6 @@ Snapshot: **45 model_types**, **438 settable params**, **38 functions**
 Active when the user selects **Guided** scope in the chat panel. Only these commands apply;
 anything else is rejected (the app suggests switching to Full). Full mode (below) is the default.
 
-- `call` `Ventilator.switch_ventilator` — turn mechanical ventilation on/off (arg: boolean)
-- `call` `Ventilator.set_fio2` — set inspired O2 fraction (0.21–1.0)
-- `call` `Ventilator.set_ettube_diameter` — set endotracheal tube diameter (mm)
-- `call` `Ventilator.set_ettube_length` — set endotracheal tube length (mm)
-- `setProp` `Ventilator.vent_mode` — ventilation mode (PC/PRVC/VC/PS/SIMV/CPAP/HFOV)
-- `setProp` `Ventilator.vent_rate` — ventilator rate (/min)
-- `setProp` `Ventilator.insp_time` — inspiration time (s)
-- `setProp` `Ventilator.tidal_volume` — target tidal volume (mL)
-- `setProp` `Ventilator.pip_cmh2o` — peak inspiratory pressure (cmH2O)
-- `setProp` `Ventilator.pip_cmh2o_max` — pressure limit of PRVC and volume guarantee; pop-off in VC (cmH2O)
-- `setProp` `Ventilator.volume_guarantee` — volume guarantee on/off in PC, PS or SIMV (servo the pressure to tidal_volume, up to pip_cmh2o_max)
-- `setProp` `Ventilator.rise_time` — pressure rise time, PC/PRVC/PS (s)
-- `setProp` `Ventilator.insp_pause` — end-inspiratory pause, PC/PRVC/VC (s); gives plateau pressure, static compliance, resistance
-- `setProp` `Ventilator.leak_size` — leak around an uncuffed ET tube, equivalent gap (mm; ~0.5-1.25 neonate, 1-3 adult; 0 = none)
-- `setProp` `Ventilator.hfo_map_cmh2o` — HFOV mean airway pressure (cmH2O)
-- `setProp` `Ventilator.hfo_amplitude_cmh2o` — HFOV amplitude, peak-to-peak (cmH2O); more amplitude clears more CO2
-- `setProp` `Ventilator.hfo_freq` — HFOV frequency (Hz); higher frequency gives smaller Vt and LESS CO2 clearance
-- `setProp` `Ventilator.ps_cmh2o` — pressure support above PEEP, PS mode and SIMV spontaneous breaths (cmH2O; 0 = unsupported in SIMV)
-- `setProp` `Ventilator.peep_cmh2o` — positive end-expiratory pressure (cmH2O); doubles as the CPAP level in CPAP mode
-- `setProp` `Ventilator.insp_flow` — inspiratory/bias flow (L/min)
-- `setProp` `Ventilator.synchronized` — synchronized (patient-triggered) ventilation on/off
-- `setProp` `Ventilator.trigger_volume_perc` — breath trigger volume (% of tidal volume)
-- `setProp` `Ventilator.trigger_mode` — patient trigger type: 'volume' (% of tidal volume) or 'flow' (trigger_flow at the tube)
-- `setProp` `Ventilator.trigger_flow` — flow trigger threshold (L/min)
-- `setProp` `Ventilator.term_sens_perc` — PS termination: the breath ends when inspiratory flow falls below this % of its peak
-- `setProp` `Ventilator.backup_rate` — CPAP apnoea backup rate (/min, 0 = off): breaths at pip_cmh2o / insp_time during apnoea
-- `call` `Ventilator.trigger_breath` — trigger a single manual breath (no args)
 - `call` `Ventilator.sle_start` — SLE6000: start/resume ventilation or switch mode (arg: CPAP/CMV/PTV/PSV/SIMV)
 - `call` `Ventilator.sle_set` — SLE6000: change one setting (args: name, value) — rr, ti (s), peep, pip (mbar), rise (s), trig_sens (l/min), term_sens (%), rr_backup (BPM, 0 = off), p_support (mbar, 0 = off), vtv (ml, 0 = off), o2 (%)
 - `call` `Ventilator.sle_standby` — SLE6000: standby, stop ventilation (no args)

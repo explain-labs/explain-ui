@@ -1,4 +1,5 @@
 - **Chart**: plot any two model values in real time.
 - **PV-loop**: pressure–volume loops of a heart chamber or vessel.
+- **SLE6000 ventilator**: a replica of the SLE6000 neonatal ventilator screen, with its modes, settings and waveforms.
 - **Explain AI Bot**: describe what you want in words and the bot proposes the changes for you to apply.
 - **Documentation**: background on the models and their physiology.

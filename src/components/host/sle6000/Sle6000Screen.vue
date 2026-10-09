@@ -16,7 +16,7 @@ import { SLE_THEME as T, SLE_CSS_VARS } from "./sleTheme";
 // validated by the device's own ranges and interlocks. Settings and monitored values come off the
 // 1 Hz slow stream, waveforms off the fast stream (never Vue-reactive).
 
-const { watch: watchProps, watchSlow, slowValues, modelState, modelReady, isRunning, call, load } = useExplain();
+const { watch: watchProps, watchSlow, slowValues, modelState, modelReady, isRunning, call } = useExplain();
 const { addRenderer, removeRenderer } = useRealtimeBus();
 
 const W = 1024;
@@ -34,6 +34,10 @@ const latest = computed<Record<string, unknown>>(() => {
 });
 const vent = computed<any>(() => (modelState.value as any)?.models?.Ventilator ?? null);
 const isSle = computed(() => vent.value?.model_type === "Sle6000");
+const weight = computed(() => {
+  const w = Number((modelState.value as any)?.weight);
+  return Number.isFinite(w) && w > 0 ? Math.round(w * 10) / 10 : null;
+});
 const read = (k: string) => latest.value[`Ventilator.${k}`] ?? vent.value?.[k];
 const liveMode = computed(() => String(read("sle_mode") ?? "Standby"));
 const live = computed(() => {
@@ -411,10 +415,11 @@ onBeforeUnmount(() => {
       </div>
       <button v-if="dirty" class="sle-confirm" aria-label="Confirm" @click="confirm">✓</button>
 
-      <!-- not an SLE6000 scenario -->
+      <!-- the adult scenarios keep the generic ventilator: outside the device's patient range -->
       <div v-if="!isSle" class="sle-notice">
-        <div>This patient's ventilator is not an SLE6000.</div>
-        <button @click="load('term_neonate_sle6000')">Load term_neonate_sle6000</button>
+        <div v-if="vent">Patient outside the SLE6000 range (0.3–30 kg)</div>
+        <div v-else>This scenario has no ventilator.</div>
+        <div v-if="vent && weight" class="sle-notice-sub">Patient weight {{ weight }} kg</div>
       </div>
       <!-- lock overlay -->
       <div v-if="locked" class="sle-lock-overlay" @click="lockHint = true"></div>
@@ -679,6 +684,10 @@ button:disabled {
   gap: 20px;
   font-size: 20px;
   z-index: 20;
+}
+.sle-notice-sub {
+  font-size: 15px;
+  color: var(--sle-label);
 }
 .sle-lock-overlay {
   position: absolute;

@@ -15,7 +15,6 @@ export const TOUR_TARGETS = [
   "tabs.monitor",
   "tab.control.editor",
   "tab.control.tasks",
-  "tab.control.ventilator",
   "tab.control.ecls",
   "tab.control.resuscitation",
   "tab.control.pregnancy",
@@ -25,10 +24,10 @@ export const TOUR_TARGETS = [
   "tab.viz.chart",
   "tab.viz.loop",
   "tab.viz.chat",
+  "tab.viz.sle6000",
   "tab.viz.docs",
   "tab.monitor.monitoring",
   "tab.monitor.monitor",
-  "tab.monitor.ventilator",
   // bottom bar
   "run.status",
   "run.start",
@@ -65,16 +64,6 @@ export const TOUR_TARGETS = [
   "commontasks.task",
   "commontasks.step",
   "commontasks.reset",
-  // ventilator panel + scope
-  "vent.panel",
-  "vent.switch",
-  "vent.on", // only present while the ventilator is enabled
-  "vent.mode",
-  "vent.settings",
-  "vent.tube",
-  "vent.trigger",
-  "vent.measured",
-  "vent.scope",
   // ECLS panel
   "ecls.panel",
   "ecls.switch",

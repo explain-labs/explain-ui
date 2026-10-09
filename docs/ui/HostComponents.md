@@ -9,7 +9,6 @@
 | `RealtimeChart.vue` | Strip-chart host: pick up to two model.prop series; shared/split axes, lock-Y, fill, presets, CSV. Drives one or two `ChartRenderer`s |
 | `LoopChart.vue` | X-Y loop host (PV loop): pick an x and a y series; presets, CSV. Drives one `LoopRenderer` |
 | `Monitor.vue` | Bedside-monitor host: six fixed waveform lanes + slow-stream numerics. Drives a `MonitorRenderer` |
-| `VentilatorScope.vue` | Ventilator graphics: Paw/Flow/Volume lanes. Reuses `MonitorRenderer` with vent signals |
 | `sle6000/Sle6000Screen.vue` | SLE6000 ventilator replica (center pane): the device's touchscreen, driving the engine's `Sle6000` model. Drives a `Sle6000Renderer` |
 | `Diagram.vue` | PixiJS circulation diagram + editor toolbar/inspector. Lazily mounts `DiagramRenderer`; bridges live edits to the engine |
 
@@ -52,22 +51,26 @@ Default on mount: aortic pressure `AA.pres` on series A when present.
 
 One `LoopRenderer`. The user picks an x and a y `model.prop`; `applyView()` does `watchProps([x, y])` then `adapter.setSignals(x, y)`. Window select drives `setWindow`. Presets (`useChartParams("LoopCharts")`) map `paths[0]→x`, `paths[1]→y`. `onDownload` → `adapter.getSeries()` → `loop_chart.csv`. Default on mount: `LV.vol` (x) vs `LV.pres` (y) — a pressure-volume loop.
 
-## Monitor.vue & VentilatorScope.vue
+## Monitor.vue
 
-Both build a `MonitorRenderer` from a `LANES: MonitorLane[]` array and split fast vs. slow. `Monitor.vue` takes its lanes from the `LANE_DEFS` catalogue in `src/render/monitorLanes.ts`. Optional props, whose defaults reproduce the full monitor: `lanes?: LaneId[]` (a subset, in order; fixed for the component's lifetime), `height?`/`minHeight?`, `showWindowSelect?` and `highlight?: LaneId[]` (lanes framed in amber through `MonitorRenderer.setHighlight`). Each lane carries its `slow` paths, so the watchlists follow the chosen lanes.
+It builds a `MonitorRenderer` from a `LANES: MonitorLane[]` array and split fast vs. slow. `Monitor.vue` takes its lanes from the `LANE_DEFS` catalogue in `src/render/monitorLanes.ts`. Optional props, whose defaults reproduce the full monitor: `lanes?: LaneId[]` (a subset, in order; fixed for the component's lifetime), `height?`/`minHeight?`, `showWindowSelect?` and `highlight?: LaneId[]` (lanes framed in amber through `MonitorRenderer.setHighlight`). Each lane carries its `slow` paths, so the watchlists follow the chosen lanes.
 
 - **Fast (waveforms):** `FAST_PATHS = LANES.map(l => l.signal)` → `watchProps(FAST_PATHS)`; the bus feeds these to `onFrame`, never through Vue.
 - **Slow (numerics):** `SLOW_PATHS` → `watchSlow(...)`; a `latest` computed reads the newest `slowValues` snapshot and `watch(latest, n => adapter.setNumerics(n))` pushes it into the renderer's gutter. Safe at ~1 Hz.
 - **Re-watch on rebuild:** `watch(modelReady, ...)` re-issues `watchProps`/`watchSlow` because each engine `build()` resets the `DataCollector` watchlist.
 
-`Monitor.vue` lanes: ECG, SpO₂ pre/post, ABP (post-ductal AD, max/min with mean sub), Resp, CO₂; signals are the `Monitor.signals.*` purpose-built waveforms, numerics are `Monitor.*` slow values. `VentilatorScope.vue` reuses the same renderer with Paw/Flow/Volume lanes off `Ventilator.pres`/`flow`/`vol` and PIP/PEEP/MV/Vt numerics (Vt scaled L→mL). Each has a **sweep** window select → `setWindow`.
+`Monitor.vue` lanes: ECG, SpO₂ pre/post, ABP (post-ductal AD, max/min with mean sub), Resp, CO₂; signals are the `Monitor.signals.*` purpose-built waveforms, numerics are `Monitor.*` slow values. It has a **sweep** window select → `setWindow`.
 
 ## sle6000/ — the SLE6000 ventilator screen
 
 An on-screen replica of the SLE6000 touchscreen (IFU V2.0 §21; see the engine's
-[`Sle6000`](../../explain-engine/docs/Sle6000.md) doc). It sits in the center pane as the `sle6000` tab,
-which is in `UNFINISHED_PANELS` (dev builds only) until the HFO phase lands. The tab shows a notice with
-a load button when the patient's ventilator is not an `Sle6000`.
+[`Sle6000`](../../explain-engine/docs/Sle6000.md) doc). It sits in the center pane as the `sle6000` tab
+and is the app's only ventilator UI.
+- **Which scenarios.** Every scenario up to 30 kg uses an `Sle6000`.
+- **Adults.** The adult scenarios keep the generic `Ventilator`. For them the tab shows "Patient
+  outside the SLE6000 range (0.3–30 kg)" over the screen.
+- **No HFOV yet.** HFOV has no control until the device's HFO phase lands. The generic
+  `VentilatorPanel` and `VentilatorScope` were removed.
 
 - **Frame.** `Sle6000Screen.vue` lays the device out on a fixed 1024 × 768 frame, CSS-scaled to the
   pane width. It has:
@@ -172,7 +175,7 @@ A tiny Pinia store bridging `Diagram.vue` (which owns the renderer locally) and 
 
 ## Gotchas
 
-- **Additive watchlists — never clear.** Hosts only ever *add* to the shared fast/slow watchlists. Each engine `build()` resets the `DataCollector`, so `Monitor`/`VentilatorScope` re-issue their watches on `modelReady`; the chart hosts re-issue via `applyView` when picks change.
+- **Additive watchlists — never clear.** Hosts only ever *add* to the shared fast/slow watchlists. Each engine `build()` resets the `DataCollector`, so `Monitor`/`Sle6000Screen` re-issue their watches on `modelReady`; the chart hosts re-issue via `applyView` when picks change.
 - **Slow numerics are the only reactive path.** Waveforms (`watchProps`) bypass Vue entirely; only the 1 Hz `slowValues` snapshot is read reactively and pushed via `setNumerics`. Don't route fast data through refs.
 - **Two charts always exist in RealtimeChart.** `adapterBottom` is constructed even when not split (kept hidden via `setVisible([])`), so a split toggle is instant and CSV export can merge it.
 - **Diagram requires the tab mounted.** `DiagramRenderer` is owned by `Diagram.vue`; bot/chat diagram commands work only while the tab (and thus `diagramStore.activeRenderer`) is live. Diagram and Chat are sibling non-lazy tabs, so it normally stays mounted.

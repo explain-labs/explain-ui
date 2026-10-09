@@ -7,9 +7,9 @@ import { ref } from "vue";
 export type LayoutColumn = "control" | "viz" | "monitor";
 
 export const useLayoutStore = defineStore("layout", () => {
-  const controlTab = ref("editor"); // editor | tasks | ventilator | ecls | resuscitation | pregnancy | scaler | events
+  const controlTab = ref("editor"); // editor | tasks | ecls | resuscitation | pregnancy | scaler | events
   const vizTab = ref("diagram"); // diagram | chart | loop | chat | builder | sle6000 | docs
-  const monitorTab = ref("monitoring"); // monitoring | monitor | ventilator
+  const monitorTab = ref("monitoring"); // monitoring | monitor
 
   const tabs = { control: controlTab, viz: vizTab, monitor: monitorTab };
   function setTab(column: LayoutColumn, value: string) {

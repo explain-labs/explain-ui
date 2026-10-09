@@ -25,7 +25,6 @@ import Diagram from "@/components/host/Diagram.vue";
 import ModelEditor from "@/components/controls/ModelEditor.vue";
 import ScalerPanel from "@/components/controls/ScalerPanel.vue";
 import CommonTasksPanel from "@/components/controls/CommonTasksPanel.vue";
-import VentilatorPanel from "@/components/controls/VentilatorPanel.vue";
 import EclsPanel from "@/components/controls/EclsPanel.vue";
 import ResuscitationPanel from "@/components/controls/ResuscitationPanel.vue";
 import PregnancyPanel from "@/components/controls/PregnancyPanel.vue";
@@ -37,7 +36,6 @@ import ChatPanel from "@/components/controls/ChatPanel.vue";
 import PatientBuilderPanel from "@/components/controls/PatientBuilderPanel.vue";
 import LoopChart from "@/components/host/LoopChart.vue";
 import Monitor from "@/components/host/Monitor.vue";
-import VentilatorScope from "@/components/host/VentilatorScope.vue";
 import DocViewer from "@/components/host/DocViewer.vue";
 import Sle6000Screen from "@/components/host/sle6000/Sle6000Screen.vue";
 import { listLessons } from "@/lessons/index";
@@ -70,8 +68,7 @@ const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
 // Panels that aren't finished yet: hidden on the deployed site, still shown
 // under `npm run dev` so they can be worked on. Remove a name here to release
 // its panel.
-// sle6000: the device replica, phase 1 of 5 (invasive conventional modes only)
-const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler", "sle6000"]);
+const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler"]);
 const showPanel = (name: string) => import.meta.env.DEV || !UNFINISHED_PANELS.has(name);
 const tour = useTour();
 // first visit (no manual progress stored yet): offer the getting-started tour
@@ -379,7 +376,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </div>
     </div>
 
-    <!-- Parameters (left 1/4) · Diagram/Chart/PV-loop tabs (center 1/2) · Numerics/patient monitor/ventilator graphs (right 1/4) -->
+    <!-- Parameters (left 1/4) · Diagram/Chart/PV-loop tabs (center 1/2) · Numerics/patient monitor (right 1/4) -->
     <div v-if="modelReady" class="flex flex-col lg:flex-row gap-3 items-start">
       <div class="w-full lg:w-1/4 min-w-0" data-tour="layout.controls">
         <Tabs v-model:value="controlTab">
@@ -389,9 +386,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </Tab>
             <Tab value="tasks" data-tour="tab.control.tasks" v-tooltip.top="'Common tasks'" aria-label="Common tasks">
               <i class="pi pi-bolt"></i>
-            </Tab>
-            <Tab value="ventilator" data-tour="tab.control.ventilator" v-tooltip.top="'Ventilator'" aria-label="Ventilator">
-              <i class="pi pi-cloud"></i>
             </Tab>
             <Tab value="ecls" data-tour="tab.control.ecls" v-tooltip.top="'ECLS'" aria-label="ECLS">
               <i class="pi pi-sync"></i>
@@ -418,11 +412,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <TabPanel value="tasks">
               <div class="flex flex-col gap-3">
                 <CommonTasksPanel />
-              </div>
-            </TabPanel>
-            <TabPanel value="ventilator">
-              <div class="flex flex-col gap-3">
-                <VentilatorPanel />
               </div>
             </TabPanel>
             <TabPanel value="ecls">
@@ -471,7 +460,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <Tab v-if="showPanel('builder')" value="builder" data-tour="tab.viz.builder" v-tooltip.top="'Patient builder'" aria-label="Patient builder">
               <i class="pi pi-user-plus"></i>
             </Tab>
-            <Tab v-if="showPanel('sle6000')" value="sle6000" data-tour="tab.viz.sle6000" v-tooltip.top="'SLE6000 ventilator'" aria-label="SLE6000 ventilator">
+            <Tab value="sle6000" data-tour="tab.viz.sle6000" v-tooltip.top="'SLE6000 ventilator'" aria-label="SLE6000 ventilator">
               <i class="pi pi-tablet"></i>
             </Tab>
             <Tab value="docs" data-tour="tab.viz.docs" v-tooltip.top="'Documentation'" aria-label="Documentation">
@@ -494,7 +483,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <TabPanel v-if="showPanel('builder')" value="builder">
               <PatientBuilderPanel />
             </TabPanel>
-            <TabPanel v-if="showPanel('sle6000')" value="sle6000">
+            <TabPanel value="sle6000">
               <Sle6000Screen />
             </TabPanel>
             <TabPanel value="docs">
@@ -511,9 +500,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </Tab>
             <Tab value="monitor" data-tour="tab.monitor.monitor" v-tooltip.top="'Patient monitor'" aria-label="Patient monitor">
               <i class="pi pi-desktop"></i>
-            </Tab>
-            <Tab value="ventilator" data-tour="tab.monitor.ventilator" v-tooltip.top="'Ventilator graphs'" aria-label="Ventilator graphs">
-              <i class="pi pi-cloud"></i>
             </Tab>
           </TabList>
           <TabPanels>
@@ -681,9 +667,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 min-height="260px"
                 :highlight="tour.monitorHighlight.value"
               />
-            </TabPanel>
-            <TabPanel value="ventilator">
-              <VentilatorScope data-tour="vent.scope" height="35vh" min-height="260px" />
             </TabPanel>
           </TabPanels>
         </Tabs>

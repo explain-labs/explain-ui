@@ -9,7 +9,7 @@
 | `types.ts` | Shell-side TypeScript mirrors of the bus shapes: `ChartFrame`, `AnimFrame`, `AnimComponent`, `AnimLayout`, `ChannelsPayload`, and the `RendererAdapter` contract |
 | `ChartRenderer.ts` | uPlot adapter for the fast chart channel — rolling-window strip chart, 1–2 series, shared/split axes, lock/auto Y, area fill, CSV snapshot |
 | `LoopRenderer.ts` | Raw-canvas X-Y "loop" plotter (e.g. PV loop): one chart signal against another parametrically; polyline, not uPlot |
-| `MonitorRenderer.ts` | Bedside-monitor sweep renderer — stacked waveform lanes with a shared sweep head + big slow-stream numerics gutter. Reused by `Monitor.vue` and `VentilatorScope.vue` |
+| `MonitorRenderer.ts` | Bedside-monitor sweep renderer — stacked waveform lanes with a shared sweep head + big slow-stream numerics gutter. Used by `Monitor.vue` |
 | `DiagramRenderer.ts` | PixiJS v8 adapter for the sprite circulation diagram (viewer + editor): compartments scaled by volume, tinted by `to2`; connectors with streaming flow dots |
 | `diagramConstants.ts` | Shared editor constants: `PICTOS`, `PATH_TYPES`, `LAYOUT_PATCH_WHITELIST` |
 
@@ -152,7 +152,7 @@ Viewer **and** editor for the circulation diagram. Lazily imported by `Diagram.v
 
 - **Shared, additive fast watchlist.** The fast watchlist is global (PV loop's LV props, the always-on ECG counters, other charts' picks all live there). `ChartRenderer` therefore defaults `visible = []` and draws **nothing** until the host calls `setVisible`; signal resolution is by name against `slots`, so a series simply doesn't appear until its watch is applied.
 - **`anim.frame` is reused in shared mode.** The diagram smooths tint across frames using its own `cr/cg/cb` fields, but any adapter that retains raw frame values must copy them — the buffer is the reader's scratch.
-- **MonitorRenderer is shared.** Both `Monitor.vue` and `VentilatorScope.vue` instantiate the same class with different `lanes`; it has no monitor-specific assumptions beyond the `MonitorLane` shape.
+- **MonitorRenderer is generic.** `Monitor.vue` instantiates it with its `lanes`; it has no monitor-specific assumptions beyond the `MonitorLane` shape, so another host can reuse it with different lanes.
 - **Loops use canvas, not uPlot.** A PV loop isn't monotonic in x, so uPlot can't draw it; `LoopRenderer` strokes a raw polyline and autoscales each frame.
 - **Width-keyed buffers reset on resize.** `MonitorRenderer`'s column store and the diagram's geometry are recomputed on `ResizeObserver` ticks; the monitor clears its sweep history on a window change.
 - **Pixi is lazy.** `DiagramRenderer` is `await import(...)`-ed in `Diagram.vue`; never static-import it into the main bundle. `init()` is async and must complete before `onFrame` does anything (guarded by `ready`).

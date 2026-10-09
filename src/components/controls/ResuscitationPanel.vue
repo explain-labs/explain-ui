@@ -5,7 +5,7 @@ import ToggleSwitch from "primevue/toggleswitch";
 import Panel from "primevue/panel";
 import { useExplain } from "@/composables/useExplain";
 
-// Bespoke CPR / resuscitation console, modelled on VentilatorPanel & EclsPanel.
+// Bespoke CPR / resuscitation console, modelled on EclsPanel.
 // Enable/disable goes through switch_cpr() (call()) — NOT a plain prop write —
 // because switching CPR on also takes over the ventilator (switch_ventilator +
 // set_pc using the vent_pres_* / vent_insp_time props) and suspends spontaneous
