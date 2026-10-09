@@ -20,6 +20,7 @@ import {
   interlocks,
   clampParam,
   formatParam,
+  isHfo,
   WAVES,
   LOOPS,
   loadLayout,
@@ -252,12 +253,13 @@ function applyLayout() {
   const l = layout.value;
   const shownWaves = l.kind === "loops" ? [l.loopWave] : l.waves;
   renderer?.setHidden(WAVES.map((w, i) => (shownWaves.includes(w) ? -1 : i)).filter((i) => i >= 0));
-  renderer?.setFilled(l.filled);
+  renderer?.setFilled(l.filled && !isHfo(liveMode.value)); // HFO traces are lines on the device
   loopA?.setConfig(LOOPS[l.primary]);
   loopB?.setConfig(LOOPS[l.secondary]);
   setSaved(null);
   capture.value = "none";
 }
+watch(liveMode, (m) => renderer?.setFilled(layout.value.filled && !isHfo(m)));
 function confirmLayout(l: SleLayout) {
   layout.value = l;
   saveLayout(l);
@@ -368,8 +370,10 @@ const PALETTE = {
   zero: T.zero,
   sweep: T.sweep,
 };
-// the loops' breath edges (inspiration counter) and HFO cycle edges (oscillator phase)
-const FAST_PATHS = [...CHANNELS.map((c) => c.signal), "Ventilator.ncc_insp", "Ventilator._hfo_phase"];
+// the loops' breath edges (inspiration counter) and HFO cycle edges (oscillator phase); the
+// patient-triggered inspirations drawn yellow (a trigger, not a mandatory breath, in inspiration)
+const TRIGGER_MARK = ["Ventilator.triggered_breath", "Ventilator._mandatory_breath", "Ventilator._inspiration"];
+const FAST_PATHS = [...CHANNELS.map((c) => c.signal), "Ventilator.ncc_insp", "Ventilator._hfo_phase", ...TRIGGER_MARK];
 
 function rewatch() {
   watchProps(FAST_PATHS);
@@ -389,6 +393,7 @@ watch(modelReady, (ready) => {
 let clockTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   renderer = new Sle6000Renderer(wave.value!, CHANNELS, PALETTE, 6);
+  renderer.setMark(TRIGGER_MARK, ([trig, mand, insp]) => trig > 0.5 && mand < 0.5 && insp > 0.5, T.triggered);
   addRenderer(renderer);
   const loopColors = { active: T.loopActive, saved: T.loopSaved };
   loopA = new SleLoopRenderer(loopAEl.value!, LOOPS[layout.value.primary], PALETTE, loopColors);

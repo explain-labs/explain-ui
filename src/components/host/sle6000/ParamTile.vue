@@ -114,7 +114,7 @@ onBeforeUnmount(cancel);
   height: 108px;
   border-radius: 8px;
   border: 1px solid #000;
-  background: linear-gradient(180deg, #55585d 0%, #3a3c41 100%);
+  background: var(--sle-button);
   color: #f2f2f2;
   user-select: none;
   touch-action: none;
@@ -143,7 +143,10 @@ onBeforeUnmount(cancel);
   height: calc(100% - 8px);
 }
 .disc {
-  fill: #1c1d20;
+  fill: var(--sle-disc);
+}
+.preview .disc {
+  fill: #000;
 }
 .selected .disc {
   fill: #d9dadc;

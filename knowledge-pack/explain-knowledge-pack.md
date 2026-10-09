@@ -3533,6 +3533,8 @@ The realtime loop flips `model.DataCollector.rt_active = true` on `start()` and 
 | `_channels` / `_on_chart_registry` | `null` | non-enumerable (must not be structure-cloned with the model graph) |
 | `registry_version`, `chart_slots`, `_chart_row` | — | typed-transport slot map / reusable Float64 scratch row |
 
+On the typed path every slot is a number: a boolean prop is written as 1 / 0 (so a flag such as `Ventilator.triggered_breath` can drive a renderer), and any other non-number as 0.
+
 The two ECG entries (`ncc_atrial`, `ncc_ventricular`) are constructed in the constructor and pushed onto `watch_list` immediately — see [Notes](#notes--caveats).
 
 ## Key methods
@@ -27145,7 +27147,9 @@ export default class Datacollector {
             if (parameter.prop2 !== null) {
               v = v ? v[parameter.prop2] || 0 : 0;
             }
-            value = typeof v === "number" ? v : 0;
+            // booleans as 1 / 0 (a flag on a chart, e.g. Ventilator.triggered_breath); other
+            // non-numbers as 0
+            value = typeof v === "number" ? v : typeof v === "boolean" ? (v ? 1 : 0) : 0;
           }
           row[i + 1] = value;
         }

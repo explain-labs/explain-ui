@@ -121,14 +121,22 @@ and is the app's only ventilator UI.
   `setCssScale` so the canvas backs the real pixel size inside the scaled frame.
 
 **Colours.** The IFU draws the screen as grey line art, but the device has SLE's dark, low-glare
-"Lunar" interface. Its colours are sampled by eye from vendor product photos (the GE HealthCare
-SLE6000 product page, and the Inspiration Healthcare SLE6000 N/C/H brochure with SIMV + VTV and HFOV
-screens). They live in one palette, `sle6000/sleTheme.ts`, which the frame applies as `--sle-*` CSS
-variables and passes to the renderer:
-- black screen, with dark-grey header strips, buttons and tiles
-- pressure trace slate-teal, filled; flow bright green; volume teal, filled; red sweep head
-- tile arcs: time light blue, pressure/volume amber, O2 green, sensitivities white
-- a yellow alarm-mute outline
+"Lunar" interface. The greys, traces and arcs are sampled (pixel modes) from the screen captures in
+the SLE6000 brochure (`SLE6000_screens.pdf`, gitignored: SIMV, HFOV, NIPPV Tr., loops and trends
+screens); the rest by eye from the GE HealthCare product page and the Inspiration Healthcare N/C/H
+brochure. They live in one palette, `sle6000/sleTheme.ts`, which the frame applies as `--sle-*` CSS
+variables and passes to the renderers:
+- a black screen with one neutral mid-grey (#4b4a4a) for the header strips, buttons, tiles and the
+  monitored-value boxes, with light captions; a tile's value sits on that grey inside a black arc
+  ring;
+- light teal-grey traces over a dark teal fill on all three channels, with a red sweep head. The
+  green line on the captures' flow channel is the trigger-level marker, not the trace;
+- in HFO the traces are lines only, as on the HFOV capture;
+- the inspiration of a patient-triggered breath is drawn **yellow** (`Sle6000Renderer.setMark` on
+  `triggered_breath`, `_mandatory_breath` and `_inspiration`; booleans reach the chart as 1/0 since
+  engine #43);
+- tile arcs: time light blue, pressure/volume orange, O2 green, sensitivities white;
+- a yellow alarm-mute outline.
 - white monitored values, each with a grey "label (unit)" under it
 
 The mode panel colours are an assumption, because no photo shows it open. The palette also reserves
