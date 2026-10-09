@@ -151,3 +151,77 @@ export const SLOW_PATHS = [
   ...SETTING_NAMES.map((k) => `Ventilator.sle_${k}`),
   ...new Set(ALL_MON.map((m) => m.path)),
 ];
+
+// ---- Layout (IFU §21.1.8, pp 145-146) ----------------------------------------------------------
+// Waveforms: up to two of the three waveforms off, filled or lines. Loops: one waveform, a primary
+// loop (V/P default) and a secondary loop (F/V default). Trends come in a later phase.
+export type WaveName = "pressure" | "flow" | "volume";
+export type LoopKind = "VP" | "FV" | "FP";
+export interface SleLayout {
+  kind: "waveforms" | "loops";
+  waves: WaveName[]; // Waveforms layout: the channels shown
+  filled: boolean;
+  loopWave: WaveName; // Loops layout: the waveform on top
+  primary: LoopKind;
+  secondary: LoopKind;
+}
+export const WAVES: WaveName[] = ["pressure", "flow", "volume"];
+export const WAVE_LABEL: Record<WaveName, string> = { pressure: "Pressure", flow: "Flow", volume: "Volume" };
+export const LOOP_LABEL: Record<LoopKind, string> = { VP: "V/P", FV: "F/V", FP: "F/P" };
+export const DEFAULT_LAYOUT: SleLayout = {
+  kind: "waveforms",
+  waves: ["pressure", "flow", "volume"],
+  filled: true,
+  loopWave: "pressure",
+  primary: "VP",
+  secondary: "FV",
+};
+
+// the axes of each loop (cmH2O -> mbar for pressure; flow l/min; volume ml)
+const AX = {
+  pressure: {
+    signal: "Ventilator.pres",
+    label: "Pressure (mbar)",
+    scale: 1 / 1.01972,
+    ranges: [[0, 10], [0, 20], [0, 30], [0, 40], [0, 60], [-5, 15], [-10, 20], [-10, 40], [-20, 60]] as [number, number][],
+  },
+  flow: {
+    signal: "Ventilator.flow",
+    label: "Flow (l/min)",
+    ranges: [[-5, 5], [-10, 10], [-20, 20], [-40, 40], [-80, 80], [-150, 150]] as [number, number][],
+  },
+  volume: {
+    signal: "Ventilator.vol",
+    label: "Volume (ml)",
+    ranges: [[0, 5], [0, 10], [0, 20], [0, 40], [0, 80], [0, 150], [-5, 5], [-5, 10], [-10, 20], [-20, 40], [-40, 80], [-100, 300]] as [number, number][],
+  },
+};
+// x against y as on the device: V/P is volume against pressure (pressure on x), F/V flow against
+// volume, F/P flow against pressure
+export const LOOPS = {
+  VP: { title: "Volume - Pressure", x: AX.pressure, y: AX.volume },
+  FV: { title: "Flow - Volume", x: AX.volume, y: AX.flow },
+  FP: { title: "Flow - Pressure", x: AX.pressure, y: AX.flow },
+};
+
+// the device "records the last layout selection" (p145): kept per viewer
+const LAYOUT_KEY = "sle6000.layout";
+export function loadLayout(): SleLayout {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (!raw) return { ...DEFAULT_LAYOUT };
+    const l = { ...DEFAULT_LAYOUT, ...JSON.parse(raw) } as SleLayout;
+    l.waves = l.waves.filter((w) => WAVES.includes(w));
+    if (!l.waves.length) l.waves = [...DEFAULT_LAYOUT.waves];
+    return l;
+  } catch {
+    return { ...DEFAULT_LAYOUT };
+  }
+}
+export function saveLayout(l: SleLayout) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+  } catch {
+    // private window or blocked storage: the layout only lasts the session
+  }
+}
