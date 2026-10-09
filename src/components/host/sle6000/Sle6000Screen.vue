@@ -838,7 +838,7 @@ button:disabled {
   border: 1px solid #000;
   border-radius: 6px;
   font-size: 13px;
-  font-style: italic;
+  text-transform: uppercase; /* capitals, upright, as on the device (ward photo) */
 }
 .sle-side.on {
   background: var(--sle-text);
@@ -858,7 +858,11 @@ button:disabled {
   border: 1px solid #000;
   border-radius: 8px;
   font-size: 13px;
-  font-style: italic;
+}
+/* menu buttons in capitals; Manual Breath / Sigh stays as written, as on the device */
+.sle-extra-btn,
+.sle-oscpause {
+  text-transform: uppercase;
 }
 .sle-extra-btn {
   top: 540px;
