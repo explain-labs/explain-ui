@@ -34,9 +34,17 @@ const factors = reactive<Record<string, number>>({});
 function scaleFactor(task: CommonTask): number {
   return factors[task.id] ?? currentScaleFactor(task.lever, modelState.value) ?? 1;
 }
+// The same for setProp/call levers, per instance ("taskId:instance"): the engine
+// applies them on its TaskScheduler (a setProp tweens over 1 s), after the
+// refreshState() that follows the click, so without this the readout lagged one
+// click behind and the next click stepped from the stale value again.
+const pending = reactive<Record<string, number>>({});
 // a (re)build — load, revert, saved state — starts from the new snapshot
 watch(modelReady, (ready) => {
-  if (!ready) for (const k of Object.keys(factors)) delete factors[k];
+  if (!ready) {
+    for (const k of Object.keys(factors)) delete factors[k];
+    for (const k of Object.keys(pending)) delete pending[k];
+  }
 });
 // once a snapshot shows what we sent, let the snapshot lead again (so a later
 // change from elsewhere — the bot, the model editor — shows up here)
@@ -45,6 +53,12 @@ watch(modelState, (st) => {
     if (!(task.id in factors)) continue;
     const f = currentScaleFactor(task.lever, st);
     if (f != null && Math.abs(f - factors[task.id]) < 1e-9) delete factors[task.id];
+  }
+  for (const key of Object.keys(pending)) {
+    const [id, inst] = key.split(":");
+    const task = COMMON_TASKS.find((t) => t.id === id);
+    const v = task ? snapshotValue(inst, task) : NaN;
+    if (!task || Math.abs(v - pending[key]) <= 1e-9 * Math.max(1, Math.abs(pending[key]))) delete pending[key];
   }
 });
 // Per-task step, in the field the user types into: a PERCENT for factor tasks
@@ -91,7 +105,9 @@ function resolveInstances(task: CommonTask): string[] {
 // the prop holding a setProp/call lever's current value
 const readTarget = (task: CommonTask) =>
   task.lever.kind === "call" ? task.lever.read : task.lever.kind === "setProp" ? task.lever.target : "";
-const current = (inst: string, task: CommonTask) => Number(findInstance(models(), inst)?.[readTarget(task)]);
+const snapshotValue = (inst: string, task: CommonTask) => Number(findInstance(models(), inst)?.[readTarget(task)]);
+// what this panel last sent, until the snapshot shows it; else the snapshot value
+const current = (inst: string, task: CommonTask) => pending[`${task.id}:${inst}`] ?? snapshotValue(inst, task);
 
 // A task is shown when its lever can act on the current scenario. Scale groups are
 // topology-robust (ModelScaler skips missing components) so they always show;
@@ -136,7 +152,10 @@ function nudge(task: CommonTask, dir: NudgeDirection) {
     // absolute stepping through the setter (it recomputes what depends on the value)
     for (const inst of resolveInstances(task)) {
       const cur = current(inst, task);
-      if (Number.isFinite(cur)) call(`${inst}.${task.lever.fn}`, [nextAbsoluteValue(cur, eff, dir)]);
+      if (!Number.isFinite(cur)) continue;
+      const next = nextAbsoluteValue(cur, eff, dir);
+      call(`${inst}.${task.lever.fn}`, [next]);
+      pending[`${task.id}:${inst}`] = next;
     }
   } else {
     const { target, field } = task.lever;
@@ -147,9 +166,13 @@ function nudge(task: CommonTask, dir: NudgeDirection) {
       const next =
         task.mode === "absolute" ? nextAbsoluteValue(cur, eff, dir) : nextSetPropValue(cur, eff, dir);
       setProp(`${inst}.${target}`, next);
+      pending[`${task.id}:${inst}`] = next;
     }
   }
   refreshState();
+  // setProp/call land on the TaskScheduler (a setProp tweens over 1 s): fetch the
+  // state again once they have, so the snapshot catches up with `pending`
+  if (task.lever.kind !== "scale") setTimeout(refreshState, 1200);
 }
 
 function resetScale(task: CommonTask) {
