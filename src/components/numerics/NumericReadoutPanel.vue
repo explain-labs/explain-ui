@@ -294,9 +294,9 @@ function removeSecondProp(param: MonitorParam) {
         <div :class="compact ? 'flex flex-col leading-none' : 'flex items-baseline gap-1'">
           <span
             class="font-semibold tabular-nums leading-none"
-            :class="compact ? 'text-sm' : 'text-lg'"
+            :class="compact ? 'text-lg' : 'text-xl'"
           >{{ fmt(p) }}</span>
-          <span class="text-[10px] opacity-50">{{ p.unit }}</span>
+          <span class="text-[11px] opacity-50">{{ p.unit }}</span>
         </div>
         <template v-if="!compact">
           <span v-if="rangeLabel(p)" class="text-[10px] opacity-40 tabular-nums leading-none">
