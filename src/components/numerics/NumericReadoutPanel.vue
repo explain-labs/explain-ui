@@ -75,6 +75,13 @@ function scaled(param: MonitorParam, raw: number): number {
   return scaleValue(param, raw, weight.value);
 }
 
+// value size: one step down for long values in the narrow compact cards (systolic/diastolic
+// pairs like 9.5/75.5), so they never overflow a 4-column card
+function valueClass(p: MonitorParam): string {
+  if (!props.compact) return "text-2xl";
+  return fmt(p).length > 6 ? "text-lg" : "text-xl";
+}
+
 function fmt(param: MonitorParam): string {
   return formatParam(param, latest.value, weight.value);
 }
@@ -294,7 +301,7 @@ function removeSecondProp(param: MonitorParam) {
         <div :class="compact ? 'flex flex-col leading-none' : 'flex items-baseline gap-1'">
           <span
             class="font-semibold tabular-nums leading-none"
-            :class="compact ? 'text-lg' : 'text-xl'"
+            :class="valueClass(p)"
           >{{ fmt(p) }}</span>
           <span class="text-[11px] opacity-50">{{ p.unit }}</span>
         </div>
