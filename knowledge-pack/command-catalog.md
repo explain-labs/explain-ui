@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **448 settable params**, **40 functions**
-(+ 58 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **452 settable params**, **48 functions**
+(+ 62 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -91,6 +91,10 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ventilator.leak_size` — Leak around the endotracheal tube — directional nudge lever
 - `setProp` `VENT_ETTUBE.r_factor_ps` — Endotracheal tube obstruction (secretions, kink) — directional nudge lever
 - `call` `Ventilator.set_temp` — Humidifier temperature — directional nudge lever (arg: new value, °C)
+- `call` `Ventilator.set_tube_position` — Endotracheal tube position — airway event (arg: one of "trachea" / "right_main" / "extubated")
+- `call` `Ventilator.set_circuit_connected` — Ventilator circuit connection — airway event (arg: one of true / false)
+- `call` `Respiration.set_airway_obstructed_left` — Bronchial plug, left main bronchus — airway event (arg: one of false / true)
+- `call` `Respiration.set_airway_obstructed_right` — Bronchial plug, right main bronchus — airway event (arg: one of false / true)
 
 ---
 
@@ -620,6 +624,8 @@ _setProp_:
 - `atelectasis_left` — atelectasis left lung (% collapsed) (number, % collapsed, range 0–90)
 - `atelectasis_right` — atelectasis right lung (% collapsed) (number, % collapsed, range 0–90)
 - `atelectasis_recruitable` — atelectasis recruitable (off = obstructive) (boolean, off = obstructive)
+- `airway_obstructed_left` — left main bronchus obstructed (plug) (boolean, plug)
+- `airway_obstructed_right` — right main bronchus obstructed (plug) (boolean, plug)
 - `el_lungs_factor` — lung elastance factor (factor, range -10–10) _(factors)_
 - `el_thorax_factor` — thorax elastance factor (factor, range -10–10) _(factors)_
 - `res_upper_airways_factor` — upper airway resistance factor (factor, range -100–100) _(factors)_
@@ -632,7 +638,15 @@ _setProp_:
 - `atelectasis_close_sd` — atelectasis closing pressure sd (cmH2O) (number, cmH2O, range 0.5–10) _(advanced)_
 - `atelectasis_tau_open` — atelectasis recruitment time constant (s) (number, s, range 0.5–60) _(advanced)_
 - `atelectasis_tau_close` — atelectasis derecruitment time constant (s) (number, s, range 1–600) _(advanced)_
+- `atelectasis_resorb_tau_air` — resorption time constant, trapped air (s) (number, s, range 10–36000) _(advanced)_
+- `atelectasis_resorb_tau_o2` — resorption time constant, trapped oxygen (s) (number, s, range 10–36000) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
+
+_call_:
+- `set_atelectasis_left(atelectasis_left (number, 0–0.9, range 0–0.9))` — atelectasis left lung (set collapsed fraction)
+- `set_atelectasis_right(atelectasis_right (number, 0–0.9, range 0–0.9))` — atelectasis right lung (set collapsed fraction)
+- `set_airway_obstructed_left(airway_obstructed_left (boolean))` — obstruct left main bronchus
+- `set_airway_obstructed_right(airway_obstructed_right (boolean))` — obstruct right main bronchus
 
 ### Resuscitation
 
@@ -682,6 +696,8 @@ _call_:
 - `set_ettube_length(ettube_length (number, mm))` — endotracheal tube length (mm)
 - `set_humidity(humidity (number, range 0–1))` — humidity
 - `set_temp(temp (number, C, range 0–42))` — temperature (C)
+- `set_tube_position(tube_position (list, one of trachea/right_main/extubated))` — move the endotracheal tube
+- `set_circuit_connected(circuit_connected (boolean))` — connect / disconnect the circuit
 
 ### Surfactant
 
@@ -785,6 +801,8 @@ _call_:
 - `set_humidity(humidity (number, range 0–1))` — humidity
 - `set_temp(temp (number, C, range 0–42))` — temperature (C)
 - `trigger_breath()` — trigger a manual breath
+- `set_tube_position(tube_position (list, one of trachea/right_main/extubated))` — move the endotracheal tube
+- `set_circuit_connected(circuit_connected (boolean))` — connect / disconnect the circuit
 
 ---
 
@@ -837,6 +855,17 @@ physiological quantity LOWERS the lever — noted per task.
   - e.g. `{"op":"setProp","model":"VENT_ETTUBE","target":"r_factor_ps","value":<target in display units, or current×(1±50%) if shown>,"reason":"adjust Tube obstruction"}`
 - **Humidifier temperature** — call `Ventilator.set_temp` (current value `temp`), step ±1 °C, range 20–42. Temperature of the inspired gas from the heated humidifier.
   - e.g. `{"op":"call","model":"Ventilator","target":"set_temp","args":[<20–42 °C>],"reason":"set Humidifier temp"}`
+
+### Airway events
+
+- **Endotracheal tube position** — call `Ventilator.set_tube_position` (current value `tube_position`), choices `"trachea"` (Trachea), `"right_main"` (Right main), `"extubated"` (Extubated). While ventilating. Right main: all gas to the right lung, the left lung collapses by resorption (faster on O2); pull back and recruit it. Extubated: the ventilator blows into the room, the baby breathes on its own without PEEP (or not at all if apnoeic).
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_tube_position","args":[<"trachea" | "right_main" | "extubated">],"reason":"Tube"}`
+- **Ventilator circuit connection** — call `Ventilator.set_circuit_connected` (current value `circuit_connected`), choices `true` (Connected), `false` (Disconnected). While ventilating. Disconnected: circuit pressure falls to ~0, no PEEP, only the baby's own breaths through the tube.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_circuit_connected","args":[<true | false>],"reason":"Circuit"}`
+- **Bronchial plug, left main bronchus** — call `Respiration.set_airway_obstructed_left` (current value `airway_obstructed_left`), choices `false` (Open), `true` (Plugged). A plug in the left main bronchus: no gas in or out, and the trapped gas is absorbed, so the left lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_airway_obstructed_left","args":[<false | true>],"reason":"Bronchial plug L"}`
+- **Bronchial plug, right main bronchus** — call `Respiration.set_airway_obstructed_right` (current value `airway_obstructed_right`), choices `false` (Open), `true` (Plugged). A plug in the right main bronchus: no gas in or out, and the trapped gas is absorbed, so the right lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_airway_obstructed_right","args":[<false | true>],"reason":"Bronchial plug R"}`
 
 ### Vascular tone
 

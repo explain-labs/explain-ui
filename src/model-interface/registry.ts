@@ -6113,6 +6113,118 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 0,
       "ll": 1,
       "ul": 600
+    },
+    {
+      "caption": "atelectasis left lung (set collapsed fraction)",
+      "target": "set_atelectasis_left",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "collapsed fraction (0–0.9)",
+          "target": "atelectasis_left",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.05,
+          "rounding": 2,
+          "ll": 0,
+          "ul": 0.9
+        }
+      ]
+    },
+    {
+      "caption": "atelectasis right lung (set collapsed fraction)",
+      "target": "set_atelectasis_right",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "collapsed fraction (0–0.9)",
+          "target": "atelectasis_right",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.05,
+          "rounding": 2,
+          "ll": 0,
+          "ul": 0.9
+        }
+      ]
+    },
+    {
+      "caption": "left main bronchus obstructed (plug)",
+      "target": "airway_obstructed_left",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "right main bronchus obstructed (plug)",
+      "target": "airway_obstructed_right",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "obstruct left main bronchus",
+      "target": "set_airway_obstructed_left",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "obstructed",
+          "target": "airway_obstructed_left",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "caption": "obstruct right main bronchus",
+      "target": "set_airway_obstructed_right",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "obstructed",
+          "target": "airway_obstructed_right",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "caption": "resorption time constant, trapped air (s)",
+      "target": "atelectasis_resorb_tau_air",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 60,
+      "rounding": 0,
+      "ll": 10,
+      "ul": 36000
+    },
+    {
+      "caption": "resorption time constant, trapped oxygen (s)",
+      "target": "atelectasis_resorb_tau_o2",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 10,
+      "rounding": 0,
+      "ll": 10,
+      "ul": 36000
     }
   ],
   "Resuscitation": [
@@ -7105,6 +7217,58 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "dynamic resistance (cmH2O/(L/s))",
       "factor": 1,
       "rounding": 0
+    },
+    {
+      "caption": "tube position (airway event)",
+      "target": "tube_position",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "circuit connected (airway event)",
+      "target": "circuit_connected",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "move the endotracheal tube",
+      "target": "set_tube_position",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "position",
+          "target": "tube_position",
+          "type": "list",
+          "custom_options": true,
+          "choices": [
+            "trachea",
+            "right_main",
+            "extubated"
+          ]
+        }
+      ]
+    },
+    {
+      "caption": "connect / disconnect the circuit",
+      "target": "set_circuit_connected",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "connected",
+          "target": "circuit_connected",
+          "type": "boolean"
+        }
+      ]
     }
   ],
   "Sle6000": [
@@ -7774,6 +7938,58 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "end-tidal co2 (mmHg)",
       "factor": 1,
       "rounding": 0
+    },
+    {
+      "caption": "tube position (airway event)",
+      "target": "tube_position",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "circuit connected (airway event)",
+      "target": "circuit_connected",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "move the endotracheal tube",
+      "target": "set_tube_position",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "position",
+          "target": "tube_position",
+          "type": "list",
+          "custom_options": true,
+          "choices": [
+            "trachea",
+            "right_main",
+            "extubated"
+          ]
+        }
+      ]
+    },
+    {
+      "caption": "connect / disconnect the circuit",
+      "target": "set_circuit_connected",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "connected",
+          "target": "circuit_connected",
+          "type": "boolean"
+        }
+      ]
     }
   ]
 };
