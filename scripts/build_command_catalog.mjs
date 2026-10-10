@@ -180,6 +180,7 @@ const leverDesc = (t) => {
     const groups = Array.isArray(t.lever.group) ? t.lever.group : [t.lever.group];
     return `scale ${groups.map((g) => `\`${g}\``).join(" + ")}`;
   }
+  if (t.lever.kind === "call") return `call \`${t.lever.model}.${t.lever.fn}\` (current value \`${t.lever.read}\`)`;
   return t.lever.resolveByType
     ? `setProp \`${t.lever.target}\` on each \`${t.lever.model}\` instance`
     : `setProp \`${t.lever.model}.${t.lever.target}\``;
@@ -188,6 +189,10 @@ const taskExample = (t) => {
   if (t.lever.kind === "scale") {
     const g = (Array.isArray(t.lever.group) ? t.lever.group : [t.lever.group])[0];
     return `{"op":"scale","group":"${g}","factor":<absolute, 1.0=baseline>,"reason":"${t.short} nudge"}`;
+  }
+  if (t.lever.kind === "call") {
+    const u = t.unit ? ` ${t.unit}` : "";
+    return `{"op":"call","model":"${t.lever.model}","target":"${t.lever.fn}","args":[<${num(t.min ?? 0)}–${num(t.max ?? 0)}${u}>],"reason":"set ${t.short}"}`;
   }
   const m = t.lever.resolveByType ? "<instance>" : t.lever.model;
   const u = dispUnit(t) ? ` ${dispUnit(t)}` : "";
@@ -211,7 +216,7 @@ const stepDesc = (t) => {
 const tasks = ["## Common tasks — directional nudges", ""];
 tasks.push(
   'Curated relative adjustments ("raise PVR 30%", "halve contractility"). Each maps onto an EXISTING',
-  "`setProp` or `scale` op — there is no special nudge op. Two resolution rules:",
+  "`setProp`, `scale` or `call` op — there is no special nudge op. Resolution rules:",
   "",
   "- **setProp levers** (a `*_factor_ps` factor or a plain number): if the field's value is shown in the",
   "  live monitor context, multiply by (1+step) to raise / 1/(1+step) to lower; otherwise set an ABSOLUTE",
@@ -223,6 +228,8 @@ tasks.push(
   "- **absolute setProp levers** (shunt sizes — PDA/foramen ovale/VSD): set an ABSOLUTE value in DISPLAY",
   "  units within the stated range; 0 = closed/none. The engine treats diameter 0 as a hard-closed fast",
   "  path, so open a closed shunt by setting a positive diameter (e.g. PDA 50 = ~half-open).",
+  "- **call levers** (ventilator tube size/length, humidifier temperature): call the setter with the",
+  "  ABSOLUTE new value within the stated range; the setter recomputes what depends on it.",
   "",
   "For inverse quantities (lung compliance ↔ elastance; preload ↔ unstressed volume) raising the",
   "physiological quantity LOWERS the lever — noted per task.",

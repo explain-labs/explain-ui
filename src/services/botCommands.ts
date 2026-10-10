@@ -15,6 +15,7 @@
 
 import { getInterfaceForType } from "@/model-interface/registry";
 import type { InterfaceField } from "@/model-interface/types";
+import { findInstance } from "./commonTasks";
 import { isAllowed, isDiagramAction, isScaleGroup, SCALE_GROUPS, type CommandOp, type DiagramAction } from "./botCommandAllowlist";
 import { LIVE_TARGETS } from "@explain/helpers/Calibrator";
 import { PICTOS, PATH_TYPES, LAYOUT_PATCH_WHITELIST } from "@/render/diagramConstants";
@@ -140,7 +141,8 @@ export function parseCommands(answer: string): ParseResult {
 // ---- validation helpers ----
 
 function fieldsFor(modelName: string, modelState: any): InterfaceField[] | null {
-  const type = modelState?.models?.[modelName]?.model_type;
+  // a sub-model of a composite (e.g. the ventilator's VENT_ETTUBE) sits in its parent's components
+  const type = findInstance(modelState?.models ?? {}, modelName)?.model_type;
   if (!type) return null;
   return getInterfaceForType(type);
 }
