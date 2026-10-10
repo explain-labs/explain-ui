@@ -237,7 +237,7 @@ tasks.push(
 );
 const byCat = {};
 for (const t of COMMON_TASKS) (byCat[t.category] ??= []).push(t);
-for (const cat of Object.keys(byCat)) {
+for (const cat of Object.keys(TASK_CATEGORY_LABELS).filter((c) => byCat[c])) {
   tasks.push(`### ${TASK_CATEGORY_LABELS[cat] ?? cat}`, "");
   for (const t of byCat[cat]) {
     const inv = t.invert ? " _(inverse: raising the quantity lowers the lever)_" : "";
