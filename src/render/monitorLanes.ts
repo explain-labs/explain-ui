@@ -9,11 +9,13 @@ export type LaneId = "ecg" | "spo2_pre" | "spo2_post" | "abp" | "resp" | "co2";
 
 export type LaneDef = MonitorLane & { slow: string[] };
 
-// format a slow-stream value, "—" when absent
-const f = (n: Record<string, number>, p: string, d: number) => {
+// format a slow-stream value (times `scale`), "—" when absent
+const f = (n: Record<string, number>, p: string, d: number, scale = 1) => {
   const v = n[p];
-  return typeof v === "number" ? v.toFixed(d) : "—";
+  return typeof v === "number" ? (v * scale).toFixed(d) : "—";
 };
+// the engine reports pressures in mmHg; the CO2 lane shows kPa, as on a European NICU monitor
+const KPA_PER_MMHG = 0.133322;
 
 export const LANE_DEFS: Record<LaneId, LaneDef> = {
   ecg: {
@@ -70,7 +72,7 @@ export const LANE_DEFS: Record<LaneId, LaneDef> = {
     color: "#facc15",
     unit: "kPa",
     fill: true,
-    readNumeric: (n) => f(n, "Monitor.etco2", 1),
+    readNumeric: (n) => f(n, "Monitor.etco2", 1, KPA_PER_MMHG), // Monitor.etco2 is in mmHg
     slow: ["Monitor.etco2"],
   },
 };
