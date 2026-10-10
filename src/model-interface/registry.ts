@@ -5988,6 +5988,45 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 2,
       "ll": -100,
       "ul": 100
+    },
+    {
+      "caption": "atelectasis left lung (% collapsed)",
+      "target": "atelectasis_left",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "factor": 100,
+      "delta": 5,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 90
+    },
+    {
+      "caption": "atelectasis right lung (% collapsed)",
+      "target": "atelectasis_right",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "factor": 100,
+      "delta": 5,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 90
+    },
+    {
+      "caption": "atelectasis hypoxic vasoconstriction (share diverted)",
+      "target": "atelectasis_hpv",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.05,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
     }
   ],
   "Resuscitation": [

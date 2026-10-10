@@ -205,6 +205,24 @@ export const COMMON_TASKS: CommonTask[] = [
     max: 10,
     help: "Up = bronchospasm / obstruction.",
   },
+  // Atelectasis: the collapsed fraction of one lung. Respiration couples the lost
+  // aerated volume, compliance and gas-exchange surface with the shunting of the
+  // collapsed units' blood; PEEP does not reopen it (static).
+  ...(["left", "right"] as const).map(
+    (side): CommonTask => ({
+      id: `atelectasis_${side}`,
+      label: `Atelectasis ${side} lung (collapsed fraction)`,
+      short: `Atelectasis ${side === "left" ? "L" : "R"}`,
+      category: "lung_mechanics",
+      lever: { kind: "call", model: "Respiration", fn: `set_atelectasis_${side}`, read: `atelectasis_${side}` },
+      mode: "absolute",
+      step: 0.1,
+      steps: [0.05, 0.1, 0.2],
+      min: 0,
+      max: 0.9,
+      help: `Fraction of the ${side} lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. PEEP does not reopen it.`,
+    }),
+  ),
   // --- Gas exchange ---
   {
     id: "o2_diffusion",

@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **438 settable params**, **40 functions**
-(+ 56 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **441 settable params**, **40 functions**
+(+ 58 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -81,6 +81,8 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `revert`  — undo all live changes — reload the patient as it was loaded
 - `tune`  — tune the live model to target value(s): map, sys+dia (together), co, hr, pap_m/pap_s, po2/spo2, pco2, be/ph, blood_volume (Full scope)
 - `loadDefinition`  — load+run a bot-built calibrated patient (Full scope; definition rides in response.artifact)
+- `call` `Respiration.set_atelectasis_left` — Atelectasis left lung (collapsed fraction) — directional nudge lever (arg: new value)
+- `call` `Respiration.set_atelectasis_right` — Atelectasis right lung (collapsed fraction) — directional nudge lever (arg: new value)
 - `setProp` `Pda.diameter_relative` — Ductus arteriosus (PDA) size — directional nudge lever
 - `setProp` `Shunts.diameter_fo` — Foramen ovale size — directional nudge lever
 - `setProp` `Shunts.diameter_vsd` — Ventricular septal defect (VSD) size — directional nudge lever
@@ -615,11 +617,14 @@ _setProp_:
 ### Respiration
 
 _setProp_:
+- `atelectasis_left` — atelectasis left lung (% collapsed) (number, % collapsed, range 0–90)
+- `atelectasis_right` — atelectasis right lung (% collapsed) (number, % collapsed, range 0–90)
 - `el_lungs_factor` — lung elastance factor (factor, range -10–10) _(factors)_
 - `el_thorax_factor` — thorax elastance factor (factor, range -10–10) _(factors)_
 - `res_upper_airways_factor` — upper airway resistance factor (factor, range -100–100) _(factors)_
 - `res_lower_airways_factor` — lower airway resistance factor (factor, range -100–100) _(factors)_
 - `gex_factor` — gasexchange factor (factor, range -100–100) _(factors)_
+- `atelectasis_hpv` — atelectasis hypoxic vasoconstriction (share diverted) (number, share diverted, range 0–1) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 ### Resuscitation
@@ -803,6 +808,10 @@ physiological quantity LOWERS the lever — noted per task.
   - e.g. `{"op":"scale","group":"left_lung_elastances","factor":<absolute, 1.0=baseline>,"reason":"Lung compliance nudge"}`
 - **Airway resistance** — scale `airway_lower_resistances`, default ±30%. Up = bronchospasm / obstruction.
   - e.g. `{"op":"scale","group":"airway_lower_resistances","factor":<absolute, 1.0=baseline>,"reason":"Airway resistance nudge"}`
+- **Atelectasis left lung (collapsed fraction)** — call `Respiration.set_atelectasis_left` (current value `atelectasis_left`), step ±0.1, range 0–0.9. Fraction of the left lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. PEEP does not reopen it.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_atelectasis_left","args":[<0–0.9>],"reason":"set Atelectasis L"}`
+- **Atelectasis right lung (collapsed fraction)** — call `Respiration.set_atelectasis_right` (current value `atelectasis_right`), step ±0.1, range 0–0.9. Fraction of the right lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. PEEP does not reopen it.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_atelectasis_right","args":[<0–0.9>],"reason":"set Atelectasis R"}`
 
 ### Ventilation drive
 
