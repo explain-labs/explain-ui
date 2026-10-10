@@ -25,7 +25,7 @@ Rules of thumb:
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
 Snapshot: **45 model_types**, **438 settable params**, **40 functions**
-(+ 51 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+(+ 56 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -84,6 +84,11 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Pda.diameter_relative` — Ductus arteriosus (PDA) size — directional nudge lever
 - `setProp` `Shunts.diameter_fo` — Foramen ovale size — directional nudge lever
 - `setProp` `Shunts.diameter_vsd` — Ventricular septal defect (VSD) size — directional nudge lever
+- `call` `Ventilator.set_ettube_diameter` — Endotracheal tube internal diameter — directional nudge lever (arg: new value, mm)
+- `call` `Ventilator.set_ettube_length` — Endotracheal tube length — directional nudge lever (arg: new value, mm)
+- `setProp` `Ventilator.leak_size` — Leak around the endotracheal tube — directional nudge lever
+- `setProp` `VENT_ETTUBE.r_factor_ps` — Endotracheal tube obstruction (secretions, kink) — directional nudge lever
+- `call` `Ventilator.set_temp` — Humidifier temperature — directional nudge lever (arg: new value, °C)
 
 ---
 
@@ -774,7 +779,7 @@ _call_:
 ## Common tasks — directional nudges
 
 Curated relative adjustments ("raise PVR 30%", "halve contractility"). Each maps onto an EXISTING
-`setProp` or `scale` op — there is no special nudge op. Two resolution rules:
+`setProp`, `scale` or `call` op — there is no special nudge op. Resolution rules:
 
 - **setProp levers** (a `*_factor_ps` factor or a plain number): if the field's value is shown in the
   live monitor context, multiply by (1+step) to raise / 1/(1+step) to lower; otherwise set an ABSOLUTE
@@ -786,6 +791,8 @@ Curated relative adjustments ("raise PVR 30%", "halve contractility"). Each maps
 - **absolute setProp levers** (shunt sizes — PDA/foramen ovale/VSD): set an ABSOLUTE value in DISPLAY
   units within the stated range; 0 = closed/none. The engine treats diameter 0 as a hard-closed fast
   path, so open a closed shunt by setting a positive diameter (e.g. PDA 50 = ~half-open).
+- **call levers** (ventilator tube size/length, humidifier temperature): call the setter with the
+  ABSOLUTE new value within the stated range; the setter recomputes what depends on it.
 
 For inverse quantities (lung compliance ↔ elastance; preload ↔ unstressed volume) raising the
 physiological quantity LOWERS the lever — noted per task.
@@ -846,6 +853,19 @@ physiological quantity LOWERS the lever — noted per task.
 
 - **Blood volume** — scale `blood_volume`, default ±10%. Down = hemorrhage; up = fluid overload.
   - e.g. `{"op":"scale","group":"blood_volume","factor":<absolute, 1.0=baseline>,"reason":"Blood volume nudge"}`
+
+### Ventilator
+
+- **Endotracheal tube internal diameter** — call `Ventilator.set_ettube_diameter` (current value `ettube_diameter`), step ±0.5 mm, range 2–9. Tube resistance rises steeply as the tube narrows (about d⁻⁴); the tube lumen is dead space too.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_diameter","args":[<2–9 mm>],"reason":"set ETT size"}`
+- **Endotracheal tube length** — call `Ventilator.set_ettube_length` (current value `ettube_length`), step ±10 mm, range 50–300. Resistance and tube dead space grow with length (e.g. an uncut tube).
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_length","args":[<50–300 mm>],"reason":"set ETT length"}`
+- **Leak around the endotracheal tube** — setProp `Ventilator.leak_size`, step ±0.1 mm, range 0–3. Gap around an uncuffed tube. 0 = no leak. The SLE6000 compensates leaks up to 35 %; above that it autotriggers.
+  - e.g. `{"op":"setProp","model":"Ventilator","target":"leak_size","value":<0–3 mm; 0=closed/none>,"reason":"set Tube leak"}`
+- **Endotracheal tube obstruction (secretions, kink)** — setProp `VENT_ETTUBE.r_factor_ps`, default ±50%. Multiplies the tube resistance. Up = secretions / kinked tube: same pressures, less volume.
+  - e.g. `{"op":"setProp","model":"VENT_ETTUBE","target":"r_factor_ps","value":<target in display units, or current×(1±50%) if shown>,"reason":"adjust Tube obstruction"}`
+- **Humidifier temperature** — call `Ventilator.set_temp` (current value `temp`), step ±1 °C, range 20–42. Temperature of the inspired gas from the heated humidifier.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_temp","args":[<20–42 °C>],"reason":"set Humidifier temp"}`
 
 ---
 

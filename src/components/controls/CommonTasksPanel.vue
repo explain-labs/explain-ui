@@ -8,6 +8,7 @@ import {
   COMMON_TASKS,
   TASK_CATEGORY_LABELS,
   currentScaleFactor,
+  findInstance,
   nextAbsoluteValue,
   nextScaleFactor,
   nextSetPropValue,
@@ -19,7 +20,7 @@ import {
 // Quick-action directional nudges ("raise PVR 30%", "halve contractility").
 // Human surface like ScalerPanel — routes straight through useExplain (not the
 // bot validate gate). The catalog (COMMON_TASKS) is shared with the bot.
-const { scale, setProp, modelState, refreshState, modelReady } = useExplain();
+const { scale, setProp, call, modelState, refreshState, modelReady } = useExplain();
 
 // Current factor of each SCALE lever. ModelScaler writes most groups as an
 // absolute `*_factor_scaling_ps` on every component, which IS in the state
@@ -68,18 +69,28 @@ function models(): Record<string, any> {
   return (modelState.value as any)?.models ?? {};
 }
 
-// Resolve a setProp lever to the live instance name(s) carrying its target prop.
-// Singleton levers use the model name directly; resolveByType levers match every
+// Resolve a setProp/call lever to the live instance name(s) carrying its prop.
+// Singleton levers use the model name directly (also a sub-model of a composite,
+// e.g. VENT_ETTUBE inside the Ventilator); resolveByType levers match every
 // instance of that model_type (e.g. GasExchanger → GASEX_LL/RL).
 function resolveInstances(task: CommonTask): string[] {
-  if (task.lever.kind !== "setProp") return [];
-  const { model, target, resolveByType } = task.lever;
+  if (task.lever.kind === "scale") return [];
   const m = models();
+  if (task.lever.kind === "call") {
+    const inst = findInstance(m, task.lever.model);
+    return inst && task.lever.read in inst ? [task.lever.model] : [];
+  }
+  const { model, target, resolveByType } = task.lever;
   if (resolveByType) {
     return Object.keys(m).filter((n) => m[n]?.model_type === model && target in (m[n] ?? {}));
   }
-  return m[model] && target in m[model] ? [model] : [];
+  const inst = findInstance(m, model);
+  return inst && target in inst ? [model] : [];
 }
+// the prop holding a setProp/call lever's current value
+const readTarget = (task: CommonTask) =>
+  task.lever.kind === "call" ? task.lever.read : task.lever.kind === "setProp" ? task.lever.target : "";
+const current = (inst: string, task: CommonTask) => Number(findInstance(models(), inst)?.[readTarget(task)]);
 
 // A task is shown when its lever can act on the current scenario. Scale groups are
 // topology-robust (ModelScaler skips missing components) so they always show;
@@ -107,10 +118,10 @@ function readout(task: CommonTask): string {
   if (task.lever.kind === "scale") return `×${scaleFactor(task).toFixed(2)}`;
   const inst = resolveInstances(task)[0];
   if (!inst) return "";
-  const v = Number(models()[inst]?.[task.lever.target]);
+  const v = current(inst, task);
   if (!Number.isFinite(v)) return "";
-  const unit = task.unit ? ` ${task.unit}` : task.lever.field === "factor" ? "×" : "";
-  return task.lever.field === "factor" ? `×${v.toFixed(2)}` : `${v.toFixed(2)}${unit}`;
+  const isFactor = task.lever.kind === "setProp" && task.lever.field === "factor";
+  return isFactor ? `×${v.toFixed(2)}` : `${v.toFixed(2)}${task.unit ? ` ${task.unit}` : ""}`;
 }
 
 function nudge(task: CommonTask, dir: NudgeDirection) {
@@ -120,10 +131,16 @@ function nudge(task: CommonTask, dir: NudgeDirection) {
     const groups = Array.isArray(task.lever.group) ? task.lever.group : [task.lever.group];
     for (const g of groups) scale(g, next);
     factors[task.id] = next;
+  } else if (task.lever.kind === "call") {
+    // absolute stepping through the setter (it recomputes what depends on the value)
+    for (const inst of resolveInstances(task)) {
+      const cur = current(inst, task);
+      if (Number.isFinite(cur)) call(`${inst}.${task.lever.fn}`, [nextAbsoluteValue(cur, eff, dir)]);
+    }
   } else {
     const { target, field } = task.lever;
     for (const inst of resolveInstances(task)) {
-      const raw = Number(models()[inst]?.[target]);
+      const raw = current(inst, task);
       const cur = Number.isFinite(raw) ? raw : field === "factor" ? 1 : NaN;
       if (!Number.isFinite(cur)) continue;
       const next =

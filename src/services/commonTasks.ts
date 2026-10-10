@@ -20,6 +20,10 @@
 //     components, so the UI reads the current factor back from there
 //     (currentScaleFactor) and only tracks volume groups client-side. The bot
 //     treats `factor` as absolute.
+//   - call lever — the quantity has a setter that recomputes derived state (the ET
+//     tube's Rohrer coefficients follow its diameter), so writing the prop alone
+//     would not take effect. Read the current value from `read`, step it, and call
+//     the setter with the new value. Absolute stepping only.
 
 export type TaskCategory =
   | "vascular_tone"
@@ -30,17 +34,21 @@ export type TaskCategory =
   | "shunts"
   | "ventilation_drive"
   | "blood_acidbase"
-  | "metabolic_thermal";
+  | "metabolic_thermal"
+  | "ventilator";
 
 export type NudgeDirection = "up" | "down";
 
-// setProp lever: one readable prop on a model.
+// setProp lever: one readable prop on a model (a sub-model of a composite, e.g.
+//   the ventilator's VENT_ETTUBE, is found inside its parent's components).
 //   `model` is a singleton INSTANCE name (Circulation/Heart/…) unless
 //   `resolveByType` is set, in which case it's a model_type resolved to the
 //   actual instance(s) at runtime (and not Guided-allowlisted, since the
 //   instance name isn't fixed).
 // scale lever: one or more ModelScaler group(s); current factor read from the
 //   state snapshot where possible (UI) / absolute-from-1.0 (bot).
+// call lever: a singleton instance's setter `fn`, called with the new value;
+//   `read` is the prop holding the current value.
 export type Lever =
   | {
       kind: "setProp";
@@ -49,7 +57,8 @@ export type Lever =
       field: "factor" | "number";
       resolveByType?: boolean;
     }
-  | { kind: "scale"; group: string | string[] };
+  | { kind: "scale"; group: string | string[] }
+  | { kind: "call"; model: string; fn: string; read: string };
 
 export interface CommonTask {
   id: string; // stable id, e.g. "svr"
@@ -81,6 +90,7 @@ export const TASK_CATEGORY_LABELS: Record<TaskCategory, string> = {
   ventilation_drive: "Ventilation drive",
   blood_acidbase: "Blood & acid-base",
   metabolic_thermal: "Metabolic & thermal",
+  ventilator: "Ventilator",
 };
 
 // First-wave tasks. Steps default to a sensible ±% per quantity.
@@ -298,6 +308,78 @@ export const COMMON_TASKS: CommonTask[] = [
     max: 2,
     help: "Down = hemorrhage; up = fluid overload.",
   },
+  // --- Ventilator: the airway and circuit side, nothing that is set on the ventilator's
+  //     own screen. Hidden when the scenario has no ventilator ---
+  {
+    id: "ett_diameter",
+    label: "Endotracheal tube internal diameter",
+    short: "ETT size",
+    category: "ventilator",
+    // the setter recomputes the tube's Rohrer coefficients; writing ettube_diameter alone would not
+    lever: { kind: "call", model: "Ventilator", fn: "set_ettube_diameter", read: "ettube_diameter" },
+    mode: "absolute",
+    step: 0.5,
+    steps: [0.5, 1],
+    min: 2,
+    max: 9,
+    unit: "mm",
+    help: "Tube resistance rises steeply as the tube narrows (about d⁻⁴); the tube lumen is dead space too.",
+  },
+  {
+    id: "ett_length",
+    label: "Endotracheal tube length",
+    short: "ETT length",
+    category: "ventilator",
+    lever: { kind: "call", model: "Ventilator", fn: "set_ettube_length", read: "ettube_length" },
+    mode: "absolute",
+    step: 10,
+    steps: [10, 20],
+    min: 50,
+    max: 300,
+    unit: "mm",
+    help: "Resistance and tube dead space grow with length (e.g. an uncut tube).",
+  },
+  {
+    id: "tube_leak",
+    label: "Leak around the endotracheal tube",
+    short: "Tube leak",
+    category: "ventilator",
+    lever: { kind: "setProp", model: "Ventilator", target: "leak_size", field: "number" },
+    mode: "absolute",
+    step: 0.1,
+    steps: [0.05, 0.1, 0.2],
+    min: 0,
+    max: 3,
+    unit: "mm",
+    help: "Gap around an uncuffed tube. 0 = no leak. The SLE6000 compensates leaks up to 35 %; above that it autotriggers.",
+  },
+  {
+    id: "ett_obstruction",
+    label: "Endotracheal tube obstruction (secretions, kink)",
+    short: "Tube obstruction",
+    category: "ventilator",
+    // composes on the r_for the ventilator writes every step (Resistor.calc_resistance)
+    lever: { kind: "setProp", model: "VENT_ETTUBE", target: "r_factor_ps", field: "factor" },
+    step: 0.5,
+    steps: [0.3, 0.5, 1],
+    min: 1,
+    max: 20,
+    help: "Multiplies the tube resistance. Up = secretions / kinked tube: same pressures, less volume.",
+  },
+  {
+    id: "humid_temp",
+    label: "Humidifier temperature",
+    short: "Humidifier temp",
+    category: "ventilator",
+    lever: { kind: "call", model: "Ventilator", fn: "set_temp", read: "temp" },
+    mode: "absolute",
+    step: 1,
+    steps: [0.5, 1, 2],
+    min: 20,
+    max: 42,
+    unit: "°C",
+    help: "Temperature of the inspired gas from the heated humidifier.",
+  },
 ];
 
 export function clamp(v: number, min: number, max: number): number {
@@ -359,7 +441,7 @@ const SCALE_GROUP_FIELDS: Record<string, { config: [string, string]; prop: strin
 // A model instance from a state snapshot. The snapshot moves composite
 // sub-models out of `models` into their parent's `components` map (e.g.
 // Circulation.components.AA), possibly several levels deep, so search those too.
-function findInstance(models: Record<string, any>, name: string): any {
+export function findInstance(models: Record<string, any>, name: string): any {
   if (models[name] && typeof models[name] === "object") return models[name];
   for (const m of Object.values(models)) {
     const comps = m?.components;
@@ -389,18 +471,27 @@ export function currentScaleFactor(lever: Lever, modelState: any): number | null
   return null;
 }
 
-// Derive bot allowlist entries (op:"setProp") for the singleton setProp levers so
-// nudges work in GUIDED scope too. model_type-resolved levers (resolveByType) are
-// skipped — their instance name isn't fixed, so they stay Full-scope only.
-// Imported by botCommandAllowlist.ts to stay DRY.
+// Derive bot allowlist entries (op:"setProp" / op:"call") for the singleton setProp
+// and call levers so nudges work in GUIDED scope too. model_type-resolved levers
+// (resolveByType) are skipped — their instance name isn't fixed, so they stay
+// Full-scope only. Imported by botCommandAllowlist.ts to stay DRY.
 export function commonTaskAllowEntries(): Array<{
-  op: "setProp";
+  op: "setProp" | "call";
   model: string;
   target: string;
   note: string;
 }> {
-  const out: Array<{ op: "setProp"; model: string; target: string; note: string }> = [];
+  const out: Array<{ op: "setProp" | "call"; model: string; target: string; note: string }> = [];
   for (const t of COMMON_TASKS) {
+    if (t.lever.kind === "call") {
+      out.push({
+        op: "call",
+        model: t.lever.model,
+        target: t.lever.fn,
+        note: `${t.label} — directional nudge lever (arg: new value${t.unit ? `, ${t.unit}` : ""})`,
+      });
+      continue;
+    }
     if (t.lever.kind !== "setProp" || t.lever.resolveByType) continue;
     out.push({
       op: "setProp",
