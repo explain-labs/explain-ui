@@ -207,7 +207,8 @@ export const COMMON_TASKS: CommonTask[] = [
   },
   // Atelectasis: the collapsed fraction of one lung. Respiration couples the lost
   // aerated volume, compliance and gas-exchange surface with the shunting of the
-  // collapsed units' blood; PEEP does not reopen it (static).
+  // collapsed units' blood. With Respiration.atelectasis_recruitable (default) high
+  // airway pressure reopens it, PEEP keeps it open and losing PEEP collapses it again.
   ...(["left", "right"] as const).map(
     (side): CommonTask => ({
       id: `atelectasis_${side}`,
@@ -220,7 +221,7 @@ export const COMMON_TASKS: CommonTask[] = [
       steps: [0.05, 0.1, 0.2],
       min: 0,
       max: 0.9,
-      help: `Fraction of the ${side} lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. PEEP does not reopen it.`,
+      help: `Fraction of the ${side} lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. A high PIP, sigh or sustained inflation (~25 cmH2O) reopens it, PEEP ≥ 8 keeps it open, low PEEP or no support lets it collapse again; the value tracks this live. Recruitable off (Model editor → Respiration) = obstructive: pressure has no effect.`,
     }),
   ),
   // --- Gas exchange ---

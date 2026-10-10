@@ -21,7 +21,8 @@ import {
 // Quick-action directional nudges ("raise PVR 30%", "halve contractility").
 // Human surface like ScalerPanel — routes straight through useExplain (not the
 // bot validate gate). The catalog (COMMON_TASKS) is shared with the bot.
-const { scale, setProp, call, modelState, refreshState, modelReady } = useExplain();
+const { scale, setProp, call, modelState, refreshState, modelReady, isRunning, watchSlow, slowValues } =
+  useExplain();
 
 // Current factor of each SCALE lever. ModelScaler writes most groups as an
 // absolute `*_factor_scaling_ps` on every component, which IS in the state
@@ -39,6 +40,11 @@ function scaleFactor(task: CommonTask): number {
 // refreshState() that follows the click, so without this the readout lagged one
 // click behind and the next click stepped from the stale value again.
 const pending = reactive<Record<string, number>>({});
+// when each pending value was sent: some props also move by themselves in the engine
+// (atelectasis recruits and re-collapses), so the snapshot may never equal what was
+// sent; a pending value therefore lapses once the delayed refresh has had time to land
+const pendingAt: Record<string, number> = {};
+const PENDING_MS = 1000;
 // a (re)build — load, revert, saved state — starts from the new snapshot
 watch(modelReady, (ready) => {
   if (!ready) {
@@ -58,7 +64,8 @@ watch(modelState, (st) => {
     const [id, inst] = key.split(":");
     const task = COMMON_TASKS.find((t) => t.id === id);
     const v = task ? snapshotValue(inst, task) : NaN;
-    if (!task || Math.abs(v - pending[key]) <= 1e-9 * Math.max(1, Math.abs(pending[key]))) delete pending[key];
+    const matches = Math.abs(v - pending[key]) <= 1e-9 * Math.max(1, Math.abs(pending[key]));
+    if (!task || matches || Date.now() - (pendingAt[key] ?? 0) > PENDING_MS) delete pending[key];
   }
 });
 // Per-task step, in the field the user types into: a PERCENT for factor tasks
@@ -106,8 +113,40 @@ function resolveInstances(task: CommonTask): string[] {
 const readTarget = (task: CommonTask) =>
   task.lever.kind === "call" ? task.lever.read : task.lever.kind === "setProp" ? task.lever.target : "";
 const snapshotValue = (inst: string, task: CommonTask) => Number(findInstance(models(), inst)?.[readTarget(task)]);
-// what this panel last sent, until the snapshot shows it; else the snapshot value
-const current = (inst: string, task: CommonTask) => pending[`${task.id}:${inst}`] ?? snapshotValue(inst, task);
+// the latest slow-stream sample while running (fresher than the snapshot)
+function liveValue(inst: string, task: CommonTask): number {
+  if (!isRunning.value) return NaN;
+  const arr = slowValues.value as any[];
+  const latest = Array.isArray(arr) && arr.length ? arr[arr.length - 1] : null;
+  return Number(latest?.[`${inst}.${readTarget(task)}`]);
+}
+// what this panel last sent, until the engine shows it; else the live value, else the snapshot
+function current(inst: string, task: CommonTask): number {
+  const sent = pending[`${task.id}:${inst}`];
+  if (sent != null) return sent;
+  const live = liveValue(inst, task);
+  return Number.isFinite(live) ? live : snapshotValue(inst, task);
+}
+// keep every setProp/call readout on the 1 Hz slow stream, so values the engine
+// changes by itself (atelectasis recruiting under pressure) update while running.
+// A rebuild starts a fresh watchlist, so watch again after one.
+let watchedKey = "";
+watch(
+  [modelReady, modelState],
+  () => {
+    if (!modelReady.value) {
+      watchedKey = "";
+      return;
+    }
+    const paths = COMMON_TASKS.flatMap((t) => resolveInstances(t).map((inst) => `${inst}.${readTarget(t)}`));
+    const key = paths.join("|");
+    if (paths.length && key !== watchedKey) {
+      watchSlow(paths); // the engine dedups its watchlist
+      watchedKey = key;
+    }
+  },
+  { immediate: true },
+);
 
 // A task is shown when its lever can act on the current scenario. Scale groups are
 // topology-robust (ModelScaler skips missing components) so they always show;
@@ -156,6 +195,7 @@ function nudge(task: CommonTask, dir: NudgeDirection) {
       const next = nextAbsoluteValue(cur, eff, dir);
       call(`${inst}.${task.lever.fn}`, [next]);
       pending[`${task.id}:${inst}`] = next;
+      pendingAt[`${task.id}:${inst}`] = Date.now();
     }
   } else {
     const { target, field } = task.lever;
@@ -167,6 +207,7 @@ function nudge(task: CommonTask, dir: NudgeDirection) {
         task.mode === "absolute" ? nextAbsoluteValue(cur, eff, dir) : nextSetPropValue(cur, eff, dir);
       setProp(`${inst}.${target}`, next);
       pending[`${task.id}:${inst}`] = next;
+      pendingAt[`${task.id}:${inst}`] = Date.now();
     }
   }
   refreshState();

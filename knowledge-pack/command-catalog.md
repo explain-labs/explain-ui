@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **441 settable params**, **40 functions**
+Snapshot: **45 model_types**, **448 settable params**, **40 functions**
 (+ 58 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -619,12 +619,19 @@ _setProp_:
 _setProp_:
 - `atelectasis_left` — atelectasis left lung (% collapsed) (number, % collapsed, range 0–90)
 - `atelectasis_right` — atelectasis right lung (% collapsed) (number, % collapsed, range 0–90)
+- `atelectasis_recruitable` — atelectasis recruitable (off = obstructive) (boolean, off = obstructive)
 - `el_lungs_factor` — lung elastance factor (factor, range -10–10) _(factors)_
 - `el_thorax_factor` — thorax elastance factor (factor, range -10–10) _(factors)_
 - `res_upper_airways_factor` — upper airway resistance factor (factor, range -100–100) _(factors)_
 - `res_lower_airways_factor` — lower airway resistance factor (factor, range -100–100) _(factors)_
 - `gex_factor` — gasexchange factor (factor, range -100–100) _(factors)_
 - `atelectasis_hpv` — atelectasis hypoxic vasoconstriction (share diverted) (number, share diverted, range 0–1) _(advanced)_
+- `atelectasis_open_pressure` — atelectasis opening pressure (cmH2O) (number, cmH2O, range 5–45) _(advanced)_
+- `atelectasis_open_sd` — atelectasis opening pressure sd (cmH2O) (number, cmH2O, range 0.5–10) _(advanced)_
+- `atelectasis_close_pressure` — atelectasis closing pressure (cmH2O) (number, cmH2O, range 0–25) _(advanced)_
+- `atelectasis_close_sd` — atelectasis closing pressure sd (cmH2O) (number, cmH2O, range 0.5–10) _(advanced)_
+- `atelectasis_tau_open` — atelectasis recruitment time constant (s) (number, s, range 0.5–60) _(advanced)_
+- `atelectasis_tau_close` — atelectasis derecruitment time constant (s) (number, s, range 1–600) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 ### Resuscitation
@@ -808,9 +815,9 @@ physiological quantity LOWERS the lever — noted per task.
   - e.g. `{"op":"scale","group":"left_lung_elastances","factor":<absolute, 1.0=baseline>,"reason":"Lung compliance nudge"}`
 - **Airway resistance** — scale `airway_lower_resistances`, default ±30%. Up = bronchospasm / obstruction.
   - e.g. `{"op":"scale","group":"airway_lower_resistances","factor":<absolute, 1.0=baseline>,"reason":"Airway resistance nudge"}`
-- **Atelectasis left lung (collapsed fraction)** — call `Respiration.set_atelectasis_left` (current value `atelectasis_left`), step ±0.1, range 0–0.9. Fraction of the left lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. PEEP does not reopen it.
+- **Atelectasis left lung (collapsed fraction)** — call `Respiration.set_atelectasis_left` (current value `atelectasis_left`), step ±0.1, range 0–0.9. Fraction of the left lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. A high PIP, sigh or sustained inflation (~25 cmH2O) reopens it, PEEP ≥ 8 keeps it open, low PEEP or no support lets it collapse again; the value tracks this live. Recruitable off (Model editor → Respiration) = obstructive: pressure has no effect.
   - e.g. `{"op":"call","model":"Respiration","target":"set_atelectasis_left","args":[<0–0.9>],"reason":"set Atelectasis L"}`
-- **Atelectasis right lung (collapsed fraction)** — call `Respiration.set_atelectasis_right` (current value `atelectasis_right`), step ±0.1, range 0–0.9. Fraction of the right lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. PEEP does not reopen it.
+- **Atelectasis right lung (collapsed fraction)** — call `Respiration.set_atelectasis_right` (current value `atelectasis_right`), step ±0.1, range 0–0.9. Fraction of the right lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. A high PIP, sigh or sustained inflation (~25 cmH2O) reopens it, PEEP ≥ 8 keeps it open, low PEEP or no support lets it collapse again; the value tracks this live. Recruitable off (Model editor → Respiration) = obstructive: pressure has no effect.
   - e.g. `{"op":"call","model":"Respiration","target":"set_atelectasis_right","args":[<0–0.9>],"reason":"set Atelectasis R"}`
 
 ### Ventilation drive

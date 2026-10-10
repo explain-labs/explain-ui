@@ -6027,6 +6027,92 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 2,
       "ll": 0,
       "ul": 1
+    },
+    {
+      "caption": "atelectasis recruitable (off = obstructive)",
+      "target": "atelectasis_recruitable",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "atelectasis opening pressure (cmH2O)",
+      "target": "atelectasis_open_pressure",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 1,
+      "rounding": 0,
+      "ll": 5,
+      "ul": 45
+    },
+    {
+      "caption": "atelectasis opening pressure sd (cmH2O)",
+      "target": "atelectasis_open_sd",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0.5,
+      "ul": 10
+    },
+    {
+      "caption": "atelectasis closing pressure (cmH2O)",
+      "target": "atelectasis_close_pressure",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 25
+    },
+    {
+      "caption": "atelectasis closing pressure sd (cmH2O)",
+      "target": "atelectasis_close_sd",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0.5,
+      "ul": 10
+    },
+    {
+      "caption": "atelectasis recruitment time constant (s)",
+      "target": "atelectasis_tau_open",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0.5,
+      "ul": 60
+    },
+    {
+      "caption": "atelectasis derecruitment time constant (s)",
+      "target": "atelectasis_tau_close",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 5,
+      "rounding": 0,
+      "ll": 1,
+      "ul": 600
     }
   ],
   "Resuscitation": [
