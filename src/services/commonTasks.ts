@@ -80,18 +80,21 @@ export interface CommonTask {
   help?: string; // tooltip + bot note
 }
 
+// The categories in the order the panel (and the bot catalog) lists them: the
+// respiratory ones first, then the rest.
 export const TASK_CATEGORY_LABELS: Record<TaskCategory, string> = {
+  lung_mechanics: "Lung mechanics",
+  ventilation_drive: "Ventilation drive",
+  ventilator: "Ventilator",
   vascular_tone: "Vascular tone",
   cardiac_performance: "Cardiac performance",
   rate_rhythm: "Rate & rhythm",
-  lung_mechanics: "Lung mechanics",
   gas_exchange: "Gas exchange",
   shunts: "Shunts & fetal channels",
-  ventilation_drive: "Ventilation drive",
   blood_acidbase: "Blood & acid-base",
   metabolic_thermal: "Metabolic & thermal",
-  ventilator: "Ventilator",
 };
+export const TASK_CATEGORY_ORDER = Object.keys(TASK_CATEGORY_LABELS) as TaskCategory[];
 
 // First-wave tasks. Steps default to a sensible ±% per quantity.
 export const COMMON_TASKS: CommonTask[] = [

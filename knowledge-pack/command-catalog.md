@@ -797,6 +797,31 @@ Curated relative adjustments ("raise PVR 30%", "halve contractility"). Each maps
 For inverse quantities (lung compliance ↔ elastance; preload ↔ unstressed volume) raising the
 physiological quantity LOWERS the lever — noted per task.
 
+### Lung mechanics
+
+- **Lung compliance** — scale `left_lung_elastances` + `right_lung_elastances`, default ±20%. _(inverse: raising the quantity lowers the lever)_ Down = stiffer lungs (RDS / hypoplasia); up = more compliant.
+  - e.g. `{"op":"scale","group":"left_lung_elastances","factor":<absolute, 1.0=baseline>,"reason":"Lung compliance nudge"}`
+- **Airway resistance** — scale `airway_lower_resistances`, default ±30%. Up = bronchospasm / obstruction.
+  - e.g. `{"op":"scale","group":"airway_lower_resistances","factor":<absolute, 1.0=baseline>,"reason":"Airway resistance nudge"}`
+
+### Ventilation drive
+
+- **Ventilation drive (reference minute volume)** — setProp `Breathing.minute_volume_ref`, default ±20%. Up = hyperventilation (↓pCO2); down = hypoventilation (↑pCO2).
+  - e.g. `{"op":"setProp","model":"Breathing","target":"minute_volume_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Ventilation drive"}`
+
+### Ventilator
+
+- **Endotracheal tube internal diameter** — call `Ventilator.set_ettube_diameter` (current value `ettube_diameter`), step ±0.5 mm, range 2–9. Tube resistance rises steeply as the tube narrows (about d⁻⁴); the tube lumen is dead space too.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_diameter","args":[<2–9 mm>],"reason":"set ETT size"}`
+- **Endotracheal tube length** — call `Ventilator.set_ettube_length` (current value `ettube_length`), step ±10 mm, range 50–300. Resistance and tube dead space grow with length (e.g. an uncut tube).
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_length","args":[<50–300 mm>],"reason":"set ETT length"}`
+- **Leak around the endotracheal tube** — setProp `Ventilator.leak_size`, step ±0.1 mm, range 0–3. Gap around an uncuffed tube. 0 = no leak. The SLE6000 compensates leaks up to 35 %; above that it autotriggers.
+  - e.g. `{"op":"setProp","model":"Ventilator","target":"leak_size","value":<0–3 mm; 0=closed/none>,"reason":"set Tube leak"}`
+- **Endotracheal tube obstruction (secretions, kink)** — setProp `VENT_ETTUBE.r_factor_ps`, default ±50%. Multiplies the tube resistance. Up = secretions / kinked tube: same pressures, less volume.
+  - e.g. `{"op":"setProp","model":"VENT_ETTUBE","target":"r_factor_ps","value":<target in display units, or current×(1±50%) if shown>,"reason":"adjust Tube obstruction"}`
+- **Humidifier temperature** — call `Ventilator.set_temp` (current value `temp`), step ±1 °C, range 20–42. Temperature of the inspired gas from the heated humidifier.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_temp","args":[<20–42 °C>],"reason":"set Humidifier temp"}`
+
 ### Vascular tone
 
 - **Systemic vascular resistance (afterload)** — scale `systemic_resistances`, default ±30%. LV afterload. Up = vasoconstriction/pressor; down = vasodilation. (MAP is partly defended by the baroreflex — CO/HR shift too.)
@@ -818,13 +843,6 @@ physiological quantity LOWERS the lever — noted per task.
 - **Heart rate (reference)** — setProp `Heart.heart_rate_ref`, default ±20%. Tachycardia (up) / bradycardia (down).
   - e.g. `{"op":"setProp","model":"Heart","target":"heart_rate_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Heart rate"}`
 
-### Lung mechanics
-
-- **Lung compliance** — scale `left_lung_elastances` + `right_lung_elastances`, default ±20%. _(inverse: raising the quantity lowers the lever)_ Down = stiffer lungs (RDS / hypoplasia); up = more compliant.
-  - e.g. `{"op":"scale","group":"left_lung_elastances","factor":<absolute, 1.0=baseline>,"reason":"Lung compliance nudge"}`
-- **Airway resistance** — scale `airway_lower_resistances`, default ±30%. Up = bronchospasm / obstruction.
-  - e.g. `{"op":"scale","group":"airway_lower_resistances","factor":<absolute, 1.0=baseline>,"reason":"Airway resistance nudge"}`
-
 ### Gas exchange
 
 - **O2 diffusion capacity** — setProp `dif_o2_factor_ps` on each `GasExchanger` instance, default ±30%. Down = impaired alveolar O2 transfer.
@@ -839,33 +857,15 @@ physiological quantity LOWERS the lever — noted per task.
 - **Ventricular septal defect (VSD) size** — setProp `Shunts.diameter_vsd`, step ±1 mm, range 0–10. Ventricular-level shunt. 0 = none.
   - e.g. `{"op":"setProp","model":"Shunts","target":"diameter_vsd","value":<0–10 mm; 0=closed/none>,"reason":"set VSD"}`
 
-### Ventilation drive
-
-- **Ventilation drive (reference minute volume)** — setProp `Breathing.minute_volume_ref`, default ±20%. Up = hyperventilation (↓pCO2); down = hypoventilation (↑pCO2).
-  - e.g. `{"op":"setProp","model":"Breathing","target":"minute_volume_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Ventilation drive"}`
-
-### Metabolic & thermal
-
-- **Metabolic demand (VO2)** — setProp `Metabolism.vo2`, default ±20%. Up = sepsis/hypermetabolism; down = hypothermia/sedation.
-  - e.g. `{"op":"setProp","model":"Metabolism","target":"vo2","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust VO2"}`
-
 ### Blood & acid-base
 
 - **Blood volume** — scale `blood_volume`, default ±10%. Down = hemorrhage; up = fluid overload.
   - e.g. `{"op":"scale","group":"blood_volume","factor":<absolute, 1.0=baseline>,"reason":"Blood volume nudge"}`
 
-### Ventilator
+### Metabolic & thermal
 
-- **Endotracheal tube internal diameter** — call `Ventilator.set_ettube_diameter` (current value `ettube_diameter`), step ±0.5 mm, range 2–9. Tube resistance rises steeply as the tube narrows (about d⁻⁴); the tube lumen is dead space too.
-  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_diameter","args":[<2–9 mm>],"reason":"set ETT size"}`
-- **Endotracheal tube length** — call `Ventilator.set_ettube_length` (current value `ettube_length`), step ±10 mm, range 50–300. Resistance and tube dead space grow with length (e.g. an uncut tube).
-  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_length","args":[<50–300 mm>],"reason":"set ETT length"}`
-- **Leak around the endotracheal tube** — setProp `Ventilator.leak_size`, step ±0.1 mm, range 0–3. Gap around an uncuffed tube. 0 = no leak. The SLE6000 compensates leaks up to 35 %; above that it autotriggers.
-  - e.g. `{"op":"setProp","model":"Ventilator","target":"leak_size","value":<0–3 mm; 0=closed/none>,"reason":"set Tube leak"}`
-- **Endotracheal tube obstruction (secretions, kink)** — setProp `VENT_ETTUBE.r_factor_ps`, default ±50%. Multiplies the tube resistance. Up = secretions / kinked tube: same pressures, less volume.
-  - e.g. `{"op":"setProp","model":"VENT_ETTUBE","target":"r_factor_ps","value":<target in display units, or current×(1±50%) if shown>,"reason":"adjust Tube obstruction"}`
-- **Humidifier temperature** — call `Ventilator.set_temp` (current value `temp`), step ±1 °C, range 20–42. Temperature of the inspired gas from the heated humidifier.
-  - e.g. `{"op":"call","model":"Ventilator","target":"set_temp","args":[<20–42 °C>],"reason":"set Humidifier temp"}`
+- **Metabolic demand (VO2)** — setProp `Metabolism.vo2`, default ±20%. Up = sepsis/hypermetabolism; down = hypothermia/sedation.
+  - e.g. `{"op":"setProp","model":"Metabolism","target":"vo2","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust VO2"}`
 
 ---
 

@@ -7,6 +7,7 @@ import { useExplain } from "@/composables/useExplain";
 import {
   COMMON_TASKS,
   TASK_CATEGORY_LABELS,
+  TASK_CATEGORY_ORDER,
   currentScaleFactor,
   findInstance,
   nextAbsoluteValue,
@@ -110,7 +111,7 @@ const categories = computed<{ category: TaskCategory; label: string; tasks: Comm
     }
     group.tasks.push(task);
   }
-  return out;
+  return out.sort((a, b) => TASK_CATEGORY_ORDER.indexOf(a.category) - TASK_CATEGORY_ORDER.indexOf(b.category));
 });
 
 // Live readout: tracked factor for scale tasks, current prop value for setProp.
