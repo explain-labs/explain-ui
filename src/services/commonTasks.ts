@@ -23,7 +23,9 @@
 //   - call lever — the quantity has a setter that recomputes derived state (the ET
 //     tube's Rohrer coefficients follow its diameter), so writing the prop alone
 //     would not take effect. Read the current value from `read`, step it, and call
-//     the setter with the new value. Absolute stepping only.
+//     the setter with the new value. Absolute stepping only. With `choices` the task
+//     is a set of buttons instead (an airway event): the setter is called with the
+//     chosen value, and `read` holds the current one.
 
 export type TaskCategory =
   | "vascular_tone"
@@ -35,7 +37,8 @@ export type TaskCategory =
   | "ventilation_drive"
   | "blood_acidbase"
   | "metabolic_thermal"
-  | "ventilator";
+  | "ventilator"
+  | "airway_events";
 
 export type NudgeDirection = "up" | "down";
 
@@ -78,6 +81,7 @@ export interface CommonTask {
   max?: number;
   unit?: string; // for number levers (display only)
   help?: string; // tooltip + bot note
+  choices?: { value: string | boolean; label: string }[]; // call lever as buttons (step unused)
 }
 
 // The categories in the order the panel (and the bot catalog) lists them: the
@@ -86,6 +90,7 @@ export const TASK_CATEGORY_LABELS: Record<TaskCategory, string> = {
   lung_mechanics: "Lung mechanics",
   ventilation_drive: "Ventilation drive",
   ventilator: "Ventilator",
+  airway_events: "Airway events",
   vascular_tone: "Vascular tone",
   cardiac_performance: "Cardiac performance",
   rate_rhythm: "Rate & rhythm",
@@ -402,6 +407,50 @@ export const COMMON_TASKS: CommonTask[] = [
     unit: "°C",
     help: "Temperature of the inspired gas from the heated humidifier.",
   },
+  // --- Airway events (DOPE): buttons, not nudges. The tube and circuit events act
+  // only while the ventilator is ventilating; Standby ends them.
+  {
+    id: "tube_position",
+    label: "Endotracheal tube position",
+    short: "Tube",
+    category: "airway_events",
+    lever: { kind: "call", model: "Ventilator", fn: "set_tube_position", read: "tube_position" },
+    step: 0,
+    choices: [
+      { value: "trachea", label: "Trachea" },
+      { value: "right_main", label: "Right main" },
+      { value: "extubated", label: "Extubated" },
+    ],
+    help: "While ventilating. Right main: all gas to the right lung, the left lung collapses by resorption (faster on O2); pull back and recruit it. Extubated: the ventilator blows into the room, the baby breathes on its own without PEEP (or not at all if apnoeic).",
+  },
+  {
+    id: "circuit",
+    label: "Ventilator circuit connection",
+    short: "Circuit",
+    category: "airway_events",
+    lever: { kind: "call", model: "Ventilator", fn: "set_circuit_connected", read: "circuit_connected" },
+    step: 0,
+    choices: [
+      { value: true, label: "Connected" },
+      { value: false, label: "Disconnected" },
+    ],
+    help: "While ventilating. Disconnected: circuit pressure falls to ~0, no PEEP, only the baby's own breaths through the tube.",
+  },
+  ...(["left", "right"] as const).map(
+    (side): CommonTask => ({
+      id: `bronchial_plug_${side}`,
+      label: `Bronchial plug, ${side} main bronchus`,
+      short: `Bronchial plug ${side === "left" ? "L" : "R"}`,
+      category: "airway_events",
+      lever: { kind: "call", model: "Respiration", fn: `set_airway_obstructed_${side}`, read: `airway_obstructed_${side}` },
+      step: 0,
+      choices: [
+        { value: false, label: "Open" },
+        { value: true, label: "Plugged" },
+      ],
+      help: `A plug in the ${side} main bronchus: no gas in or out, and the trapped gas is absorbed, so the ${side} lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.`,
+    }),
+  ),
 ];
 
 export function clamp(v: number, min: number, max: number): number {
@@ -506,11 +555,14 @@ export function commonTaskAllowEntries(): Array<{
   const out: Array<{ op: "setProp" | "call"; model: string; target: string; note: string }> = [];
   for (const t of COMMON_TASKS) {
     if (t.lever.kind === "call") {
+      const arg = t.choices
+        ? `one of ${t.choices.map((c) => JSON.stringify(c.value)).join(" / ")}`
+        : `new value${t.unit ? `, ${t.unit}` : ""}`;
       out.push({
         op: "call",
         model: t.lever.model,
         target: t.lever.fn,
-        note: `${t.label} — directional nudge lever (arg: new value${t.unit ? `, ${t.unit}` : ""})`,
+        note: `${t.label} — ${t.choices ? "airway event" : "directional nudge lever"} (arg: ${arg})`,
       });
       continue;
     }

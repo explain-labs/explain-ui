@@ -190,6 +190,9 @@ const taskExample = (t) => {
     const g = (Array.isArray(t.lever.group) ? t.lever.group : [t.lever.group])[0];
     return `{"op":"scale","group":"${g}","factor":<absolute, 1.0=baseline>,"reason":"${t.short} nudge"}`;
   }
+  if (t.lever.kind === "call" && t.choices) {
+    return `{"op":"call","model":"${t.lever.model}","target":"${t.lever.fn}","args":[<${t.choices.map((c) => JSON.stringify(c.value)).join(" | ")}>],"reason":"${t.short}"}`;
+  }
   if (t.lever.kind === "call") {
     const u = t.unit ? ` ${t.unit}` : "";
     return `{"op":"call","model":"${t.lever.model}","target":"${t.lever.fn}","args":[<${num(t.min ?? 0)}–${num(t.max ?? 0)}${u}>],"reason":"set ${t.short}"}`;
@@ -206,6 +209,7 @@ const taskExample = (t) => {
   return `{"op":"setProp","model":"${m}","target":"${t.lever.target}","value":<target in display units, or current×(1±${pct(t.step)}) if shown>,"reason":"adjust ${t.short}"}`;
 };
 const stepDesc = (t) => {
+  if (t.choices) return `choices ${t.choices.map((c) => `\`${JSON.stringify(c.value)}\` (${c.label})`).join(", ")}`;
   if (t.mode !== "absolute") return `default ±${pct(t.step)}`;
   const dispStep = num(t.step * facOf(t));
   const lo = num((t.min ?? 0) * facOf(t));

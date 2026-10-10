@@ -45,11 +45,14 @@ const pending = reactive<Record<string, number>>({});
 // sent; a pending value therefore lapses once the delayed refresh has had time to land
 const pendingAt: Record<string, number> = {};
 const PENDING_MS = 1000;
+// the same for choice tasks (airway events): the value just chosen, until the engine shows it
+const pendingChoice = reactive<Record<string, string | boolean>>({});
 // a (re)build — load, revert, saved state — starts from the new snapshot
 watch(modelReady, (ready) => {
   if (!ready) {
     for (const k of Object.keys(factors)) delete factors[k];
     for (const k of Object.keys(pending)) delete pending[k];
+    for (const k of Object.keys(pendingChoice)) delete pendingChoice[k];
   }
 });
 // once a snapshot shows what we sent, let the snapshot lead again (so a later
@@ -66,6 +69,12 @@ watch(modelState, (st) => {
     const v = task ? snapshotValue(inst, task) : NaN;
     const matches = Math.abs(v - pending[key]) <= 1e-9 * Math.max(1, Math.abs(pending[key]));
     if (!task || matches || Date.now() - (pendingAt[key] ?? 0) > PENDING_MS) delete pending[key];
+  }
+  for (const key of Object.keys(pendingChoice)) {
+    const [id, inst] = key.split(":");
+    const task = COMMON_TASKS.find((t) => t.id === id);
+    const v = task ? findInstance(models(), inst)?.[readTarget(task)] : undefined;
+    if (!task || v === pendingChoice[key] || Date.now() - (pendingAt[key] ?? 0) > PENDING_MS) delete pendingChoice[key];
   }
 });
 // Per-task step, in the field the user types into: a PERCENT for factor tasks
@@ -114,12 +123,34 @@ const readTarget = (task: CommonTask) =>
   task.lever.kind === "call" ? task.lever.read : task.lever.kind === "setProp" ? task.lever.target : "";
 const snapshotValue = (inst: string, task: CommonTask) => Number(findInstance(models(), inst)?.[readTarget(task)]);
 // the latest slow-stream sample while running (fresher than the snapshot)
-function liveValue(inst: string, task: CommonTask): number {
-  if (!isRunning.value) return NaN;
+function liveRaw(inst: string, task: CommonTask): unknown {
+  if (!isRunning.value) return undefined;
   const arr = slowValues.value as any[];
   const latest = Array.isArray(arr) && arr.length ? arr[arr.length - 1] : null;
-  return Number(latest?.[`${inst}.${readTarget(task)}`]);
+  return latest?.[`${inst}.${readTarget(task)}`];
 }
+const liveValue = (inst: string, task: CommonTask) => Number(liveRaw(inst, task));
+// a choice task's current value: just chosen, else live, else the snapshot
+function choiceValue(inst: string, task: CommonTask): unknown {
+  const key = `${task.id}:${inst}`;
+  if (key in pendingChoice) return pendingChoice[key];
+  const live = liveRaw(inst, task);
+  return live !== undefined ? live : findInstance(models(), inst)?.[readTarget(task)];
+}
+function choose(task: CommonTask, value: string | boolean) {
+  if (task.lever.kind !== "call") return;
+  for (const inst of resolveInstances(task)) {
+    call(`${inst}.${task.lever.fn}`, [value]);
+    pendingChoice[`${task.id}:${inst}`] = value;
+    pendingAt[`${task.id}:${inst}`] = Date.now();
+  }
+  refreshState();
+  setTimeout(refreshState, 1200);
+}
+const isChosen = (task: CommonTask, value: string | boolean) => {
+  const inst = resolveInstances(task)[0];
+  return inst != null && choiceValue(inst, task) === value;
+};
 // what this panel last sent, until the engine shows it; else the live value, else the snapshot
 function current(inst: string, task: CommonTask): number {
   const sent = pending[`${task.id}:${inst}`];
@@ -172,6 +203,7 @@ const categories = computed<{ category: TaskCategory; label: string; tasks: Comm
 // Live readout: tracked factor for scale tasks, current prop value for setProp.
 function readout(task: CommonTask): string {
   if (task.lever.kind === "scale") return `×${scaleFactor(task).toFixed(2)}`;
+  if (task.choices) return task.choices.find((c) => isChosen(task, c.value))?.label ?? "";
   const inst = resolveInstances(task)[0];
   if (!inst) return "";
   const v = current(inst, task);
@@ -269,6 +301,19 @@ function resetScale(task: CommonTask) {
             <div class="text-xs opacity-50">{{ readout(task) }}</div>
           </div>
 
+          <div v-if="task.choices" class="flex flex-wrap justify-end gap-1">
+            <Button
+              v-for="c in task.choices"
+              :key="String(c.value)"
+              :label="c.label"
+              size="small"
+              :severity="isChosen(task, c.value) ? undefined : 'secondary'"
+              :outlined="!isChosen(task, c.value)"
+              class="!px-2 !py-1 !text-xs"
+              @click="choose(task, c.value)"
+            />
+          </div>
+          <template v-else>
           <Button
             v-tooltip.top="'Decrease'"
             icon="pi pi-minus"
@@ -308,6 +353,7 @@ function resetScale(task: CommonTask) {
             aria-label="Reset"
             @click="resetScale(task)"
           />
+          </template>
           </div>
         </div>
       </div>

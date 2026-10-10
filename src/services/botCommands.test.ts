@@ -102,3 +102,29 @@ describe("validateCommand SLE6000 HFO (Guided scope)", () => {
     expect(guided({ op: "call", model: "Ventilator", target: "sle_osc_pause", args: [] }).ok).toBe(true);
   });
 });
+
+describe("validateCommand atelectasis and airway events", () => {
+  const state = {
+    models: {
+      Ventilator: { name: "Ventilator", model_type: "Sle6000" },
+      Respiration: { name: "Respiration", model_type: "Respiration" },
+    },
+  };
+  const run = (scope: "guided" | "full") => (cmd: object) =>
+    validateCommand({ reason: "t", ...cmd } as any, state, scope);
+
+  for (const scope of ["guided", "full"] as const) {
+    const v = run(scope);
+    it(`accepts the common-task calls (${scope})`, () => {
+      expect(v({ op: "call", model: "Respiration", target: "set_atelectasis_right", args: [0.6] }).ok).toBe(true);
+      expect(v({ op: "call", model: "Respiration", target: "set_airway_obstructed_left", args: [true] }).ok).toBe(true);
+      expect(v({ op: "call", model: "Ventilator", target: "set_tube_position", args: ["right_main"] }).ok).toBe(true);
+      expect(v({ op: "call", model: "Ventilator", target: "set_circuit_connected", args: [false] }).ok).toBe(true);
+    });
+    it(`rejects out-of-range or wrong-typed args (${scope})`, () => {
+      expect(v({ op: "call", model: "Respiration", target: "set_atelectasis_right", args: [1.5] }).ok).toBe(false);
+      expect(v({ op: "call", model: "Respiration", target: "set_airway_obstructed_left", args: ["yes"] }).ok).toBe(false);
+      expect(v({ op: "call", model: "Ventilator", target: "set_tube_position", args: ["oesophagus"] }).ok).toBe(false);
+    });
+  }
+});
