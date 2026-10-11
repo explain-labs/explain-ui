@@ -7392,6 +7392,74 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       ]
     },
     {
+      "caption": "OxyGenie (closed-loop O2)",
+      "target": "sle_oxygenie",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "on",
+          "target": "state",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "caption": "SpO2 monitoring",
+      "target": "sle_spo2_monitoring",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "on",
+          "target": "state",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "caption": "OxyGenie SpO2 target range (%)",
+      "target": "sle_set_spo2_target",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "range",
+          "target": "range",
+          "type": "list",
+          "options": [],
+          "choices": [
+            "90-94",
+            "91-95",
+            "92-96",
+            "94-98"
+          ],
+          "custom_options": true,
+          "default": "91-95"
+        }
+      ]
+    },
+    {
+      "caption": "SpO2 probe on the patient",
+      "target": "set_spo2_probe",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "attached",
+          "target": "attached",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
       "caption": "HFOV sigh (Sigh P for Sigh Ti)",
       "target": "sle_sigh",
       "type": "function",
@@ -7891,6 +7959,56 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "advanced",
       "readonly": true,
       "caption": "oscillation pause left (s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "mon_spo2",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "SpO2 (ventilator, %)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "oxy_state",
+      "type": "string",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "OxyGenie state"
+    },
+    {
+      "target": "oxy_ref_o2",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "OxyGenie reference O2 (%)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "oxy_override_remaining",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "OxyGenie manual override remaining (s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_spo2_target",
+      "type": "string",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "SpO2 target range (%)"
+    },
+    {
+      "target": "sle_spo2_avg",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "SpO2 averaging time (s)",
       "factor": 1,
       "rounding": 0
     },
