@@ -7,4 +7,6 @@ Probeer de andere modi via **Mode**:
 - **SIMV:** alleen het ingestelde aantal teugen wordt ondersteund; de overige teugen van de baby niet.
 - **PSV:** elke teug wordt ondersteund, en de machine beëindigt de teug ook als de flow afneemt (**Term Sens**), zodat de baby ook de inspiratietijd bepaalt.
 
+Onder **Patiënt → Ventilation drive** kun je de eigen ademhaling van de baby uit- en aanzetten. Zet hem uit in PTV: de machine valt terug op de ingestelde frequentie.
+
 > Vergelijk de drukcurve tussen de modi. Welke teugen ondersteunt de machine, en welke neemt de baby alleen?

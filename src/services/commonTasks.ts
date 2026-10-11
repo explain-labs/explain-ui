@@ -308,6 +308,19 @@ export const COMMON_TASKS: CommonTask[] = [
     unit: "L/kg/min",
     help: "Up = hyperventilation (↓pCO2); down = hypoventilation (↑pCO2).",
   },
+  {
+    id: "spontaneous_breathing",
+    label: "Spontaneous breathing",
+    short: "Own breathing",
+    category: "ventilation_drive",
+    lever: { kind: "call", model: "Breathing", fn: "switch_breathing", read: "breathing_enabled" },
+    step: 0,
+    choices: [
+      { value: true, label: "On" },
+      { value: false, label: "Off" },
+    ],
+    help: "Off = apnoea (e.g. sedation or relaxation): only the ventilator breathes. On a ventilator, see how the triggered modes (PTV, PSV, SIMV) fall back to their backup rate.",
+  },
   // --- Metabolic & thermal ---
   {
     id: "vo2",
@@ -575,7 +588,7 @@ export function commonTaskAllowEntries(): Array<{
         op: "call",
         model: t.lever.model,
         target: t.lever.fn,
-        note: `${t.label} — ${t.choices ? "airway event" : "directional nudge lever"} (arg: ${arg})`,
+        note: `${t.label} — ${t.choices ? "choice of states" : "directional nudge lever"} (arg: ${arg})`,
       });
       continue;
     }

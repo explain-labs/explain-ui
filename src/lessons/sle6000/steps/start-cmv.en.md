@@ -8,7 +8,7 @@ Start ventilation with the button below. It sets **CMV** (continuous mandatory v
 | Ti | 0.35 s |
 | O₂ | 21 % |
 
-In this lesson the baby's own breathing is switched off, so every breath you see comes from the ventilator. (In the step about triggered modes it comes back.)
+In this lesson the baby's own breathing is switched off, so every breath you see comes from the ventilator. (In the step about triggered modes it comes back, and you can switch it on and off yourself under **Patient → Ventilation drive**.)
 
 You can also start it yourself: **Mode → CMV → Confirm**.
 

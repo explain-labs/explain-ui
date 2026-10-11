@@ -1,7 +1,7 @@
 Now it's your turn. Everything is open:
 
 - the **ventilator**: every mode and setting, Layout (try the **loops** and **trends**) and OxyGenie (hold the O₂ tile);
-- **Patient**: lung compliance and airway resistance, atelectasis, tube size, length and leak, tube obstruction, tube position, circuit, SpO₂ probe and bronchial plugs.
+- **Patient**: the baby's own breathing (on/off) and ventilation drive, lung compliance and airway resistance, atelectasis, tube size, length and leak, tube obstruction, tube position, circuit, SpO₂ probe and bronchial plugs.
 
 Some ideas:
 

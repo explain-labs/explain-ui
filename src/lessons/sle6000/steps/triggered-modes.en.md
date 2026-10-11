@@ -7,4 +7,6 @@ Try the other modes via **Mode**:
 - **SIMV:** only the set number of breaths is supported; the baby's other breaths go unsupported.
 - **PSV:** each breath is supported, and the ventilator also ends the breath when the flow falls (**Term Sens**), so the baby also sets the inspiratory time.
 
+Under **Patient → Ventilation drive** you can switch the baby's own breathing off and on. Switch it off in PTV: the ventilator falls back to the set rate.
+
 > Compare the pressure curve between the modes. Which breaths does the ventilator support, and which does the baby take alone?
