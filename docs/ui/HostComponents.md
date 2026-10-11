@@ -98,6 +98,10 @@ and is the app's only ventilator UI.
   Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 opens the O2
   menu (see OxyGenie below). `display` / `ends` show a list setting by name, and `tag` puts a small
   text under the value (OxyGenie's "Auto" / "---").
+- **Tap vs hold** (`press.ts`, `usePress`), shared by the tiles, the monitored values (1 s) and
+  the Lock button (1 s). The pointer is captured on press, and a hold is cancelled only when the
+  pointer moves off the control (a bounds check on `pointermove`), not on `pointerleave`. In Safari,
+  `pointerleave` cancelled every hold (the screen re-renders each second), so each hold became a tap.
 - **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
   1 s hold switches between them. Sized from a ward photo of the device: the group boxes share the
   column height by their number of rows, and values are 36 px (single) / 32 px (double) with 13 px

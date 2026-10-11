@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount } from "vue";
+import { computed } from "vue";
 import { SLE_THEME } from "./sleTheme";
+import { usePress } from "./press";
 
 // One SLE6000 parameter control (IFU p150, pp 68-76; colours from the device photos, see
 // sleTheme.ts): a dark rounded tile with the label on top, the value on a dark disc ringed by a 270°
@@ -53,35 +54,12 @@ const boostPath = computed(() =>
   props.boost != null && props.boost > props.value ? arc(135 + 270 * frac(props.value), 135 + 270 * frac(props.boost)) : "",
 );
 
-// tap vs hold
-let timer: ReturnType<typeof setTimeout> | null = null;
-let held = false;
-function down(e: PointerEvent) {
-  try {
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  } catch {
-    // no active pointer with that id (synthetic events): the hold still works without capture
-  }
-  held = false;
-  if (props.holdMs > 0) {
-    timer = setTimeout(() => {
-      held = true;
-      timer = null;
-      emit("hold");
-    }, props.holdMs);
-  }
-}
-function up() {
-  if (timer) clearTimeout(timer);
-  timer = null;
-  if (!held) emit("tap");
-  held = false;
-}
-function cancel() {
-  if (timer) clearTimeout(timer);
-  timer = null;
-}
-onBeforeUnmount(cancel);
+// tap vs hold (press.ts: safe against Safari's pointerleave on re-render)
+const { down, move, up, cancel } = usePress({
+  holdMs: () => props.holdMs,
+  onHold: () => emit("hold"),
+  onTap: () => emit("tap"),
+});
 </script>
 
 <template>
@@ -91,9 +69,9 @@ onBeforeUnmount(cancel);
     role="button"
     :aria-label="`${label} ${text} ${unit}`"
     @pointerdown="down"
+    @pointermove="move"
     @pointerup="up"
     @pointercancel="cancel"
-    @pointerleave="cancel"
   >
     <div class="sle-tile-label">{{ label }}</div>
     <svg viewBox="0 0 100 100" class="sle-tile-svg">

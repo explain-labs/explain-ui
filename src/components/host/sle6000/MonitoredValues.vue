@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { monGroups, type MonValue } from "./sleUi";
+import { usePress } from "./press";
 
 // The monitored-values column (IFU p151; look from the device photos, see sleTheme.ts): white values
 // on black, right-aligned, each with a small grey "label (unit)" under it, in dark group boxes.
@@ -26,21 +27,12 @@ function show(m: MonValue): string {
   return m.fmt ? m.fmt(v) : v.toFixed(m.d);
 }
 
-let timer: ReturnType<typeof setTimeout> | null = null;
-function down() {
-  timer = setTimeout(() => {
-    timer = null;
-    emit("toggle");
-  }, 1000);
-}
-function cancel() {
-  if (timer) clearTimeout(timer);
-  timer = null;
-}
+// 1 s hold switches single/double column (press.ts: safe against Safari's pointerleave)
+const { down, move, up, cancel } = usePress({ holdMs: () => 1000, onHold: () => emit("toggle") });
 </script>
 
 <template>
-  <div class="sle-mon" @pointerdown="down" @pointerup="cancel" @pointerleave="cancel" @pointercancel="cancel">
+  <div class="sle-mon" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="cancel">
     <div v-for="(g, gi) in groups" :key="gi" class="sle-mon-group" :class="{ double }" :style="{ flexGrow: rows(g) }">
       <template v-for="(m, i) in g" :key="(m?.path ?? 'gap') + i">
         <div v-if="m" class="sle-mon-cell">
