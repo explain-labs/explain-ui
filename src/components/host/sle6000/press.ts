@@ -1,6 +1,6 @@
 import { getCurrentInstance, onBeforeUnmount } from "vue";
 
-// Tap vs press-and-hold for the SLE6000 screen's controls (parameter tiles 2 s / 3 s, the
+// Tap vs press-and-hold for the SLE6000 screen's controls (parameter tiles 2 s, the
 // monitored values 1 s, the lock 1 s). The pointer is captured on press, and the hold is
 // cancelled only when the pointer really moves off the control (a bounds check on pointermove).
 // Not on pointerleave: in Safari every hold was cancelled and the release counted as a tap
