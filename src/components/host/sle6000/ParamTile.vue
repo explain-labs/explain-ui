@@ -79,8 +79,10 @@ const { down, move, up, cancel } = usePress({
       <path :d="arc(135, 405)" class="track" />
       <path v-if="fillPath" :d="fillPath" class="fill" :style="{ stroke: COLORS[kind] }" />
       <path v-if="boostPath" :d="boostPath" class="fill" :style="{ stroke: BOOST }" />
-      <text :x="CX" :y="CY + 6" class="value" :class="{ off }">{{ text }}</text>
-      <text v-if="tag" :x="CX" :y="CY + 15" class="tag">{{ tag }}</text>
+      <!-- with a tag (OxyGenie) the value and "Auto" / "---" stack in the disc at nearly the same
+           size, as on the device (ward photo: "25" over "Auto") -->
+      <text :x="CX" :y="tag ? CY - 1 : CY + 6" class="value" :class="{ off, tagged: !!tag }">{{ text }}</text>
+      <text v-if="tag" :x="CX" :y="CY + 13" class="tag">{{ tag }}</text>
       <text :x="pt(135)[0] - 1" :y="90" class="end" text-anchor="start">{{ ends ? ends[0] : fmtEnd(min) }}</text>
       <text :x="pt(45)[0] + 1" :y="90" class="end" text-anchor="end">{{ ends ? ends[1] : fmtEnd(max) }}</text>
       <text :x="CX" :y="98" class="unit">{{ unit }}</text>
@@ -152,9 +154,12 @@ const { down, move, up, cancel } = usePress({
 .value.off {
   font-size: 17px;
 }
+.value.tagged {
+  font-size: 16px;
+}
 .tag {
   fill: currentColor;
-  font-size: 7.5px;
+  font-size: 13px;
   text-anchor: middle;
 }
 .end,

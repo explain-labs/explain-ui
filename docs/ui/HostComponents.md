@@ -96,8 +96,8 @@ and is the app's only ventilator UI.
   pressure orange, O2 green, sensitivity white). Its states are available, selected (white) and
   preview (black). A tap selects it. A hold emits `hold`: 2 s switches on an Off function (VTV, RR
   Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 opens the O2
-  menu (see OxyGenie below). `display` / `ends` show a list setting by name, and `tag` puts a small
-  text under the value (OxyGenie's "Auto" / "---").
+  menu (see OxyGenie below). `display` / `ends` show a list setting by name, and `tag` puts a
+  text under the value at nearly its size (OxyGenie's "Auto" / "---", as "25 / Auto" on the device).
 - **Tap vs hold** (`press.ts`, `usePress`), shared by the tiles, the monitored values (1 s) and
   the Lock button (1 s). The pointer is captured on press, and a hold is cancelled only when the
   pointer moves off the control (a bounds check on `pointermove`), not on `pointerleave`. In Safari,
@@ -144,7 +144,7 @@ and is the app's only ventilator UI.
     it and Confirm calls `sle_oxygenie(true)`. With OxyGenie on the hold offers only that button,
     and Confirm switches it off (no Boost while it is on, p121).
   - **Status box** beside the O2 tile, where the +/− buttons and Confirm go (p120). It is drawn
-    as on a ward photo of the device: about 1.5 tiles wide, solid green (#72dc20, sampled) with
+    as on a ward photo of the device: about 1.5 tiles wide, solid green (#57a61b: the hue of the photo, darker than its overexposed #72dc20) with
     white "OxyGenie" / the state / the target range. The states are "Auto", "Waiting for Signal"
     (no valid SpO2; its colour is not documented, so it stays green), and a blue "Manual
     Override" with its 30 s countdown. It is hidden while a setting is being edited. The O2 tile shows
