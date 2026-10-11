@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **452 settable params**, **48 functions**
-(+ 62 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **452 settable params**, **52 functions**
+(+ 66 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -38,6 +38,10 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `call` `Ventilator.sle_standby` — SLE6000: standby, stop ventilation (no args)
 - `call` `Ventilator.sle_manual_breath` — SLE6000: one manual breath (no args)
 - `call` `Ventilator.sle_o2_boost` — SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)
+- `call` `Ventilator.sle_oxygenie` — SLE6000: OxyGenie closed-loop O2 on/off (arg: boolean); needs SpO2 monitoring and a running ventilator
+- `call` `Ventilator.sle_spo2_monitoring` — SLE6000: SpO2 monitoring on/off (arg: boolean)
+- `call` `Ventilator.sle_set_spo2_target` — SLE6000: OxyGenie SpO2 target range (arg: 90-94, 91-95, 92-96 or 94-98)
+- `call` `Ventilator.set_spo2_probe` — SpO2 probe on the patient (arg: boolean; false = detached, no signal: OxyGenie waits for a signal)
 - `call` `Ventilator.sle_sigh` — SLE6000 HFOV: one sigh at Sigh P for Sigh Ti (no args)
 - `call` `Ventilator.sle_osc_pause` — SLE6000 HFOV: oscillation pause at MAP for up to 60 s; call again to cancel (no args)
 - `setProp` `Heart.heart_rate_ref` — reference heart rate (bpm)
@@ -689,6 +693,10 @@ _call_:
 - `sle_set(name (list, one of rr/ti/peep/pip/rise/trig_sens/term_sens/rr_backup/p_support/vtv/o2/freq/ie/map/dp/hfo_vtv/sigh_rr/sigh_ti/sigh_p/hfo_activity); value (number))` — change a setting
 - `sle_manual_breath()` — manual breath
 - `sle_o2_boost(state (boolean))` — O2 Boost (+10 % for 2 min)
+- `sle_oxygenie(state (boolean))` — OxyGenie (closed-loop O2)
+- `sle_spo2_monitoring(state (boolean))` — SpO2 monitoring
+- `sle_set_spo2_target(range (list, one of 90-94/91-95/92-96/94-98))` — OxyGenie SpO2 target range (%)
+- `set_spo2_probe(attached (boolean))` — SpO2 probe on the patient
 - `sle_sigh()` — HFOV sigh (Sigh P for Sigh Ti)
 - `sle_osc_pause()` — HFOV oscillation pause (60 s, again to cancel)
 - `sle_set_circuit(diameter (number, mm, range 10–15))` — patient circuit (mm)
@@ -862,6 +870,8 @@ physiological quantity LOWERS the lever — noted per task.
   - e.g. `{"op":"call","model":"Ventilator","target":"set_tube_position","args":[<"trachea" | "right_main" | "extubated">],"reason":"Tube"}`
 - **Ventilator circuit connection** — call `Ventilator.set_circuit_connected` (current value `circuit_connected`), choices `true` (Connected), `false` (Disconnected). While ventilating. Disconnected: circuit pressure falls to ~0, no PEEP, only the baby's own breaths through the tube.
   - e.g. `{"op":"call","model":"Ventilator","target":"set_circuit_connected","args":[<true | false>],"reason":"Circuit"}`
+- **SpO2 probe (ventilator's sensor)** — call `Ventilator.set_spo2_probe` (current value `spo2_probe_attached`), choices `true` (Attached), `false` (Detached). The SLE6000's SpO2 sensor. Detached: no SpO2 signal; with OxyGenie on it waits for a signal, holds the O2 for 60 s, then moves it slowly towards the reference O2.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_spo2_probe","args":[<true | false>],"reason":"SpO2 probe"}`
 - **Bronchial plug, left main bronchus** — call `Respiration.set_airway_obstructed_left` (current value `airway_obstructed_left`), choices `false` (Open), `true` (Plugged). A plug in the left main bronchus: no gas in or out, and the trapped gas is absorbed, so the left lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.
   - e.g. `{"op":"call","model":"Respiration","target":"set_airway_obstructed_left","args":[<false | true>],"reason":"Bronchial plug L"}`
 - **Bronchial plug, right main bronchus** — call `Respiration.set_airway_obstructed_right` (current value `airway_obstructed_right`), choices `false` (Open), `true` (Plugged). A plug in the right main bronchus: no gas in or out, and the trapped gas is absorbed, so the right lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.

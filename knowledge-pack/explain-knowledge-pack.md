@@ -2856,7 +2856,8 @@ Then resets the non-persistent factors `el_base_factor` and `el_k_factor` to `1.
 u_vol_eff = u_vol + (u_vol_factor − 1)·u_vol + (u_vol_factor_ps − 1)·u_vol + (u_vol_factor_scaling_ps − 1)·u_vol
 ```
 
-Then resets the non-persistent factor `u_vol_factor` to `1.0`.
+It is floored at 0. The layers add, so several writers lowering them at once (Surfactant derecruitment
+plus atelectasis) could otherwise produce a negative unstressed volume. Then resets the non-persistent factor `u_vol_factor` to `1.0`.
 
 ### `calc_pressure`
 
@@ -5202,6 +5203,10 @@ dif_o2_step = dif_o2
             + (dif_o2_factor_scaling  − 1) · dif_o2
 ```
 
+Both constants are floored at 0. The layers add, so several writers lowering them at once (Surfactant
+derecruitment plus atelectasis) could otherwise make one negative. Gas would then be pumped against
+its gradient, and the blood gases would blow up.
+
 ## Calculation cycle (`calc_model`)
 
 1. Resolve `_blood` / `_gas` from `model.models`.
@@ -7355,9 +7360,17 @@ rates is kept (with a running sum) and averaged into `heart_rate`, so it updates
 
 **Respiratory rate** — `calc_resp_rate()` detects a breath when an **active** breathing source reaches
 the start of inspiration (`ncc_insp === 1`): the spontaneous `Breathing` model (when
-`breathing_enabled`) or the `Ventilator` (when `is_enabled`). It keeps a rolling window of
-breath-to-breath intervals spanning ~`rr_avg_time` seconds and reports `breaths / window-time × 60`,
-updated every breath. Both references are optional (`?? null`); a missing source is simply skipped.
+`breathing_enabled`) or the `Ventilator` (when `is_enabled`). One breath counts once: a ventilator
+breath that starts while a spontaneous inspiration is running (`Breathing.insp_running`) is the breath
+that effort triggered or landed on, and an effort that starts during a ventilator inspiration
+(`Ventilator._inspiration`) is fused into it. So in patient-triggered modes (PTV, PSV, synchronised
+SIMV breaths) the rate is the patient's rate, and in unsynchronised CMV it is the set rate plus the
+efforts that fall between the ventilator breaths. It keeps a rolling window of breath-to-breath
+intervals spanning ~`rr_avg_time` seconds and reports `breaths / window-time × 60`, updated every
+breath. When no breath starts for a whole window (apnoea), `resp_rate` follows the open interval
+(`60 / time since the last breath`) and the window restarts with the next breaths; the interval that
+ends the apnoea is not counted. Both references are optional (`?? null`); a missing source is simply
+skipped.
 
 **End-tidal CO₂** — while the `Ventilator` is enabled, `etco2` is mirrored straight from
 `Ventilator.etco2`. Otherwise it is derived from the spontaneous breath: `calc_resp_rate` tracks the
@@ -7449,9 +7462,10 @@ matching `flow_targets`:
 - **Pure observer.** The Monitor never writes to the models it samples; no model depends on it. The
   `DataCollector` reads its outputs through the watchlist like any other model.
 - **Breath sourcing.** `resp_rate` counts breaths from the spontaneous `Breathing` source *and* the
-  `Ventilator` (each gated by its enable flag). In assisted ventilation, where both are active, both
-  breath types are counted, which can overcount the rate; in purely spontaneous or purely ventilated
-  states it is correct.
+  `Ventilator` (each gated by its enable flag), merging the two onsets of one breath (above). Before
+  the merge, every patient-triggered breath was counted twice (effort onset + triggered ventilator
+  breath), so PTV/PSV showed about double the real rate. An effort during a ventilator inspiration
+  in CMV is not counted (fused breath).
 - **Start-up transient.** The first heart-rate and respiratory-rate windows include the time before
   the first beat/breath, so the very first read-out is slightly off; it settles after one window.
 - **`do2_br` / `do2_lb` need `AA` / `AD`.** The oxygen-delivery metrics read the aortic O₂ content
@@ -8127,7 +8141,7 @@ The reusable physical primitives every component model is built from.
 | Doc | Models |
 |---|---|
 | [Ventilator](./Ventilator.md) | Mechanical ventilator physics (modes incl. CPAP/PS/HFOV via ET tube); the base of Sle6000, and the adults' ventilator. |
-| [Sle6000](./Sle6000.md) | SLE6000 neonatal ventilator, the ventilator of every scenario up to 30 kg: the Ventilator driven through the device's modes, settings, circuits and monitored values. |
+| [Sle6000](./Sle6000.md) | SLE6000 neonatal ventilator, the ventilator of every scenario up to 30 kg: the Ventilator driven through the device's modes, settings, circuits and monitored values, with the OxyGenie closed-loop O2 controller. |
 | [Ecls](./Ecls.md) | Extracorporeal life support (ECMO): pump, oxygenator, cannulae. |
 | [Monitor](./Monitor.md) | Patient monitor; derives displayed vitals from model state. |
 | [Resuscitation](./Resuscitation.md) | Resuscitation interventions (chest compressions). |
@@ -8638,6 +8652,8 @@ A single set of system-wide multipliers over the respiratory tree:
 - **Lung / chest-wall stiffness** — `el_lungs_factor`, `el_thorax_factor`.
 - **Airway resistance** — `res_upper_airways_factor`, `res_lower_airways_factor`.
 - **Gas-exchange efficiency** — `gex_factor` (drives both O₂ and CO₂ diffusion).
+- **Atelectasis** — `atelectasis_left`, `atelectasis_right`: the collapsed fraction of each lung (see
+  [Atelectasis](#atelectasis)).
 
 Each multiplier is translated into a **delta** on the corresponding `*_factor_ps` of the grouped
 models, so it composes additively with other writers of that persistent layer.
@@ -8670,6 +8686,20 @@ models, so it composes additively with other writers of that persistent layer.
 | `res_upper_airways_factor` | `1.0` | `set_upper_airway_resistance` | `r_factor_ps` on the upper airways |
 | `res_lower_airways_factor` | `1.0` | `set_lower_airway_resistance` | `r_factor_ps` on the lower airways |
 | `gex_factor` | `1.0` | `set_gasexchange` | `dif_o2_factor_ps` **and** `dif_co2_factor_ps` on the exchangers |
+
+### Atelectasis inputs
+
+| Property | Default | Method | Drives |
+|---|---|---|---|
+| `atelectasis_left` / `_right` | `0.0` | `set_atelectasis_left` / `_right` | collapsed fraction of that lung, clamped `0..atelectasis_max` |
+| `atelectasis_max` | `0.9` | — | upper clamp (a fully collapsed lung has no aerated volume left to scale) |
+| `atelectasis_hpv` | `0.3` | — | share of the collapsed units' perfusion that hypoxic pulmonary vasoconstriction removes from the lung |
+| `atelectasis_recruitable` | `true` | — | pressure reopens and re-collapses the affected units; `false` = obstructive/resorption atelectasis |
+| `atelectasis_open_pressure` / `_open_sd` | `25` / `3` cmH₂O | — | opening pressures of the collapsed units (normal distribution, on the distending pressure) |
+| `atelectasis_close_pressure` / `_close_sd` | `8.5` / `1.5` cmH₂O | — | closing pressures of the affected units |
+| `atelectasis_tau_open` / `_tau_close` | `3` / `30` s | — | recruitment and derecruitment time constants |
+| `intrapulmonary_shunt_left` / `_right` | `["IPSL"]` / `["IPSR"]` | — | the lung's shunt resistors (art → ven) |
+| `pulmonary_capillaries_left` / `_right` | `["LL_ART_LL_CAP", "LL_CAP_LL_VEN"]` / `["RL_…"]` | — | the lung's gas-exchanging path, in series |
 
 ### Series dead space (pushed to the `dead_space` compartments every update)
 
@@ -8721,6 +8751,143 @@ tier on the grouped models: `el_base_factor_ps` (lungs/thorax), `r_factor_ps` (a
 All factor inputs default to 1.0 (no effect). Disease scenarios raise lung/airway factors (e.g. RDS →
 stiff lungs, bronchospasm → high lower-airway resistance) or lower `gex_factor` (impaired diffusion).
 
+## Atelectasis
+
+A shunt alone is not atelectasis. Lowering the intrapulmonary-shunt resistance reproduces the
+hypoxaemia but leaves the lung fully aerated: FRC, compliance and Vt do not change, so neither the
+ventilator readouts nor PEEP have anything to act on. A collapsed unit loses four things at once, and
+each lung already has a channel for each:
+
+| Collapsed fraction `c` | Channel | Layer |
+|---|---|---|
+| aerated volume ×(1 − c) | `ALL`/`ALR` `u_vol` | `u_vol_factor_ps` (delta) |
+| elastance ×1/(1 − c) (fewer units in parallel) | `ALL`/`ALR` `el_base` | `el_base_factor_ps` (delta) |
+| exchange surface ×(1 − c) | `GASEX_LL`/`GASEX_RL` `dif_o2`, `dif_co2` | `dif_*_factor_ps` (delta) |
+| perfusion of the collapsed units → shunt | `IPSL`/`IPSR` and the capillary resistors | `r_factor` (every step) |
+
+The gas side follows the other `set_*` methods: the change in the target multiplier since the last
+call is added to the persistent layer, so a set-and-clear round trip restores the start values and it
+composes with `el_lungs_factor`, `gex_factor` and Surfactant's non-persistent layer.
+
+**Perfusion.** The capillary path and the intrapulmonary shunt both run from `xL_ART` to `xL_VEN`, so
+they see the same pressure drop and split the lung's blood flow in the ratio of their conductances.
+With `G_ips`, `G_cap` the conductances without the non-persistent layer and `s0 = G_ips / (G_ips + G_cap)`
+the shunt share of the aerated lung:
+
+```
+G_tot' = (G_ips + G_cap) · (1 − c·hpv)                    hypoxic vasoconstriction diverts blood away
+s'     = s0 + (1 − s0) · c·(1 − hpv) / (1 − c·hpv)        the rest of the collapsed units' blood is shunted
+```
+
+Each shunt resistor is scaled by `G_ips / (s'·G_tot')` and each capillary resistor by
+`G_cap / ((1 − s')·G_tot')`, written on the non-persistent `r_factor` every step: `r_factor_ps` on
+`IPSL`/`IPSR` belongs to [Surfactant](./Surfactant.md) and the scaling layer to the Calibrator and
+`ModelScaler`, and the factors are computed against those layers so they compose. Because the split is
+set from conductance ratios, the shunt share does not depend on the scenario's `Shunts.ips_res`
+(preterm 1600–4200, term 5000). With `c = 0` nothing is written.
+
+On `term_neonate`, right lung, room air (`scripts/probe_atelectasis.mjs`):
+
+| c | SaO₂ | PaO₂ | lung Qs | Qs/Qt | ALR ml | CMV 20/5: Vte | C (ml/mbar) |
+|---|---|---|---|---|---|---|---|
+| 0 | 96.3 | 70 | 9 % | 9 % | 53 | 46.6 | 3.10 |
+| 0.3 | 93.7 | 58 | 30 % | 19 % | 39 | 42.9 | 2.86 |
+| 0.6 | 89.6 | 47 | 56 % | 32 % | 23 | 37.8 | 2.52 |
+| 0.9 | 82.2 | 39 | 88 % | 47 % | 6 | 31.2 | 2.08 |
+
+These are the static effects, measured with `atelectasis_recruitable = false`.
+
+### Recruitment
+
+Setting a lung's atelectasis (`set_atelectasis_left/right`, or the prop) defines both the collapsed
+fraction `c` and the **unstable** region `u = c`: the units prone to collapse. Within it, `x = c / u`
+is the share that is collapsed. Healthy lungs (`u = 0`) never derecruit, and setting 0 resolves the
+atelectasis completely. Recruited units **stay unstable**: they keep their closing pressure, so only
+PEEP keeps them open.
+
+Each unit has an opening and a closing pressure, normally distributed (the Hickling picture of
+recruitment). They are evaluated every update (15 ms) on the lung's instantaneous **distending
+pressure** `p = ALx.pres_in` (alveolar recoil = airway − pleural) in cmH₂O:
+
+```
+can_stay_closed = 1 − Φ((p − TOP) / sd_open)      units whose opening pressure is above p
+must_close      = 1 − Φ((p − TCP) / sd_close)     units whose closing pressure is above p
+x > can_stay_closed:  x → can_stay_closed  with tau_open     (recruitment)
+x < must_close:       x → must_close       with tau_close    (derecruitment)
+otherwise:            hold                                    (hysteresis)
+```
+
+Because `p` is instantaneous, recruitment follows the time spent at pressure. A sustained inflation or
+an HFOV sigh opens more than brief breaths at the same peak. Every change of `c` goes through the same
+persistent-layer deltas as a user change, and the perfusion follows it every step.
+
+**Calibration.** At end-expiration the pleural pressure in this model is about −4.5 cmH₂O, so the
+distending pressure sits roughly 5 cmH₂O above the set PEEP. On `term_neonate`, the collapsed lung's
+distending pressure in cmH₂O, min–max:
+
+| | range |
+|---|---|
+| spontaneous | 4–8 |
+| CMV 20/0 | 5–22 |
+| CMV 20/2 | 7–22 |
+| CMV 20/5 | 10–22 |
+| CMV 28/8 | 12–27 |
+
+The closing pressure is 8.5 cmH₂O (about PEEP 4 at the airway), with sd 1.5. So PEEP ≥ 8 holds
+everything, PEEP 5 lets about a fifth of the unstable region re-collapse, and PEEP 2 or no support
+re-collapses most of it.
+
+The opening pressure is 25 cmH₂O (sd 3), the range of a neonatal sustained inflation. CMV 20/5
+recruits only a little (its peak sits in the tail), while PIP 28 or a sigh of 27 mbar opens most of it.
+
+Trace on `term_neonate`, right lung, set to 0.6 on SLE CMV 20/5 (`scripts/probe_atelectasis.mjs`):
+
+| phase | c | SaO₂ | lung Qs | ALR ml |
+|---|---|---|---|---|
+| CMV 20/5, 2 min after setting 0.6 | 0.53 | 91.1 | 49 % | 32 |
+| PIP 28 / PEEP 8, 1 min | 0.29 | 94.3 | 30 % | 52 |
+| PIP 20 / PEEP 8, 2 min (holds) | 0.29 | 94.2 | 29 % | 50 |
+| PEEP 5, 3 min (holds) | 0.29 | 94.7 | 29 % | 47 |
+| PEEP 2, 3 min (re-collapses) | 0.49 | 92.2 | 45 % | 33 |
+| HFOV MAP 12 + 5 sighs 27 mbar × 3 s | 0.19 | 94.7 | 22 % | 57 |
+| Standby, spontaneous, 3 min | 0.55 | 90.6 | 50 % | 26 |
+
+With `atelectasis_recruitable = false` (a mucus plug, resorption atelectasis) the collapse ignores
+pressure. In the preterm scenarios [Surfactant](./Surfactant.md) keeps its own whole-lung
+recruitment on the non-persistent layer. The two run independently and their effects add.
+
+The thresholds are calibrated on the term lung. In `preterm_28wk`, recruitment with PIP 28 or sighs
+works the same way, but PEEP 8 already lets some re-collapse. At PEEP ≤ 5, Surfactant derecruits the
+whole lung as well, so a surfactant-deficient lung needs more PEEP, as at the bedside.
+
+Because the factor layers add up, Surfactant's derecruitment and atelectasis together can take a
+lung's effective unstressed volume or diffusion constant below zero. [Capacitance](./Capacitance.md)
+floors `u_vol_eff` and [GasExchanger](./GasExchanger.md) the diffusion constants at 0. A negative
+diffusion constant would pump gas against its gradient and blow up the blood gases.
+
+### Bronchus obstruction and resorption
+
+`airway_obstructed_left` / `_right` (setters `set_airway_obstructed_left/right`) close a main
+bronchus (`DS_ALx.no_flow`) with a mucus plug. A tube in the right main bronchus blocks the left one
+through `set_tube_block(side, state)` (called by [Ventilator](./Ventilator.md#airway-events)). That
+block is kept apart from the plug, and the bronchus is closed while either holds. No gas moves in or out, and the
+trapped gas is absorbed into the blood, so the lung collapses (resorption atelectasis):
+
+```
+c → atelectasis_max    with tau = tau_air + (tau_o2 − tau_air) · (FO₂_trapped − 0.21) / 0.79
+```
+
+Oxygen absorbs fast and nitrogen slowly, so the time constant runs from `atelectasis_resorb_tau_air`
+(1800 s, trapped room air) to `_tau_o2` (240 s, trapped oxygen). `FO₂_trapped` is the lung's `fo2`
+captured at the moment of obstruction. The absorbed gas leaves the lung: each update holds the
+trapped lung at its captured recoil pressure, so it deflates instead of pressurising as it stiffens.
+The collapsed units join the unstable region. While obstructed, pressure recruitment of that lung
+pauses. Once the bronchus is open again, pressure recruits it and PEEP keeps it open.
+
+On term_neonate with a right-mainstem tube on CMV 20/5, the left lung's collapse after 10 minutes is
+0.26 on air and 0.67 on oxygen. A right bronchial plug in a spontaneously breathing baby takes SaO₂
+from 96 to 76 % in 5 minutes.
+
 ## Example definition (JSON)
 
 From `term_neonate.json`:
@@ -8765,9 +8932,9 @@ From `term_neonate.json`:
 - **Factors are cumulative and shared.** `*_factor_ps` is written by several models; `Respiration`
   only adds its delta. A factor driven to the 0 clamp stops tracking further decreases until the
   target rises again — inherent to the per-model persistent-factor scheme.
-- **Side- and space-specific lists are reserved.** `pleural_space_left/right`, `intrapulmonary_shunt`,
-  and the `_left`/`_right` airway/lung/exchanger lists are declared but **not** used by any method —
-  hooks for future per-side control.
+- **Side- and space-specific lists.** The `left_lung`/`right_lung` and
+  `gas_exchanger_left_lung`/`_right_lung` lists are used by atelectasis; `pleural_space_left/right`,
+  `intrapulmonary_shunt` and the `_left`/`_right` airway lists are declared but not used by any method.
 - **Group membership is name-based** — a model is only affected if its name is in the relevant list.
 
 ````
@@ -9195,7 +9362,7 @@ Consequences for how it should behave:
 
 ### FILE: explain-engine/docs/Sle6000.md
 
-```markdown
+````markdown
 # Sle6000
 
 **Source:** [`device_models/Sle6000.js`](../device_models/Sle6000.js), settings table in
@@ -9210,10 +9377,10 @@ to it.
 
 **Phase 1** covers the invasive conventional modes CPAP, CMV, PTV, PSV and SIMV, with volume
 targeting (VTV). **Phase 2** adds the invasive oscillatory modes: HFOV, with VTV, sighs and
-oscillation pause, and HFOV+CMV (see [HFO](#hfo-phase-2)). These come in later phases:
+oscillation pause, and HFOV+CMV (see [HFO](#hfo-phase-2)). The closed-loop O2 controller
+[OxyGenie](#oxygenie), with the SpO2 sensor, is in as well. These come in later phases:
 - the non-invasive modes, including nHFOV
 - alarms
-- OxyGenie
 
 ## Using it in a scenario
 
@@ -9278,6 +9445,10 @@ the other modes.
 | `sle_osc_pause()` | HFOV Oscillation Pause: oscillation stops at MAP for up to 60 s, a second press cancels (p155). `hfo_pause_remaining` counts down |
 | `sle_o2_boost(state)` | O2 Boost: set O2 + `sle_o2_boost_inc` (10 %) for 2 minutes, then back (p128). `o2_boost_remaining` counts down |
 | `sle_set_circuit(d)` | 10 or 15 mm patient circuit |
+| `sle_oxygenie(state)` | OxyGenie on/off (p119). On needs SpO2 monitoring and a running ventilator; it cancels an O2 Boost. See [OxyGenie](#oxygenie) |
+| `sle_set_spo2(settings)` | Utilities → Sensors → SpO2 (p104): `on` (monitoring), `target` (`"90-94"`, `"91-95"`, `"92-96"`, `"94-98"`), `avg` (averaging time, s: 3 = 2–4, 5 = 4–6, 8, 10 … 16). Monitoring off switches OxyGenie off |
+| `sle_spo2_monitoring(state)` / `sle_set_spo2_target(range)` | Single-setting forms of `sle_set_spo2`, for the bot and the model editor |
+| `set_spo2_probe(attached)` | The sensor on or off the patient (an event, not a device setting). Off: no valid SpO2 |
 
 Switching the ventilator off by any route (`switch_ventilator(false)`) is the device's Standby.
 
@@ -9293,7 +9464,12 @@ Switching the ventilator off by any route (`switch_ventilator(false)`) is the de
 ## Modes → generic ventilator
 
 Every mode assumes a flow sensor at the tube (invasive). That means a flow trigger at `sle_trig_sens`
-and flow-cycled support at `sle_term_sens`.
+and flow-cycled support at `sle_term_sens`. The flow trigger has patient leak compensation up to
+35 % (`leak_comp_max_perc`, §20.6.1 p127): a tube leak within that range doesn't auto-trigger, a
+larger one does. PSV termination has the automatic leak compensation of §20.6.4: leak flows
+up to 5 l/min or half the peak flow, while the leak is 10–50 %. Within that range a breath
+cycles on flow, not Ti Max. See *Leak and the flow trigger* and *Leak and flow cycling* in
+[Ventilator](./Ventilator.md).
 
 | SLE mode | Generic mode | Notes |
 |---|---|---|
@@ -9424,6 +9600,120 @@ be lower than the set ΔP; here the servo holds the circuit pressure, so it matc
 - Vmin, Vte, DCO2 and Leak
 - R and C
 
+## Airway events
+
+The generic [Ventilator](./Ventilator.md#airway-events) supplies right mainstem intubation,
+accidental extubation and circuit disconnection, and Standby ends them. There are no alarms yet, so
+they show up in the monitored values (Vte, leak, C, pressures), the waveforms and the patient
+monitor.
+
+## OxyGenie
+
+OxyGenie is the SLE6000's optional closed-loop O2 controller (manual chapter 19, pp 118–121). It keeps
+the SpO2 inside a target range by setting the O2 once a second. The algorithm is the adaptive PID
+controller developed in Hobart by Gale and Dargaville (University of Tasmania and Royal Hobart Hospital,
+the VDL1.x algorithm), licensed to SLE in 2018. The constants below come from the example embodiment of
+the patent and the device behaviour from the manual.
+
+**Sources:**
+- Patent US11135384B2, *Method, apparatus and system for automatically controlling inspired oxygen
+  delivery* (Gale TJ, Dargaville PA; University of Tasmania; priority 2015).
+- Dargaville PA et al. *Development and preclinical testing of an adaptive algorithm for automated
+  control of inspired oxygen in the preterm infant.* Arch Dis Child Fetal Neonatal Ed 2017;102:F31–F36.
+- Plottier GK et al. *Clinical evaluation of a novel adaptive algorithm for automated control of
+  oxygen therapy in preterm infants on non-invasive respiratory support.* Arch Dis Child Fetal
+  Neonatal Ed 2017;102:F37–F43.
+- Sturrock S et al. *A randomised crossover trial of closed loop automated oxygen control in preterm,
+  ventilated infants.* Acta Paediatr 2020 (OxyGenie on the SLE6000).
+
+### The SpO2 sensor
+
+- `mon_spo2` is the ventilator's own reading: the preductal saturation (`AA.so2`, the patient
+  monitor's `sao2_pre`), read once a second (the blood gases update at 1 Hz) and averaged over the
+  averaging time (`sle_spo2_avg`, default 8 s, p104). While OxyGenie is on the averaging is fixed at
+  2–4 s (3 s here, p120).
+- It is `null`, no valid signal, when SpO2 monitoring is off (`sle_spo2_on`) or the probe is off the
+  patient (`spo2_probe_attached`).
+- The simulated SpO2 has no noise, artefact or pleth/SIQ signal.
+
+### States (`oxy_state`, pp 118–119)
+
+| State | Screen | Behaviour |
+|---|---|---|
+| `off` | no status box | The O2 control is the user's setting |
+| `auto` | "Auto" | The controller sets the O2 every second. The O2 control (`sle_o2`) shows the delivered value, in 0.5 % steps |
+| `fallback` | "Waiting for signal", O2 `---` | No valid SpO2. First 60 s: hold the O2. Then, by the last valid reading: in the range, hold; above it, move down towards the reference O2; below it, move up towards it. A valid reading resumes Auto at once |
+| `override` | "Manual Override" + countdown, blue | Touching O2 (any `sle_apply` that carries `o2`) delivers the user's O2 for 30 s (`oxy_override_remaining`); it cannot be cancelled. Then Auto resumes from that O2 |
+
+Switching off (`sle_oxygenie(false)`, SpO2 monitoring off, Standby) leaves the O2 control at the last
+delivered value. O2 Boost is refused while OxyGenie is on (p121).
+
+### The controller (patent, example embodiment)
+
+Every second, with the error `e = SpO2 − midpoint` of the target range (`sle_spo2_target`, 91–95 %
+by default, so 93 %):
+
+```
+O2 = round_0.5( clamp( ref + clamp(P + I + D, ±40), 21, 100 ) )     ref = min(oxy_ref_o2, 60)
+```
+
+- **P** = `Kp · adapt · Kpfm · max(e, −13)`, with `Kp = −1` (% O2 per % SpO2).
+  - `max(e, −13)`: the error is capped below, as SpO2 is unreliable low.
+  - `Kpfm`, target-range attenuation: ×0.25 within 1 % of the midpoint, ×0.5 within 2 %, else ×1.
+  - `adapt`, lung-severity adaptation: ×0.5 at a reference O2 of 21 % rising linearly to ×1.0 at
+    40 %. A stiffer lung (higher O2 requirement) has a flatter SpO2 response to O2, so it gets more
+    gain.
+- **I** = `Ki · Σe`, `Ki = −0.0125` (% O2 per %·s).
+  - Severinghaus compensation: while the integral term still holds the O2 up (I > 0) a positive
+    error is multiplied by the steepness of the PaO2–SpO2 curve, so a hyperoxic infant is weaned
+    fast. The multipliers (patent Table 2):
+
+    | SpO2 % | ≤ 91 | 92 | 93 | 94 | 95 | 96 | 97 | 98 | 99 | 100 |
+    |---|---|---|---|---|---|---|---|---|---|---|
+    | × | 1 | 1.2 | 1.4 | 1.7 | 2.2 | 2.9 | 4.4 | 7.9 | 20.1 | 50 |
+
+    The compensation stops when the integral term reaches zero.
+  - At room air a positive error is not accumulated (there is nothing left to wean).
+  - Anti-windup: |I| ≤ 40 %.
+- **D** = `Kd · slope`, `Kd = −1`, the least-squares slope of the last 5 readings (%/s). It is zero
+  while the SpO2 falls from above the target range (all 5 readings above it).
+- **Reference O2** (`oxy_ref_o2`): starts at the O2 set when OxyGenie is switched on (the manual asks
+  for an appropriate O2 before activation, p38), then every 30 minutes becomes the average delivered
+  O2 of the last hour, by at most 10 % per update (p118). The integrand absorbs a change, so the O2
+  does not jump. For the ±40 % limit the reference is capped at 60 %, so the O2 can always reach 21 %.
+- **Bumpless restart:** at the end of an override and when the signal returns, the integrand is set
+  so that the output equals the O2 delivered at that moment.
+- **"O2 > N %"** (`oxy_high_o2_flag`, p228): set when Auto has delivered more than `sle_oxy_high_o2`
+  (default 60 %) for 10 s, the default SpO2 alarm delay. There is no alarm system yet; the screen
+  shows it as a message.
+
+The gains are plain properties (`oxy_kp`, `oxy_ki`, `oxy_kd`), not device settings.
+
+### Behaviour in the model
+
+`scripts/probe_oxygenie.mjs` (CMV, apnoeic patient):
+
+| Case | Result |
+|---|---|
+| preterm_26wk on air, SpO2 ≈ 70 % | O2 41 % after 60 s; SpO2 91.8 % after 10 min (O2 ≈ 53 %), never above 92 % |
+| term_neonate on 60 %, SpO2 ≈ 100 % | weaned to 21 % in about 8 min, SpO2 never below 97.9 % |
+
+The O2 → SpO2 response of the model is slow and flat in shunt-dominated disease: right-lung
+atelectasis needs ≈ 50 % O2 for 94 % with 60 % collapse. The SpO2 time constant after an O2 step is
+about 30 s (alveolar wash-in plus circulation). So the closed loop responds through its integral term
+over minutes, not the 19–20 s response time of the manual's test conditions (p169).
+
+### Not modelled
+
+From the patent: the self-tuning of Kp every 30 min (the hyperoxia/hypoxia time ratio), the Kp
+boosts after a respiratory pause or a CPAP pressure loss, the transient O2 rise in apnoea, and the
+signal validation (pleth shape, perfusion index, HR match). The patent derives the reference O2 from
+a V/Q–shunt estimate it does not specify; the manual describes it as the average requirement of the
+last hour, which is what is modelled. The 10 % reference rate limit is taken as 10 percentage points
+(the patent does not say whether it is relative). The speed of the fallback drift ("slowly", p119) is
+not given; it is 1 % per 30 s here. O2 Suction (p127) is not modelled, so its OxyGenie interlock
+isn't either.
+
 ## Not modelled yet, and assumptions
 
 - **Pressure response (12 ms).**
@@ -9467,6 +9757,10 @@ be lower than the set ΔP; here the servo holds the circuit pressure, so it matc
 
 ## Verification
 
+`node scripts/probe_oxygenie.mjs` runs pass/fail checks of OxyGenie: titration of a hypoxaemic
+preterm into the range, weaning a hyperoxic term neonate to air, the manual override and its bumpless
+restart, the fallback hold and drift, the "O2 > N %" flag and the interlocks.
+
 `node scripts/probe_sle6000.mjs` runs pass/fail checks on `term_neonate`:
 - settings validation and interlocks
 - CMV pressures, timing and monitored values
@@ -9489,7 +9783,7 @@ be lower than the set ΔP; here the servo holds the circuit pressure, so it matc
   - manual breath
   - the way back to CMV
 
-```
+````
 
 ### FILE: explain-engine/docs/Surfactant.md
 
@@ -10694,6 +10988,7 @@ VENT_GASIN ──[VENT_INSP_VALVE]──► VENT_GASCIRCUIT ──[VENT_ETTUBE]�
 | `VENT_ETTUBE` | Resistor | ET tube (`VENT_GASCIRCUIT → DS`); its `r_for`/`r_back` are driven by `calc_ettube_resistance` |
 | `VENT_EXP_VALVE` | Resistor | Expiratory valve (`VENT_GASCIRCUIT → VENT_GASOUT`) |
 | `VENT_LEAK` | Resistor | Leak around an uncuffed tube (`DS → MOUTH`), driven by `leak_size`. Added by `init_model` when a scenario does not declare it. |
+| `VENT_DISCONNECT` | Resistor | The open Y-piece of a disconnected circuit (`VENT_GASCIRCUIT → MOUTH`, `disconnect_resistance`), closed unless `circuit_connected` is false. Added by `init_model` when a scenario does not declare it. |
 
 References to the first six are cached in `init_model` and held in `_ventilator_parts` for batch enable/disable. `VENT_LEAK` is handled separately: it is only open while the ventilator is on **and** `leak_size > 0`.
 
@@ -10739,6 +11034,10 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `trigger_volume_perc` | % | Trigger volume as a percent of `tidal_volume` (default 6), with `trigger_mode` `"volume"` |
 | `trigger_mode` | string | `"volume"` (default): `trigger_volume_perc` of the set Vt during a patient effort; `"flow"`: `trigger_flow` at the tube |
 | `trigger_flow` | L/min | Flow-trigger threshold: inspiratory flow at the tube during expiration (default 0.6) |
+| `leak_compensation` | bool | Flow trigger: subtract the learned baseline leak flow before the threshold (default true) — see *Tube leak* |
+| `leak_comp_max_perc` | % | Compensate only while the leak (3-breath mean of `leak_perc`) is at most this (default 100; the SLE6000 sets 35) |
+| `leak_term_min_perc` / `leak_term_max_perc` | % | Flow cycling: compensate the leak only while it is within this range (default 0–100; the SLE6000 sets 10–50) |
+| `leak_term_max_flow` | L/min | Flow cycling: cap on the compensated leak flow (default 0 = no cap; the SLE6000 sets 5). It is also capped at half the peak flow |
 | `term_sens_perc` | % | Termination sensitivity: a `PS` (or SIMV support) breath cycles off when inspiratory flow falls below this % of its peak (default 30) |
 | `backup_rate` | /min | `CPAP` apnoea backup: a time-cycled breath at `pip_cmh2o`/`insp_time` after `60/backup_rate` s without a spontaneous effort (default 0 = off) |
 | `synchronized` | bool | Enable patient-trigger detection in `PC`/`PRVC`/`VC` (default false). `PS` and `SIMV` always trigger; ignored in `CPAP` |
@@ -10769,6 +11068,7 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `triggered_breath` | bool | True once a patient-triggered/synchronized breath has been armed |
 | `pip_delivered` | cmH₂O | The inspiratory pressure target in use: `pip_cmh2o` (PC), `peep + ps_cmh2o` (PS), or the working pressure in PRVC / volume guarantee |
 | `leak_perc` | % | Per-breath leak at the tube flow sensor, `(Vti − Vte)/Vti` |
+| `leak_flow_comp` | L/min | Baseline leak flow the flow trigger subtracts at the current pressure (0 = not compensating) |
 | `pressure_limited` | bool | Volume-targeted modes: working pressure at `pip_cmh2o_max` while Vt is still below target (the "Vt low / Pmax reached" alarm condition) |
 | `map_meas` | cmH₂O | Mean airway pressure over the last breath; without breaths (CPAP, HFOV, apnoea) over 3 s blocks |
 | `hfo_amplitude_delivered` | cmH₂O | HFOV amplitude in use: the set one, or the working one with volume targeting |
@@ -11168,14 +11468,99 @@ breath. Behaviour that comes out of the model (`scripts/probe_ventilator_leak.mj
   the pressure to its limit. The lung then gets *more* than the target (18 mL against 15), bounded
   only by the 130 % inspired-volume guard. This is the clinical reason VG is unreliable with large
   leaks.
-- **PS cycles on Ti max.** The leak keeps inspiratory flow from decaying to `term_sens_perc` of
-  peak.
+- **PS cycles on Ti max without leak compensation.** The circuit feeds the leak at the
+  inspiratory pressure, so the inspiratory flow levels off at the leak flow and never decays to
+  `term_sens_perc` of peak. With leak compensation it cycles on flow again (see *Leak and flow
+  cycling* below).
 - **Dead-space flush.** The continuous leak flow through `DS` washes out CO₂, which lowers PaCO₂
   a little, much like tracheal gas insufflation.
 - **VC is not compensated.** Leaked gas is lost from the set volume.
 
+### Leak and the flow trigger (leak compensation)
+
+During expiration the circuit keeps resupplying the leak through the tube to hold PEEP, so the tube
+flow sensor reads a steady *inspiratory* flow equal to the leak flow at PEEP. Uncompensated, that
+flow crosses `trigger_flow` and every breath auto-triggers once the minimal expiratory time has
+passed: term_neonate in SLE PTV 15/4/30, apnoeic, with a 1 mm leak was cycled at 58/min.
+
+Neonatal ventilators compensate for this, and so does the model. It learns the leak the way the
+device can, from its own sensor only (it never reads `VENT_LEAK`): over a whole breath the lung
+returns to its start volume, so the breath's net volume through the sensor is the leaked volume.
+With the orifice law Q = g·√P (P the circuit pressure),
+
+```
+g_breath = max(∫ flow dt, 0) / ∫ √P dt        (per breath, at the breath start)
+g        ← g + (g_breath − g)/3                 (filtered over ~3 breaths)
+trigger:   flow − g·√P  >  trigger_flow          (leak_flow_comp = g·√P, in L/min)
+```
+
+The first breaths after a leak appears are uncompensated while `g` builds up. Compensation applies
+only while the 3-breath mean of `leak_perc` is at most `leak_comp_max_perc`; above it the leak
+auto-triggers again, as on a device whose compensation range is exceeded. Results with the
+SLE6000 (limit 35 %), PTV 15/4/30, `scripts/probe_sle6000.mjs` section 14:
+
+| leak_size | Leak % | apnoeic: triggered / mandatory per 30 s | breathing: triggers per effort |
+|---|---|---|---|
+| 0 | 0 | 0 / 15 | 1.0 |
+| 0.7 mm | 20 | 0 / 15 | 1.0 |
+| 0.8 mm | 27 | 0 / 15 | 1.0 |
+| 0.9 mm | 36 | 22 / 0 (auto-triggering) | — |
+| 1.5 mm | 80 | 43 / 0 (auto-triggering) | — |
+
+The volume trigger (`trigger_mode "volume"`) needs no compensation: it only arms on a `Breathing`
+effort, so a leak alone never starts a breath. Not modelled: leak-corrected volumes.
+
+### Leak and flow cycling
+
+A flow-cycled breath (`PS`, and supported breaths in `SIMV`) ends when the inspiratory flow falls
+to `term_sens_perc` of its peak. With a leak the flow levels off at the leak flow at the
+inspiratory pressure instead. Once that is above the termination level, every breath runs to Ti
+max: with SLE PSV 15/4 (Ti Max 0.6 s, Term Sens 5 %) that is every breath from about 0.7 mm
+(20 % leak).
+
+With leak compensation, `_term_flow()` takes the learned leak flow `q = g·√P` off first:
+
+```
+end of breath:   flow − q  <  term_sens · (peak − q)
+```
+
+The breath ends when the patient's own flow has decayed to Term Sens of its peak, just above the
+leak flow level. The SLE6000 IFU (§20.6.4) says a termination level below the leak flow is
+"terminated at the leak flow level". The flow approaches that level from above and never crosses
+it, and the learned leak is about 10 % low at PIP (it is fitted over the whole breath). Ending at
+exactly the leak flow therefore still ran to Ti max, and the form above is used instead.
+
+As on the device:
+- `q` is capped at half the peak flow and at `leak_term_max_flow`;
+- it is applied only while the leak is within `leak_term_min_perc`–`leak_term_max_perc`.
+
+Results with the SLE6000 (5 l/min, 10–50 %), `probe_sle6000.mjs` section 15:
+
+| PSV 15/4, Ti Max 0.6 s | Leak % | breaths ending on Ti Max |
+|---|---|---|
+| 0.8 mm, compensation off | 28 | all |
+| 0.8 mm | 28 | none (mean Ti 0.58 s) |
+| 1.2 mm | 64 | all (above 50 %) |
+
 `Breathing` subtracts the leak flow from the airway-opening flow (see below), because gas that
 escapes around the tube never reaches the lungs.
+
+## Airway events
+
+Three events of the DOPE list, active only while ventilating. `switch_ventilator(false)` ends them:
+the tube goes back to the trachea and the circuit is reconnected. Resistors look their compartments
+up by name on every step, so each event re-routes `comp_from` / `comp_to` and restoring the names
+restores the circuit exactly. The tube's own ends (`VENT_GASCIRCUIT`, `DS`) are captured at init.
+
+| Event | Routing | What it shows |
+|---|---|---|
+| `tube_position = "right_main"` | sets [`Respiration.airway_obstructed_left`](./Respiration.md#bronchus-obstruction-and-resorption): `DS_ALL` closed | All the tidal volume goes to the right lung, so the measured C falls (term_neonate CMV 20/5: 3.1 → 1.9 ml/mbar) and SpO₂ falls. The left lung collapses by resorption, faster on oxygen. Pulling back leaves the collapse for recruitment. |
+| `tube_position = "extubated"` | `VENT_ETTUBE → MOUTH`; `MOUTH_DS` open; leak and tube dead space off | The ventilator blows into the room, so Vte is 0 and the leak 100 %. The patient breathes through the natural airway without PEEP. An apnoeic patient desaturates (60 % after 1 min). |
+| `circuit_connected = false` | `VENT_ETTUBE` from `MOUTH`; `VENT_DISCONNECT` open | Circuit pressure falls to about 2 cmH₂O. The proximal flow sensor stays on the tube and reads only the patient's own breaths. No PEEP. |
+
+The tube's block is kept apart from a bronchial plug (`Respiration.set_tube_block`), so either one
+can be cleared without opening a bronchus the other still blocks. `scripts/probe_airway_events.mjs` checks every
+event, its recovery, and the end of all events on Standby.
 
 ## Coupling to `Breathing`
 
@@ -11237,6 +11622,8 @@ the factor layers on `VENT_INSP_VALVE` / `VENT_ETTUBE` / `VENT_EXP_VALVE` are ge
 | `set_humidity(new_humidity)` / `set_temp(new_temp)` | Re-derive fresh-gas composition (both `VENT_GASIN` and `VENT_GASCIRCUIT`), and push the new humidity / temperature onto those compartments — see note below |
 | `set_ettube_diameter(d)` / `set_ettube_length(l)` | Update tube geometry → resistance |
 | `trigger_breath()` | Manual breath: ignored during inspiration, otherwise delivered after the minimal expiratory time (all modes except CPAP) |
+| `set_tube_position(pos)` | Airway event: `"trachea"`, `"right_main"` or `"extubated"` (see [Airway events](#airway-events)) |
+| `set_circuit_connected(state)` | Airway event: `false` disconnects the circuit from the tube |
 
 > **Why the setters write to the gas compartments directly.** `humidity` and `target_temp` are live
 > targets that [`GasCapacitance`](./GasCapacitance.md) relaxes toward on every step. Setting only the
@@ -13805,6 +14192,8 @@ export class Capacitance extends BaseModelClass {
         + (this.u_vol_factor - 1) * this.u_vol
         + (this.u_vol_factor_ps - 1) * this.u_vol
         + (this.u_vol_factor_scaling_ps - 1) * this.u_vol
+    // the factor layers add up and can take the sum below zero; an unstressed volume can't be negative
+    if (this.u_vol_eff < 0.0) this.u_vol_eff = 0.0;
 
     // reset the non persistent factors
     this.u_vol_factor = 1.0;
@@ -14190,6 +14579,12 @@ export class GasExchanger extends BaseModelClass {
         + (this.dif_co2_factor - 1) * this.dif_co2
         + (this.dif_co2_factor_ps - 1) * this.dif_co2
         + (this.dif_co2_factor_scaling - 1) * this.dif_co2; // apply scaling factor to the diffusion factor
+
+    // the factor layers add up, so several writers lowering them at once (Surfactant derecruitment
+    // plus atelectasis) can take the sum below zero; a negative diffusion constant would pump gas
+    // against its gradient and blow up the blood gases, so floor it at no exchange
+    if (this.dif_o2_step < 0.0) this.dif_o2_step = 0.0;
+    if (this.dif_co2_step < 0.0) this.dif_co2_step = 0.0;
 
 
     // calculate the O2 flux from the blood to the gas compartment.
@@ -21360,6 +21755,16 @@ export class Placenta extends BaseModelClass {
 ```javascript
 import { BaseModelClass } from "../base_models/BaseModelClass";
 
+const MMHG_TO_CMH2O = 1.35951;
+
+// standard normal cumulative distribution (Abramowitz & Stegun 7.1.26 erf, |error| < 1.5e-7)
+function phi(z) {
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1.0 / (1.0 + 0.3275911 * x);
+  const erf = 1.0 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return z >= 0 ? 0.5 * (1.0 + erf) : 0.5 * (1.0 - erf);
+}
+
 /*
 compliance of the chestwall 4.2 ml/cmH2O/kg => 0.00544 L/mmHg/kg => 0.01904 L/mmHg
 -> elastance = 52.5 mmHg/L
@@ -21410,6 +21815,39 @@ export class Respiration extends BaseModelClass {
 
     this.gex_factor = 1.0
 
+    // atelectasis: collapsed fraction of each lung (0 = fully aerated, clamped at atelectasis_max).
+    // A collapsed unit loses its aerated volume, its share of the lung's compliance and its gas
+    // exchange surface, while its blood keeps flowing past it unoxygenated (intrapulmonary shunt),
+    // less the share that hypoxic pulmonary vasoconstriction diverts (atelectasis_hpv, 0..1).
+    this.atelectasis_left = 0.0;
+    this.atelectasis_right = 0.0;
+    this.atelectasis_hpv = 0.3;
+    this.atelectasis_max = 0.9;
+    // recruitment: the collapsed units have normally distributed opening and closing pressures
+    // (cmH2O, on the lung's distending pressure ALx.pres_in). Above its opening pressure a unit
+    // reopens (tau_open), below its closing pressure it collapses again (tau_close); in between
+    // it holds (hysteresis). Recruited units stay unstable: only PEEP keeps them open. Off =
+    // obstructive/resorption atelectasis, which pressure does not reopen.
+    this.atelectasis_recruitable = true;
+    this.atelectasis_open_pressure = 25.0;
+    this.atelectasis_open_sd = 3.0;
+    this.atelectasis_close_pressure = 8.5;
+    this.atelectasis_close_sd = 1.5;
+    this.atelectasis_tau_open = 3.0;
+    this.atelectasis_tau_close = 30.0;
+    // bronchus obstruction (a mucus plug, or the left main bronchus behind a right-mainstem tube): no
+    // gas in or out of that lung, and the trapped gas is absorbed into the blood, so the lung collapses
+    // (resorption atelectasis). Oxygen absorbs fast and nitrogen slowly: the time constant runs from
+    // tau_air (trapped room air) to tau_o2 (trapped oxygen) with the trapped gas's O2 fraction.
+    this.airway_obstructed_left = false;
+    this.airway_obstructed_right = false;
+    this.atelectasis_resorb_tau_air = 1800.0;
+    this.atelectasis_resorb_tau_o2 = 240.0;
+    this.intrapulmonary_shunt_left = ["IPSL"]
+    this.intrapulmonary_shunt_right = ["IPSR"]
+    this.pulmonary_capillaries_left = ["LL_ART_LL_CAP", "LL_CAP_LL_VEN"]
+    this.pulmonary_capillaries_right = ["RL_ART_RL_CAP", "RL_CAP_RL_VEN"]
+
 
     // -----------------------------------------------
     // dependent properties
@@ -21424,11 +21862,31 @@ export class Respiration extends BaseModelClass {
     this._prev_gex_factor = 1.0;
     this._prev_res_upper_airways_factor = 1.0;
     this._prev_res_lower_airways_factor = 1.0;
+    this._prev_atelectasis_left = 0.0;
+    this._prev_atelectasis_right = 0.0;
+    this._unstable_left = 0.0; // fraction of the lung's units prone to collapse (set with the atelectasis)
+    this._unstable_right = 0.0;
+    this._prev_airway_obstructed_left = false;
+    this._prev_airway_obstructed_right = false;
+    this._tube_block_left = false; // the bronchus is blocked by a misplaced tube (Ventilator), not a plug
+    this._tube_block_right = false;
+    this._closed_left = false; // effective state: plugged or blocked by the tube
+    this._closed_right = false;
+    this._trapped_fo2_left = 0.21; // O2 fraction of the trapped gas, captured at obstruction
+    this._trapped_fo2_right = 0.21;
+    this._trapped_pres_left = 0.0; // recoil pressure of the trapped lung, captured at obstruction (mmHg)
+    this._trapped_pres_right = 0.0;
   }
 
   calc_model() {
+    // the blood side of atelectasis rides on non-persistent resistor factors, so it is re-written
+    // every step (not throttled); it is skipped entirely while both lungs are aerated
+    if (this._prev_atelectasis_left > 0) this.apply_atelectasis_perfusion("left", this._prev_atelectasis_left);
+    if (this._prev_atelectasis_right > 0) this.apply_atelectasis_perfusion("right", this._prev_atelectasis_right);
+
     this._update_counter += this._t;
     if (this._update_counter > this._update_interval) {
+      const dt_update = this._update_counter;
       this._update_counter = 0.0;
 
       // series dead space configuration (live-editable): the dead-space compartments carry their
@@ -21469,6 +21927,18 @@ export class Respiration extends BaseModelClass {
         this.set_gasexchange(this.gex_factor);
         this._prev_gex_factor = this.gex_factor;
       }
+
+      if (this._prev_atelectasis_left !== this.atelectasis_left) this.set_atelectasis_left(this.atelectasis_left);
+      if (this._prev_atelectasis_right !== this.atelectasis_right) this.set_atelectasis_right(this.atelectasis_right);
+
+      if (this._prev_airway_obstructed_left !== this.airway_obstructed_left) this.set_airway_obstructed_left(this.airway_obstructed_left);
+      if (this._prev_airway_obstructed_right !== this.airway_obstructed_right) this.set_airway_obstructed_right(this.airway_obstructed_right);
+
+      // an obstructed lung resorbs (pressure can't reach it); an open one recruits under pressure
+      if (this._closed_left) this.resorb_atelectasis("left", dt_update);
+      else if (this.atelectasis_recruitable && this._unstable_left > 0) this.recruit_atelectasis("left", dt_update);
+      if (this._closed_right) this.resorb_atelectasis("right", dt_update);
+      else if (this.atelectasis_recruitable && this._unstable_right > 0) this.recruit_atelectasis("right", dt_update);
     }
   }
 
@@ -21538,6 +22008,184 @@ export class Respiration extends BaseModelClass {
     this.gex_factor = new_factor;
   }
 
+  // the user entry point: sets the collapsed fraction AND the unstable region it defines, so 0
+  // resolves the atelectasis completely
+  set_atelectasis_left(new_fraction) {
+    this.atelectasis_left = this._apply_atelectasis_gas("left", new_fraction, this._prev_atelectasis_left);
+    this._prev_atelectasis_left = this.atelectasis_left;
+    this._unstable_left = this.atelectasis_left;
+  }
+
+  set_atelectasis_right(new_fraction) {
+    this.atelectasis_right = this._apply_atelectasis_gas("right", new_fraction, this._prev_atelectasis_right);
+    this._prev_atelectasis_right = this.atelectasis_right;
+    this._unstable_right = this.atelectasis_right;
+  }
+
+  // a bronchial plug (the user's): airway_obstructed_left/right
+  set_airway_obstructed_left(state) {
+    this.airway_obstructed_left = !!state;
+    this._prev_airway_obstructed_left = this.airway_obstructed_left;
+    this._update_bronchus("left");
+  }
+
+  set_airway_obstructed_right(state) {
+    this.airway_obstructed_right = !!state;
+    this._prev_airway_obstructed_right = this.airway_obstructed_right;
+    this._update_bronchus("right");
+  }
+
+  // a misplaced tube blocking a main bronchus (set by the Ventilator), kept apart from the plug so
+  // either can be cleared without opening a bronchus the other still blocks
+  set_tube_block(side, state) {
+    if (side === "left") this._tube_block_left = !!state;
+    else this._tube_block_right = !!state;
+    this._update_bronchus(side);
+  }
+
+  _update_bronchus(side) {
+    const closed = side === "left"
+      ? this.airway_obstructed_left || this._tube_block_left
+      : this.airway_obstructed_right || this._tube_block_right;
+    const was_closed = side === "left" ? this._closed_left : this._closed_right;
+    const models = this._model_engine.models;
+    const airways = side === "left" ? this.lower_airways_left : this.lower_airways_right;
+    for (const name of airways) if (models[name]) models[name].no_flow = closed;
+    if (closed && !was_closed) {
+      // capture the trapped gas: its O2 fraction sets the resorption speed, its recoil pressure is held
+      // while the gas is absorbed (the lung deflates instead of pressurising as it stiffens)
+      const lungs = (side === "left" ? this.left_lung : this.right_lung).map((n) => models[n]).filter(Boolean);
+      const n = Math.max(lungs.length, 1);
+      const fo2 = lungs.reduce((sum, m) => sum + (m.fo2 ?? 0.21), 0) / n;
+      const pres = lungs.reduce((sum, m) => sum + (m.pres_in ?? 0), 0) / n;
+      if (side === "left") { this._trapped_fo2_left = fo2; this._trapped_pres_left = pres; }
+      else { this._trapped_fo2_right = fo2; this._trapped_pres_right = pres; }
+    }
+    if (side === "left") this._closed_left = closed;
+    else this._closed_right = closed;
+  }
+
+  resorb_atelectasis(side, dt) {
+    // the trapped gas is absorbed: the collapsed fraction rises toward atelectasis_max. The collapsed
+    // units join the unstable region, so once the bronchus is open again pressure can recruit them.
+    const models = this._model_engine.models;
+    const fo2 = side === "left" ? this._trapped_fo2_left : this._trapped_fo2_right;
+    const share_o2 = Math.min(Math.max((fo2 - 0.21) / 0.79, 0.0), 1.0);
+    const tau = this.atelectasis_resorb_tau_air + (this.atelectasis_resorb_tau_o2 - this.atelectasis_resorb_tau_air) * share_o2;
+    const c_prev = side === "left" ? this._prev_atelectasis_left : this._prev_atelectasis_right;
+    const c = c_prev + (this.atelectasis_max - c_prev) * Math.min(dt / Math.max(tau, dt), 1.0);
+    if (side === "left") {
+      this.atelectasis_left = this._apply_atelectasis_gas("left", c, c_prev);
+      this._prev_atelectasis_left = this.atelectasis_left;
+      this._unstable_left = Math.max(this._unstable_left, this.atelectasis_left);
+    } else {
+      this.atelectasis_right = this._apply_atelectasis_gas("right", c, c_prev);
+      this._prev_atelectasis_right = this.atelectasis_right;
+      this._unstable_right = Math.max(this._unstable_right, this.atelectasis_right);
+    }
+    // the absorbed gas leaves: hold the trapped lung at its captured recoil pressure (alveoli are
+    // linear, el_k = 0), so it deflates as its aerated volume shrinks
+    const p = side === "left" ? this._trapped_pres_left : this._trapped_pres_right;
+    for (const name of side === "left" ? this.left_lung : this.right_lung) {
+      const m = models[name];
+      if (!m || !(m.el_eff > 0)) continue;
+      const excess = m.vol - (m.u_vol_eff + Math.max(p, 0) / m.el_eff);
+      if (excess > 0) m.volume_out(excess);
+    }
+  }
+
+  recruit_atelectasis(side, dt) {
+    // within the unstable region, x = collapsed share. At distending pressure p:
+    //   can_stay_closed = 1 - PHI((p - TOP) / sd_open)    units whose opening pressure is above p
+    //   must_close      = 1 - PHI((p - TCP) / sd_close)   units whose closing pressure is above p
+    // x relaxes down to can_stay_closed (recruitment, tau_open) or up to must_close
+    // (derecruitment, tau_close) and holds in between. The pressure is instantaneous, so the
+    // recruitment follows the time spent at pressure (a sustained inflation beats brief breaths).
+    const unstable = side === "left" ? this._unstable_left : this._unstable_right;
+    const c_prev = side === "left" ? this._prev_atelectasis_left : this._prev_atelectasis_right;
+    const lungs = (side === "left" ? this.left_lung : this.right_lung).map((n) => this._model_engine.models[n]).filter(Boolean);
+    if (lungs.length === 0) return;
+    const p = (lungs.reduce((sum, m) => sum + m.pres_in, 0) / lungs.length) * MMHG_TO_CMH2O;
+
+    const can_stay_closed = 1.0 - phi((p - this.atelectasis_open_pressure) / Math.max(this.atelectasis_open_sd, 0.1));
+    const must_close = 1.0 - phi((p - this.atelectasis_close_pressure) / Math.max(this.atelectasis_close_sd, 0.1));
+    let x = c_prev / unstable;
+    if (x > can_stay_closed) x += (can_stay_closed - x) * Math.min(dt / Math.max(this.atelectasis_tau_open, dt), 1.0);
+    else if (x < must_close) x += (must_close - x) * Math.min(dt / Math.max(this.atelectasis_tau_close, dt), 1.0);
+    else return;
+
+    const c = Math.min(Math.max(x, 0.0), 1.0) * unstable;
+    if (side === "left") {
+      this.atelectasis_left = this._apply_atelectasis_gas("left", c, c_prev);
+      this._prev_atelectasis_left = this.atelectasis_left;
+    } else {
+      this.atelectasis_right = this._apply_atelectasis_gas("right", c, c_prev);
+      this._prev_atelectasis_right = this.atelectasis_right;
+    }
+  }
+
+  _apply_atelectasis_gas(side, new_fraction, prev_fraction) {
+    // gas side: with a fraction c of the lung's units collapsed, the aerated volume (u_vol) and the
+    // exchange surface (dif) scale with the open fraction (1 - c), and the elastance with 1 / (1 - c)
+    // (fewer units in parallel). Applied as deltas on the persistent layers, like the other set_*.
+    const c = Math.min(Math.max(Number(new_fraction) || 0, 0), this.atelectasis_max);
+    const open = (f) => 1.0 - f;
+    const d_open = open(c) - open(prev_fraction);
+    const d_el = 1.0 / open(c) - 1.0 / open(prev_fraction);
+    const lungs = side === "left" ? this.left_lung : this.right_lung;
+    const gasex = side === "left" ? this.gas_exchanger_left_lung : this.gas_exchanger_right_lung;
+    lungs.forEach((name) => {
+      const m = this._model_engine.models[name];
+      if (!m) return;
+      m.u_vol_factor_ps = Math.max(m.u_vol_factor_ps + d_open, 0);
+      m.el_base_factor_ps = Math.max(m.el_base_factor_ps + d_el, 0);
+    });
+    gasex.forEach((name) => {
+      const m = this._model_engine.models[name];
+      if (!m) return;
+      m.dif_o2_factor_ps = Math.max(m.dif_o2_factor_ps + d_open, 0);
+      m.dif_co2_factor_ps = Math.max(m.dif_co2_factor_ps + d_open, 0);
+    });
+    return c;
+  }
+
+  apply_atelectasis_perfusion(side, c) {
+    // blood side: the lung's arterial -> venous bed is the capillary path (gas-exchanging) in parallel
+    // with the intrapulmonary shunt. Both see the same pressure drop, so their flow split equals their
+    // conductance split. The collapsed units' perfusion moves to the shunt, except the share hypoxic
+    // vasoconstriction (hpv) removes from the lung altogether:
+    //   G_tot' = G_tot * (1 - c*hpv)
+    //   s'     = s0 + (1 - s0) * c*(1 - hpv) / (1 - c*hpv)      (s0 = shunt share when aerated)
+    // Written on the resistors' non-persistent r_factor (r_factor_ps belongs to Surfactant, the
+    // scaling layer to the Calibrator/ModelScaler), computed against the persistent layers so it
+    // composes with them.
+    const models = this._model_engine.models;
+    const shunts = (side === "left" ? this.intrapulmonary_shunt_left : this.intrapulmonary_shunt_right)
+      .map((n) => models[n]).filter(Boolean);
+    const caps = (side === "left" ? this.pulmonary_capillaries_left : this.pulmonary_capillaries_right)
+      .map((n) => models[n]).filter(Boolean);
+    if (shunts.length === 0 || caps.length === 0) return;
+
+    // effective resistance without the non-persistent layer (Resistor's additive factor composition)
+    const r_base = (r) => r.r_for * (r.r_factor_ps + r.r_factor_scaling_ps - 1.0);
+    const g_ips = shunts.reduce((g, r) => g + (r.no_flow ? 0 : 1.0 / r_base(r)), 0);
+    const r_cap = caps.reduce((sum, r) => sum + r_base(r), 0); // capillary path is in series
+    if (!(r_cap > 0) || !(g_ips >= 0)) return;
+    const g_cap = 1.0 / r_cap;
+    const g_tot = g_ips + g_cap;
+
+    const hpv = Math.min(Math.max(this.atelectasis_hpv, 0), 1);
+    const s0 = g_ips / g_tot;
+    const g_tot_new = g_tot * (1.0 - c * hpv);
+    // without an open shunt path the collapsed units' blood can only be diverted, not shunted
+    const s_new = g_ips > 0 ? s0 + (1.0 - s0) * (c * (1.0 - hpv)) / (1.0 - c * hpv) : 0.0;
+
+    // scale every shunt and capillary resistor by the conductance ratio of its branch
+    const k_ips = g_ips > 0 ? g_ips / (s_new * g_tot_new) : 1.0;
+    const k_cap = g_cap / ((1.0 - s_new) * g_tot_new);
+    if (g_ips > 0) shunts.forEach((r) => { r.r_factor = 1.0 + (k_ips - 1.0) * r_base(r) / r.r_for; });
+    caps.forEach((r) => { r.r_factor = 1.0 + (k_cap - 1.0) * r_base(r) / r.r_for; });
+  }
 }
 
 ```
@@ -23527,14 +24175,22 @@ export class Monitor extends BaseModelClass {
   }
   calc_resp_rate() {
     // a breath starts when an ACTIVE breathing source reaches the start of inspiration
-    // (ncc_insp === 1); both the spontaneous and the ventilator source are considered
-    const spont = this._breathing && this._breathing.breathing_enabled && this._breathing.ncc_insp === 1;
-    const vent = this._ventilator && this._ventilator.is_enabled && this._ventilator.ncc_insp === 1;
+    // (ncc_insp === 1); both the spontaneous and the ventilator source are considered, but one breath
+    // counts once: a ventilator breath that starts during a spontaneous inspiration is the breath the
+    // effort triggered (or landed on), and an effort that starts during a ventilator inspiration is
+    // fused into it. Efforts between ventilator breaths still count.
+    const vent_on = !!(this._ventilator && this._ventilator.is_enabled);
+    const spont_on = !!(this._breathing && this._breathing.breathing_enabled);
+    const spont_onset = spont_on && this._breathing.ncc_insp === 1;
+    const vent_onset = vent_on && this._ventilator.ncc_insp === 1;
+    const spont = spont_onset && !(vent_on && this._ventilator._inspiration && !vent_onset);
+    const vent = vent_onset && !(spont_on && this._breathing.insp_running && !spont_onset);
 
     if (spont || vent) {
       const interval = this._resp_interval_counter;
       this._resp_interval_counter = 0.0;
-      if (interval > 0) {
+      // the interval that ends an apnoea (longer than the window) is not a breath-to-breath interval
+      if (interval > 0 && interval <= this.rr_avg_time) {
         // rolling window of breath-to-breath intervals spanning ~rr_avg_time seconds
         this._rr_intervals.push(interval);
         this._rr_window_sum += interval;
@@ -23551,6 +24207,14 @@ export class Monitor extends BaseModelClass {
         this.etco2 = this._etco2_peak;
         this._etco2_peak = 0.0;
       }
+    }
+
+    // apnoea: no breath for a whole averaging window, so the rate falls with the open interval and
+    // the window restarts with the next breaths, instead of holding the last value
+    if (this._resp_interval_counter > this.rr_avg_time) {
+      this.resp_rate = 60.0 / this._resp_interval_counter;
+      this._rr_intervals = [];
+      this._rr_window_sum = 0.0;
     }
 
     // accumulate the per-breath peak airway pCO2 for the spontaneous end-tidal read-out
@@ -23796,7 +24460,7 @@ export class Resuscitation extends BaseModelClass {
 
 ```javascript
 import { Ventilator } from "./Ventilator";
-import { SLE_PARAMS, SLE_MODES, SLE_HFO_MODES, sle_defaults, sle_clamp, sle_interlocks } from "./sle6000_params";
+import { SLE_PARAMS, SLE_MODES, SLE_HFO_MODES, SLE_SPO2_TARGETS, SLE_SPO2_AVG, sle_defaults, sle_clamp, sle_interlocks } from "./sle6000_params";
 
 const MBAR_TO_CMH2O = 1.01972;
 const HFO_BIAS_FLOW = 8.0; // l/min, the continuous flow (p24); an assumption for HFO
@@ -23808,6 +24472,23 @@ const HFO_BIAS_FLOW = 8.0; // l/min, the continuous flow (p24); an assumption fo
 //   volume left when the pressure is back at PEEP + 10 %: 93 % ideal -> ~84 % (reference ~84 %)
 const PRES_RESPONSE_TAU = 0.012; // s
 
+// OxyGenie (manual ch. 19, pp 118-121): the closed-loop O2 controller licensed from the University of
+// Tasmania (Gale & Dargaville, VDL1.x). The constants are the example embodiment of patent
+// US11135384B2; see docs/Sle6000.md#oxygenie.
+// Severinghaus compensation: the multiplier of a positive error while the integral term still holds
+// the FiO2 up, from the slope of the PaO2-SpO2 curve (patent, Table 2); 1 at 91 % and below
+const OXY_SEVERINGHAUS = { 92: 1.2, 93: 1.4, 94: 1.7, 95: 2.2, 96: 2.9, 97: 4.4, 98: 7.9, 99: 20.1, 100: 50.0 };
+const OXY_NEG_ERROR_CAP = -13.0; // % SpO2, the proportional term's error floor (SpO2 is unreliable low)
+const OXY_MAX_DELTA = 40.0; // %, the output stays within this of the reference O2 (p118)
+const OXY_REF_LIMIT_CAP = 60.0; // %, the reference used for that limit is capped, so 21 % stays reachable (p118)
+const OXY_REF_INTERVAL = 1800.0; // s, reference O2 update; it averages the last hour (p118)
+const OXY_REF_WINDOW = 3600.0; // s
+const OXY_REF_MAX_STEP = 10.0; // %, per update (patent: within 10 % of the previous value)
+const OXY_OVERRIDE = 30.0; // s, manual override (p119)
+const OXY_FALLBACK_HOLD = 60.0; // s without a valid SpO2 before the O2 drifts to the reference (p119)
+const OXY_FALLBACK_RATE = 1.0 / 30.0; // %/s, that drift ("slowly"; not given, an assumption)
+const OXY_HIGH_O2_DELAY = 10.0; // s, the "O2 > N %" message delay: the SpO2 alarm delay default (p228)
+
 export class Sle6000 extends Ventilator {
   // static properties
   static model_type = "Sle6000";
@@ -23817,7 +24498,7 @@ export class Sle6000 extends Ventilator {
    * device's own modes, settings (mbar, with its ranges, resolutions and interlocks), patient
    * circuits and monitored values. Phase 1: the invasive conventional modes CPAP, CMV, PTV, PSV and
    * SIMV, with volume targeting (VTV). Phase 2: the invasive oscillatory modes HFOV (with VTV, sighs
-   * and oscillation pause) and HFOV+CMV. It is the ventilator of every scenario up to 30 kg (the
+   * and oscillation pause) and HFOV+CMV. OxyGenie: the closed-loop O2 controller on the device's SpO2. It is the ventilator of every scenario up to 30 kg (the
    * device's range); the scenario keeps the instance name "Ventilator", so the Monitor,
    * Resuscitation and every UI path that reads Ventilator.* keep working. A scenario can start
    * ventilating: is_enabled true plus sle_mode and the sle_* settings.
@@ -23850,6 +24531,15 @@ export class Sle6000 extends Ventilator {
     this.sle_hfo_activity = d.hfo_activity; // HFOV+CMV: 0 = oscillation in both phases, 1 = expiration only
     this.sle_circuit = 10; // mm, patient circuit BC6188 (10) or BC6198 (15)
     this.sle_o2_boost_inc = 10; // %, O2 Boost increment (factory default, p128)
+    this.sle_spo2_on = true; // SpO2 monitoring (Utilities > Sensors > SpO2, p104)
+    this.sle_spo2_target = "91-95"; // OxyGenie target range, one of SLE_SPO2_TARGETS (default, p104)
+    this.sle_spo2_avg = 8; // s, SpO2 averaging time (default 8 s; fixed at 2-4 s while OxyGenie is on)
+    this.sle_oxy_high_o2 = 60; // %, "O2 > N %" while OxyGenie is on (default 60, p228)
+    this.spo2_probe_attached = true; // the sensor on the patient (an event: a detached probe gives no signal)
+    // OxyGenie gains (patent example embodiment): % O2 per % SpO2 error, per %·s, per %/s
+    this.oxy_kp = -1.0;
+    this.oxy_ki = -0.0125;
+    this.oxy_kd = -1.0;
 
     // Dependent properties: the monitored values, filtered as the device does (p175)
     this.mon_pip = 0.0; // mbar
@@ -23873,6 +24563,11 @@ export class Sle6000 extends Ventilator {
     this.mon_dco2 = 0.0; // ml^2/s, HFO gas transport coefficient f * Vte^2, tau 3 cycles
     this.mon_freq = 0.0; // Hz, HFO frequency
     this.o2_boost_remaining = 0.0; // s left of an O2 Boost (0 = none)
+    this.mon_spo2 = null; // %, the ventilator's SpO2 (preductal, averaged; null = no valid signal)
+    this.oxy_state = "off"; // OxyGenie: off | auto | fallback (waiting for signal) | override
+    this.oxy_ref_o2 = 21.0; // %, reference O2: the average requirement of the last hour
+    this.oxy_override_remaining = 0.0; // s left of a manual override
+    this.oxy_high_o2_flag = false; // "O2 > N %" shown
 
     // Local properties
     this._mon_init = false;
@@ -23888,6 +24583,16 @@ export class Sle6000 extends Ventilator {
     this._cmv_p_max = -1e9; // cmH2O, peak pressure of the current HFOV+CMV breath
     this._cmv_was_insp = false;
     this._cycle_crossed = false; // a CMV breath edge fell inside the current oscillation
+    this._spo2_site = null; // the preductal sensor site (AA, as the patient monitor's sao2_pre)
+    this._spo2_timer = 0.0; // s, the sensor and OxyGenie run once a second
+    this._spo2_samples = []; // the last raw 1 Hz readings, for the averaging time
+    this._oxy_sum_e = 0.0; // the integrand (sum of 1 s errors)
+    this._oxy_spo2_hist = []; // the last 5 averaged readings, for the derivative
+    this._oxy_o2_hist = []; // the delivered O2 of the last hour, 1 Hz, for the reference O2
+    this._oxy_ref_timer = 0.0;
+    this._oxy_no_signal = 0.0; // s without a valid SpO2
+    this._oxy_last_spo2 = null; // the last valid reading
+    this._oxy_high_o2_time = 0.0;
   }
 
   init_model(args = {}) {
@@ -23901,6 +24606,7 @@ export class Sle6000 extends Ventilator {
   }
 
   calc_model() {
+    this._calc_spo2();
     this._calc_o2_boost();
     super.calc_model();
     this._sle_monitoring();
@@ -23914,6 +24620,11 @@ export class Sle6000 extends Ventilator {
     // given setting, keep the others (parameter memory across modes, p124), apply the interlocks and
     // start (or switch) the mode. `settings` may carry `mode` and `circuit`.
     const mode = settings.mode ?? this.sle_mode;
+    // touching O2 while OxyGenie is on is a manual override: the set O2 for 30 s (p119)
+    if ("o2" in settings && this.oxy_state !== "off") {
+      this.oxy_state = "override";
+      this.oxy_override_remaining = OXY_OVERRIDE;
+    }
     for (const [k, v] of Object.entries(settings)) {
       if (k in SLE_PARAMS) this[`sle_${k}`] = sle_clamp(k, Number(v));
     }
@@ -23954,6 +24665,7 @@ export class Sle6000 extends Ventilator {
       this.sle_mode = "Standby";
       this.o2_boost_remaining = 0.0;
       this._o2_boost_base = null;
+      this._oxy_stop();
       this._reset_monitor();
     } else if (!this._in_apply) {
       this._sync_from_generic();
@@ -24008,9 +24720,60 @@ export class Sle6000 extends Ventilator {
   }
 
   sle_o2_boost(state = true) {
-    // O2 Boost: the set O2 plus sle_o2_boost_inc for 2 minutes, then back to the set value (p128)
+    // O2 Boost: the set O2 plus sle_o2_boost_inc for 2 minutes, then back to the set value (p128);
+    // not while OxyGenie is on (p121)
+    if (state && this.oxy_state !== "off") return;
     this.o2_boost_remaining = state ? 120.0 : 0.0;
     if (!state) this._end_o2_boost();
+  }
+
+  sle_oxygenie(state = true) {
+    // OxyGenie on/off (p119): only with SpO2 monitoring on and while ventilating. The O2 set at
+    // activation seeds the reference O2 and so the initial response (p38)
+    if (!state) {
+      this._oxy_stop();
+      return;
+    }
+    if (this.oxy_state !== "off" || !this.sle_spo2_on || !this.is_enabled) return;
+    this.o2_boost_remaining = 0.0;
+    this._end_o2_boost();
+    this.oxy_ref_o2 = this.sle_o2;
+    this._oxy_sum_e = 0.0;
+    this._oxy_spo2_hist = [];
+    this._oxy_o2_hist = [];
+    this._oxy_ref_timer = 0.0;
+    this._oxy_no_signal = 0.0;
+    this._oxy_high_o2_time = 0.0;
+    this._spo2_samples = this._spo2_samples.slice(-this._spo2_avg_n());
+    this.oxy_state = this.mon_spo2 === null ? "fallback" : "auto";
+  }
+
+  sle_set_spo2(settings = {}) {
+    // Utilities > Sensors > SpO2 (p104): monitoring on/off, the OxyGenie target range and the
+    // averaging time. Monitoring off also switches OxyGenie off (it needs the SpO2)
+    if (SLE_SPO2_TARGETS.includes(settings.target)) this.sle_spo2_target = settings.target;
+    if (SLE_SPO2_AVG.includes(Number(settings.avg))) this.sle_spo2_avg = Number(settings.avg);
+    if (typeof settings.on === "boolean") {
+      this.sle_spo2_on = settings.on;
+      if (!settings.on) {
+        this._oxy_stop();
+        this.mon_spo2 = null;
+        this._spo2_samples = [];
+      }
+    }
+  }
+
+  sle_spo2_monitoring(state = true) {
+    this.sle_set_spo2({ on: Boolean(state) });
+  }
+
+  sle_set_spo2_target(range = "91-95") {
+    this.sle_set_spo2({ target: range });
+  }
+
+  set_spo2_probe(attached = true) {
+    // the sensor on (or off) the patient: no valid signal while it is off
+    this.spo2_probe_attached = Boolean(attached);
   }
 
   sle_set_circuit(diameter = 10) {
@@ -24039,6 +24802,12 @@ export class Sle6000 extends Ventilator {
     this.rise_time = this.sle_rise;
     this.trigger_mode = "flow";
     this.trigger_flow = this.sle_trig_sens;
+    this.leak_comp_max_perc = 35; // patient leak compensation, 35 % in the conventional modes (p127)
+    // PSV automatic leak compensation (p127): flow cycling compensates leak flows up to 5 l/min or
+    // 50 % of the peak flow, only while the leak is 10-50 %
+    this.leak_term_min_perc = 10;
+    this.leak_term_max_perc = 50;
+    this.leak_term_max_flow = 5;
     this.term_sens_perc = this.sle_term_sens;
     this.insp_pause = 0.0;
     if (this._o2_boost_base === null) this.set_fio2(this.sle_o2 / 100.0);
@@ -24171,6 +24940,178 @@ export class Sle6000 extends Ventilator {
     this.exp_valve_resistance = (r_mbar * MBAR_TO_CMH2O) / 1.35951; // mmHg·s/L
     this.insp_flow = this.sle_circuit === 15 ? 40.0 : 20.0; // l/min
     this.pres_response_tau = PRES_RESPONSE_TAU;
+  }
+
+  // ------------------------------------------------------------------------------------------------
+  // SpO2 and OxyGenie
+
+  _spo2_avg_n() {
+    return this.oxy_state !== "off" ? 3 : this.sle_spo2_avg;
+  }
+
+  _calc_spo2() {
+    // the sensor reads the preductal saturation once a second (the blood gases update at 1 Hz)
+    // and averages it over the averaging time; OxyGenie runs on each new reading
+    this._spo2_timer += this._t;
+    if (this._spo2_timer < 1.0) return;
+    this._spo2_timer -= 1.0;
+    this._spo2_site ??= this._model_engine.models["AA"] ?? null;
+    const so2 = this._spo2_site?.so2;
+    const valid = this.sle_spo2_on && this.spo2_probe_attached && Number.isFinite(so2) && so2 > 0.0;
+    if (valid) {
+      this._spo2_samples.push(so2);
+      const n = this._spo2_avg_n();
+      if (this._spo2_samples.length > n) this._spo2_samples.splice(0, this._spo2_samples.length - n);
+      this.mon_spo2 = this._spo2_samples.reduce((a, b) => a + b, 0) / this._spo2_samples.length;
+    } else {
+      this._spo2_samples = [];
+      this.mon_spo2 = null;
+    }
+    if (this.oxy_state !== "off") this._calc_oxygenie();
+  }
+
+  _oxy_target() {
+    const [lo, hi] = this.sle_spo2_target.split("-").map(Number);
+    return { lo, hi, mid: (lo + hi) / 2.0 };
+  }
+
+  _calc_oxygenie() {
+    if (!this.is_enabled) {
+      this._oxy_stop();
+      return;
+    }
+    const { lo, hi, mid } = this._oxy_target();
+    const spo2 = this.mon_spo2;
+
+    if (this.oxy_state === "override") {
+      // the user's O2, delivered for 30 s; then Auto resumes from it (bumpless: the integrand is
+      // set so that the output equals the user's O2)
+      this.oxy_override_remaining = Math.max(0.0, this.oxy_override_remaining - 1.0);
+      if (this.oxy_override_remaining === 0.0) {
+        this._oxy_spo2_hist = [];
+        this._oxy_bumpless(spo2 !== null ? spo2 - mid : 0.0);
+        this.oxy_state = spo2 === null ? "fallback" : "auto";
+      }
+    } else if (spo2 === null) {
+      // fallback (p119): hold the last O2 for 60 s; then, by the last valid reading, hold (in the
+      // target range) or move slowly towards the reference O2 (above: down, below: up)
+      this.oxy_state = "fallback";
+      this._oxy_no_signal += 1.0;
+      this._oxy_spo2_hist = [];
+      const last = this._oxy_last_spo2;
+      if (this._oxy_no_signal > OXY_FALLBACK_HOLD && last !== null) {
+        const ref = this.oxy_ref_o2;
+        let o2 = this.sle_o2;
+        if (last > hi && o2 > ref) o2 = Math.max(ref, o2 - OXY_FALLBACK_RATE);
+        else if (last < lo && o2 < ref) o2 = Math.min(ref, o2 + OXY_FALLBACK_RATE);
+        this._oxy_deliver(o2, false);
+      }
+    } else {
+      if (this.oxy_state === "fallback") {
+        // a valid signal again: the requirement from that reading, without the old trend
+        this._oxy_spo2_hist = [];
+        this._oxy_bumpless(spo2 - mid);
+      }
+      this.oxy_state = "auto";
+      this._oxy_no_signal = 0.0;
+      this._oxy_last_spo2 = spo2;
+      this._oxy_pid(spo2, mid, hi);
+    }
+
+    // the delivered O2 of the last hour and the reference O2: its average, updated every 30 min
+    // and by at most 10 % a time
+    this._oxy_o2_hist.push(this.sle_o2);
+    if (this._oxy_o2_hist.length > OXY_REF_WINDOW) this._oxy_o2_hist.shift();
+    this._oxy_ref_timer += 1.0;
+    if (this._oxy_ref_timer >= OXY_REF_INTERVAL) {
+      this._oxy_ref_timer = 0.0;
+      const avg = this._oxy_o2_hist.reduce((a, b) => a + b, 0) / this._oxy_o2_hist.length;
+      const ref = this.oxy_ref_o2;
+      const new_ref = Math.min(ref + OXY_REF_MAX_STEP, Math.max(ref - OXY_REF_MAX_STEP, avg));
+      // the output must not jump: the integrand absorbs the reference change
+      if (this.oxy_state === "auto" && this.oxy_ki !== 0.0) this._oxy_sum_e -= (Math.min(new_ref, OXY_REF_LIMIT_CAP) - Math.min(ref, OXY_REF_LIMIT_CAP)) / this.oxy_ki;
+      this.oxy_ref_o2 = new_ref;
+    }
+
+    // "O2 > N %" (p228): Auto delivering above the set level, after the alarm delay
+    this._oxy_high_o2_time = this.sle_o2 > this.sle_oxy_high_o2 ? this._oxy_high_o2_time + 1.0 : 0.0;
+    this.oxy_high_o2_flag = this._oxy_high_o2_time >= OXY_HIGH_O2_DELAY;
+  }
+
+  _oxy_p(e) {
+    // the proportional term (patent): the error capped below at -13 %, attenuated inside the
+    // target range (x0.25 within 1 % of the midpoint, x0.5 within 2 %) and the gain adapted to the
+    // severity of the lung disease through the reference O2 (x0.5 at 21 % to x1.0 at 40 %)
+    const ep = Math.max(e, OXY_NEG_ERROR_CAP);
+    const ae = Math.abs(e);
+    const kpfm = ae <= 1.0 ? 0.25 : ae <= 2.0 ? 0.5 : 1.0;
+    const ref = Math.min(Math.max(this.oxy_ref_o2, 21.0), 40.0);
+    const adapt = 0.5 + (0.5 * (ref - 21.0)) / 19.0;
+    return this.oxy_kp * adapt * kpfm * ep;
+  }
+
+  _oxy_pid(spo2, mid, hi) {
+    const e = spo2 - mid;
+    const ki = this.oxy_ki;
+
+    // integral: Severinghaus compensation, a positive error weighted by the steepness of the
+    // PaO2-SpO2 curve while the integral term still holds the O2 up; no accumulation of a positive
+    // error at room air (nothing left to wean)
+    // (the compensation lasts until the integral term reaches zero, so it stops there)
+    const holding = e > 0.0 && ki * this._oxy_sum_e > 0.0;
+    const ei = holding ? e * (OXY_SEVERINGHAUS[Math.min(100, Math.round(spo2))] ?? 1.0) : e;
+    if (!(e > 0.0 && this.sle_o2 <= 21.0)) this._oxy_sum_e += ei;
+    if (holding && ki * this._oxy_sum_e < 0.0) this._oxy_sum_e = 0.0;
+    if (ki !== 0.0) {
+      const lim = Math.abs(OXY_MAX_DELTA / ki);
+      this._oxy_sum_e = Math.min(lim, Math.max(-lim, this._oxy_sum_e));
+    }
+
+    // derivative: least-squares slope over the last 5 readings; no rise of the O2 while the
+    // SpO2 falls from above the target range
+    const h = this._oxy_spo2_hist;
+    h.push(spo2);
+    if (h.length > 5) h.shift();
+    let slope = 0.0;
+    if (h.length >= 2) {
+      const n = h.length, xm = (n - 1) / 2.0, ym = h.reduce((a, b) => a + b, 0) / n;
+      let num = 0.0, den = 0.0;
+      for (let i = 0; i < n; i++) {
+        num += (i - xm) * (h[i] - ym);
+        den += (i - xm) * (i - xm);
+      }
+      slope = num / den;
+    }
+    if (slope < 0.0 && h.length === 5 && h.every((v) => v > hi)) slope = 0.0;
+
+    const delta = this._oxy_p(e) + ki * this._oxy_sum_e + this.oxy_kd * slope;
+    const ref = Math.min(this.oxy_ref_o2, OXY_REF_LIMIT_CAP);
+    this._oxy_deliver(ref + Math.min(OXY_MAX_DELTA, Math.max(-OXY_MAX_DELTA, delta)));
+  }
+
+  _oxy_bumpless(e) {
+    // set the integrand so that the controller's output is the O2 delivered now
+    if (this.oxy_ki === 0.0) return;
+    const ref = Math.min(this.oxy_ref_o2, OXY_REF_LIMIT_CAP);
+    const lim = Math.abs(OXY_MAX_DELTA / this.oxy_ki);
+    const sum = (this.sle_o2 - ref - this._oxy_p(e)) / this.oxy_ki;
+    this._oxy_sum_e = Math.min(lim, Math.max(-lim, sum));
+  }
+
+  _oxy_deliver(o2, round = true) {
+    // the blender's O2: 0.5 % steps, 21-100 %, shown on the O2 control (p118)
+    let v = Math.min(100.0, Math.max(21.0, o2));
+    if (round) v = Math.round(v * 2.0) / 2.0;
+    this.sle_o2 = v;
+    this.set_fio2(v / 100.0);
+  }
+
+  _oxy_stop() {
+    // OxyGenie off: the O2 control keeps the last delivered value
+    this.oxy_state = "off";
+    this.oxy_override_remaining = 0.0;
+    this.oxy_high_o2_flag = false;
+    this._oxy_high_o2_time = 0.0;
   }
 
   _calc_o2_boost() {
@@ -24379,11 +25320,23 @@ export class Ventilator extends BaseModelClass {
     this.hfo_sigh_cmh2o = 10; // cmH2O, pressure held during an HFOV sigh
     this.hfo_activity = "both"; // HFOV_CMV: oscillate in "both" phases or in expiration only ("exp")
     this.leak_size = 0.0; // mm, equivalent diameter of the gap around an uncuffed tube (0 = no leak)
+    // airway events (only while ventilating): where the tube tip sits, and whether the circuit is
+    // attached to the tube. right_main obstructs the left main bronchus; extubated puts the tube tip in
+    // the room and the patient on the natural airway; disconnected opens the circuit's Y-piece and
+    // the tube's proximal end to the room.
+    this.tube_position = "trachea"; // trachea | right_main | extubated
+    this.circuit_connected = true;
+    this.disconnect_resistance = 5.0; // mmHg*s/L, the open Y-piece of a disconnected circuit
     this.exp_valve_resistance = 0.0; // mmHg·s/L, expiratory limb + valve (0 = auto, by circuit size)
     this.volume_guarantee = false; // PC/PS: servo the working pressure to tidal_volume (limit pip_cmh2o_max)
     this.trigger_volume_perc = 6;
     this.trigger_mode = "volume"; // "volume": trigger_volume_perc of the set Vt during a patient effort; "flow": trigger_flow at the tube
     this.trigger_flow = 0.6; // L/min, flow-trigger threshold (inspiratory flow at the tube during expiration)
+    this.leak_compensation = true; // flow trigger: subtract the learned baseline leak flow before the threshold
+    this.leak_comp_max_perc = 100; // %, compensate only while the (averaged) leak is at most this
+    this.leak_term_min_perc = 0; // %, flow cycling: compensate the leak only while it is at least this
+    this.leak_term_max_perc = 100; // %, ... and at most this
+    this.leak_term_max_flow = 0; // L/min, flow cycling: cap on the compensated leak flow (0 = no cap)
     this.term_sens_perc = 30; // %, a PS breath cycles off when inspiratory flow decays below this % of its peak
     this.backup_rate = 0; // /min, CPAP apnoea backup: a time-cycled breath at PIP/insp_time after 60/backup_rate s without an effort (0 = off)
     this.synchronized = false;
@@ -24413,6 +25366,7 @@ export class Ventilator extends BaseModelClass {
     this.pip_delivered = 0.0; // cmH2O, the inspiratory pressure target actually in use
     this.pressure_limited = false; // volume-targeted: working pressure at pip_cmh2o_max, Vt below target
     this.leak_perc = 0.0; // %, per-breath leak (Vti - Vte) / Vti, as a ventilator reports it
+    this.leak_flow_comp = 0.0; // L/min, baseline leak flow the flow trigger subtracts (0 = not compensating)
     this.hfo_tidal_volume = 0.0; // L, HFOV volume delivered per oscillation (at the tube)
     this.hfo_dco2 = 0.0; // mL^2/s, HFOV gas transport coefficient f * Vt^2
     this.hfo_map_meas = 0.0; // cmH2O, measured mean circuit pressure in HFOV
@@ -24438,6 +25392,9 @@ export class Ventilator extends BaseModelClass {
     this._vent_leak = null;
     this._leak_length = 20; // mm, length of the laryngeal leak channel
     this._ventilator_parts = [];
+    this._vent_disconnect = null;
+    this._ett_from = "VENT_GASCIRCUIT"; // the tube's own ends, as defined (captured at init)
+    this._ett_to = "DS";
     this._ettube_length_ref = 110;
     this._min_exp_time = 0.1;
     this._pip = 0.0;
@@ -24499,6 +25456,10 @@ export class Ventilator extends BaseModelClass {
     this._map_sum = 0.0;
     this._map_time = 0.0;
     this._trig_times = []; // model times of patient-triggered breath starts (last 60 s)
+    this._leak_net_vol = 0.0; // L, net volume through the tube sensor over the current breath
+    this._leak_sqrtp = 0.0; // √cmH2O·s, integral of √(airway pressure) over the current breath
+    this._leak_g = 0.0; // L/s per √cmH2O, learned leak conductance (orifice law, Q = g·√P)
+    this._leak_perc_avg = 0.0; // %, leak_perc averaged over ~3 breaths (gates the compensation)
     this._ps_breath = false; // SIMV: the breath in progress is a pressure-supported spontaneous breath
     this._simv_window_counter = 0.0; // SIMV: time into the current mandatory-breath window
     this._simv_breath_given = false; // SIMV: this window's mandatory (or synchronised) breath was delivered
@@ -24527,6 +25488,25 @@ export class Ventilator extends BaseModelClass {
       };
     }
 
+    // the open Y-piece of a disconnected circuit: a resistor from the circuit to the room, closed
+    // unless the circuit is disconnected (added the same way for scenarios that predate it)
+    if (comps && comps.value && !comps.value.VENT_DISCONNECT) {
+      comps.value.VENT_DISCONNECT = {
+        name: "VENT_DISCONNECT",
+        description: "gas resistor model of the open Y-piece of a disconnected ventilator circuit",
+        is_enabled: false,
+        model_type: "Resistor",
+        components: {},
+        r_for: 1000000,
+        r_back: 1000000,
+        r_k: 0,
+        comp_from: "VENT_GASCIRCUIT",
+        comp_to: "MOUTH",
+        no_flow: true,
+        no_back_flow: false,
+      };
+    }
+
     // initialize the super class
     super.init_model(args);
 
@@ -24539,6 +25519,11 @@ export class Ventilator extends BaseModelClass {
     this._vent_ettube = this._model_engine.models["VENT_ETTUBE"];
     this._vent_exp_valve = this._model_engine.models["VENT_EXP_VALVE"];
     this._vent_leak = this._model_engine.models["VENT_LEAK"] ?? null;
+    this._vent_disconnect = this._model_engine.models["VENT_DISCONNECT"] ?? null;
+    // a saved state may carry a re-routed tube (an airway event in progress); its own ends are the
+    // circuit and the airway
+    this._ett_from = this._vent_gascircuit?.name ?? "VENT_GASCIRCUIT";
+    this._ett_to = this._vent_ettube.comp_to === "MOUTH" ? "DS" : this._vent_ettube.comp_to;
 
     // store the models inside a list for easy switching.
     this._ventilator_parts = [
@@ -24649,7 +25634,7 @@ export class Ventilator extends BaseModelClass {
     this._breath_interval_counter += this._t;
     this._et_tube_resistance = this.calc_ettube_resistance(this._vent_ettube.flow);
     this.calc_leak();
-    this._set_tube_dead_space(true);
+    this._set_tube_dead_space(this.tube_position !== "extubated");
     this._calc_monitoring();
   }
 
@@ -24663,6 +25648,10 @@ export class Ventilator extends BaseModelClass {
     // HFOV, apnoea) per 3 s block
     this._map_sum += this.pres * this._t;
     this._map_time += this._t;
+    // leak learning: over a whole breath the lung returns to its start volume, so the net volume
+    // through the tube sensor is the volume that left through the leak
+    this._leak_net_vol += this._vent_ettube.flow * this._t;
+    this._leak_sqrtp += Math.sqrt(Math.max(this.pres, 0.0)) * this._t;
     if (this._map_time >= 3.0) this._close_map_block();
     // in CPAP the patient sets the rate; backup breaths only come during apnoea
     const spont = this._breathing_model?.breathing_enabled ? this._breathing_model.resp_rate : 0.0;
@@ -24681,7 +25670,7 @@ export class Ventilator extends BaseModelClass {
   _set_tube_dead_space(intubated) {
     // the ET-tube lumen is dead space in series with the airway; the dead-space compartment carries
     // it as rigid composition sub-tanks ahead of the tube port (only with series dead space on)
-    const ds = this._vent_ettube?._comp_to;
+    const ds = this._model_engine.models[this._ett_to];
     if (!ds || !("tube_volume" in ds)) return;
     const r = this.ettube_diameter / 2000.0; // m
     ds.tube_port_model = this._vent_gascircuit?.name ?? "";
@@ -24693,7 +25682,7 @@ export class Ventilator extends BaseModelClass {
     // leak_size, so the leak grows with airway pressure (more in inspiration, a little at PEEP)
     const leak = this._vent_leak;
     if (!leak) return;
-    if (!(this.leak_size > 0.0)) {
+    if (!(this.leak_size > 0.0) || this.tube_position === "extubated") {
       leak.no_flow = true;
       return;
     }
@@ -24719,6 +25708,49 @@ export class Ventilator extends BaseModelClass {
       this.insp_tidal_volume > 0.0
         ? Math.max(0.0, (100.0 * (this.insp_tidal_volume - this.exp_tidal_volume)) / this.insp_tidal_volume)
         : 0.0;
+  }
+
+  _learn_leak() {
+    // leak compensation, as on a neonatal ventilator: learn the leak from the sensor's own
+    // measurements, breath by breath. The leak is an orifice (Q = g·√P), so the breath's net
+    // volume over its ∫√P dt gives the conductance, filtered over about 3 breaths
+    if (this._leak_sqrtp > 0.0) {
+      const g = Math.max(this._leak_net_vol, 0.0) / this._leak_sqrtp;
+      this._leak_g += (g - this._leak_g) / 3.0;
+      this._leak_perc_avg += (this.leak_perc - this._leak_perc_avg) / 3.0;
+    }
+    this._leak_net_vol = 0.0;
+    this._leak_sqrtp = 0.0;
+  }
+
+  _leak_flow_now() {
+    // L/s, the learned leak flow at the current airway pressure; 0 when not compensating (off,
+    // nothing learned yet, or a leak above what the device compensates)
+    if (!this.leak_compensation || this._leak_perc_avg > this.leak_comp_max_perc) return 0.0;
+    return this._leak_g * Math.sqrt(Math.max(this.pres, 0.0));
+  }
+
+  _term_flow() {
+    // L/s, the flow at which a flow-cycled breath ends: term_sens_perc of the peak flow. A leak keeps
+    // the inspiratory flow from decaying that far (the circuit feeds the leak at the inspiratory
+    // pressure, so the flow levels off at the leak flow and the breath runs to Ti max). With leak
+    // compensation the learned leak flow q is taken off first: the breath ends when the patient's
+    // own flow (flow - q) falls to term_sens_perc of its peak (peak - q), i.e. just above the leak
+    // flow level, which also tolerates the error in the learned leak. As the SLE6000's PSV
+    // automatic leak compensation (IFU §20.6.4): q at most half the peak flow and
+    // leak_term_max_flow, and only while the leak is within leak_term_min_perc..leak_term_max_perc
+    const t = this.term_sens_perc / 100.0;
+    if (
+      !this.leak_compensation ||
+      this._leak_perc_avg < this.leak_term_min_perc ||
+      this._leak_perc_avg > this.leak_term_max_perc
+    ) {
+      return t * this._peak_flow;
+    }
+    let q = this._leak_g * Math.sqrt(Math.max(this.pres, 0.0));
+    if (this.leak_term_max_flow > 0.0) q = Math.min(q, this.leak_term_max_flow / 60.0);
+    q = Math.min(q, 0.5 * this._peak_flow);
+    return q + t * (this._peak_flow - q);
   }
 
   triggering() {
@@ -24758,9 +25790,13 @@ export class Ventilator extends BaseModelClass {
   flow_triggering() {
     // flow trigger, as on a ventilator with a proximal flow sensor: patient inspiratory flow at the
     // tube above trigger_flow (L/min) during expiration starts a breath. Armed once the minimal
-    // expiratory time has passed, so the end of the previous breath can't re-trigger.
+    // expiratory time has passed, so the end of the previous breath can't re-trigger. With a tube
+    // leak the circuit keeps resupplying it through the tube, which the sensor reads as inspiratory
+    // flow: leak compensation subtracts the learned baseline leak flow first, so a leak within the
+    // compensated range doesn't auto-trigger
+    this.leak_flow_comp = this._leak_flow_now() * 60.0;
     if (this._trigger_blocked || !this._expiration || this._te_counter < this._min_exp_time) return;
-    if (this._vent_ettube.flow * 60.0 > this.trigger_flow) {
+    if (this._vent_ettube.flow * 60.0 - this.leak_flow_comp > this.trigger_flow) {
       this._exp_time_counter = this.exp_time + 0.1;
       this.triggered_breath = true;
     }
@@ -24815,7 +25851,7 @@ export class Ventilator extends BaseModelClass {
       const flow_cycled =
         this._ps_breath &&
         this._peak_flow > 0.0 &&
-        this._vent_ettube.flow < (this.term_sens_perc / 100.0) * this._peak_flow;
+        this._vent_ettube.flow < this._term_flow();
       const time_cycled = this._insp_time_counter > this.insp_time;
       const vol_limit = !this._ps_breath && this._vg_volume_limit_reached();
       if (flow_cycled || time_cycled || vol_limit) this._end_inspiration();
@@ -24903,7 +25939,7 @@ export class Ventilator extends BaseModelClass {
       const flow_cycled =
         !this._mandatory_breath &&
         this._peak_flow > 0.0 &&
-        this._vent_ettube.flow < (this.term_sens_perc / 100.0) * this._peak_flow;
+        this._vent_ettube.flow < this._term_flow();
       const time_cycled = this._insp_time_counter > this.insp_time;
 
       if (flow_cycled || time_cycled || this._vg_volume_limit_reached()) {
@@ -25007,6 +26043,7 @@ export class Ventilator extends BaseModelClass {
 
     this.calc_measured_mechanics();
     this._calc_leak_perc();
+    this._learn_leak();
     // volume-targeted modes: trim the working pressure on the breath just completed (in SIMV only
     // on mandatory breaths: a supported spontaneous breath has its own, capped, pressure)
     if (this._volume_targeted() && !this._ps_breath) this.pressure_regulated_volume_control();
@@ -25681,6 +26718,11 @@ export class Ventilator extends BaseModelClass {
     this._map_sum = 0.0;
     this._map_time = 0.0;
     this._trig_times = [];
+    this._leak_net_vol = 0.0;
+    this._leak_sqrtp = 0.0;
+    this._leak_g = 0.0;
+    this._leak_perc_avg = 0.0;
+    this.leak_flow_comp = 0.0;
     this._ps_breath = false;
     this._simv_window_counter = 0.0;
     this._simv_breath_given = false;
@@ -25689,6 +26731,11 @@ export class Ventilator extends BaseModelClass {
   }
 
   switch_ventilator(state) {
+    // off = not intubated: the airway events end with it (tube back in place, circuit attached)
+    if (!state) {
+      this.tube_position = "trachea";
+      this.circuit_connected = true;
+    }
     this.is_enabled = state;
     this._reset_state();
     if (state) this._apply_humidifier();
@@ -25712,6 +26759,66 @@ export class Ventilator extends BaseModelClass {
     if (this._vent_leak) {
       this._vent_leak.is_enabled = state && this.leak_size > 0.0;
       this._vent_leak.no_flow = !(state && this.leak_size > 0.0);
+    }
+
+    this._apply_airway_routing();
+  }
+
+  // the airway events exist only while ventilating (a patient off the ventilator is not intubated)
+  set_tube_position(position) {
+    if (!this.is_enabled || !["trachea", "right_main", "extubated"].includes(position)) return;
+    this.tube_position = position;
+    this._apply_airway_routing();
+  }
+
+  set_circuit_connected(state) {
+    if (!this.is_enabled) return;
+    this.circuit_connected = !!state;
+    this._apply_airway_routing();
+  }
+
+  _apply_airway_routing() {
+    // re-route the tube for the current airway events. Resistors look their compartments up by name
+    // every step, so changing comp_from / comp_to takes effect on the next step and restoring the
+    // names restores the circuit exactly.
+    const models = this._model_engine.models;
+    const ett = this._vent_ettube;
+    if (!ett) return;
+    const ventilating = this.is_enabled;
+    const extubated = ventilating && this.tube_position === "extubated";
+    const disconnected = ventilating && !this.circuit_connected;
+
+    // the tube: from the circuit (or the room when disconnected) to the airway (or the room when out)
+    ett.comp_from = disconnected ? "MOUTH" : this._ett_from;
+    ett.comp_to = extubated ? "MOUTH" : this._ett_to;
+    if (ventilating) ett.no_flow = disconnected && extubated; // both ends in the room
+
+    // the open Y-piece
+    const yp = this._vent_disconnect;
+    if (yp) {
+      yp.is_enabled = disconnected;
+      yp.no_flow = !disconnected;
+      if (disconnected) {
+        const r_min = Math.max(this._t * ((this._vent_gascircuit?.el_eff ?? 0.0) + (models["MOUTH"]?.el_eff ?? 0.0)), 0.1);
+        yp.r_for = Math.max(this.disconnect_resistance, r_min);
+        yp.r_back = yp.r_for;
+      }
+    }
+
+    // out of the trachea the patient breathes through the natural airway, without the tube's dead
+    // space or the leak around it
+    const mouth_ds = models["MOUTH_DS"];
+    if (mouth_ds && ventilating) mouth_ds.no_flow = !extubated;
+    if (ventilating) this._set_tube_dead_space(!extubated);
+    if (extubated && this._vent_leak) {
+      this._vent_leak.is_enabled = false;
+      this._vent_leak.no_flow = true;
+    }
+
+    // a tube in the right main bronchus blocks the left one (kept apart from a bronchial plug)
+    const resp = models["Respiration"];
+    if (resp && typeof resp.set_tube_block === "function") {
+      resp.set_tube_block("left", ventilating && this.tube_position === "right_main");
     }
   }
 
@@ -26058,6 +27165,11 @@ export const SLE_MODES = {
 
 // the oscillatory modes
 export const SLE_HFO_MODES = ["HFOV", "HFOV+CMV"];
+
+// SpO2 (Utilities > Sensors > SpO2, p104): the OxyGenie target ranges, the only ones it may be used
+// with (p118), and the averaging times in s (3 = "2-4", 5 = "4-6"; 8 is the default)
+export const SLE_SPO2_TARGETS = ["90-94", "91-95", "92-96", "94-98"];
+export const SLE_SPO2_AVG = [3, 5, 8, 10, 12, 14, 16];
 
 export const SLE_MODE_NAMES = Object.keys(SLE_MODES);
 
@@ -28003,10 +29115,12 @@ export default class TaskScheduler {
     new_function_call.type = 2
     new_function_call.stepsize = 0.0;
 
+    // keep the model and method NAMES, not references: the task list is part of the model state
+    // the worker posts to the UI, and a function can't be structured-cloned, so a pending call
+    // would make every GET state fail until it ran. The method is looked up when the task runs.
     let result = new_function_call.func.split(".")
-    // get a reference to the function
-    new_function_call.model = this._model_engine.models[result[0]]
-    new_function_call.func = this._model_engine.models[result[0]][result[1]]
+    new_function_call.model = result[0]
+    new_function_call.func = result[1]
 
     // add the function call to the task list
     this._tasks[id] = new_function_call;
@@ -28113,7 +29227,10 @@ export default class TaskScheduler {
               remove_task = true;
               break;
             case 2:
-              task.func.apply(task.model, task.args)
+              {
+                const m = this._model_engine.models[task.model];
+                if (typeof m?.[task.func] === "function") m[task.func].apply(m, task.args ?? []);
+              }
               task.completed = true;
               remove_task = true;
               break;
@@ -34527,6 +35644,243 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 2,
       "ll": -100,
       "ul": 100
+    },
+    {
+      "caption": "atelectasis left lung (% collapsed)",
+      "target": "atelectasis_left",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "factor": 100,
+      "delta": 5,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 90
+    },
+    {
+      "caption": "atelectasis right lung (% collapsed)",
+      "target": "atelectasis_right",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "factor": 100,
+      "delta": 5,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 90
+    },
+    {
+      "caption": "atelectasis hypoxic vasoconstriction (share diverted)",
+      "target": "atelectasis_hpv",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.05,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
+    },
+    {
+      "caption": "atelectasis recruitable (off = obstructive)",
+      "target": "atelectasis_recruitable",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "atelectasis opening pressure (cmH2O)",
+      "target": "atelectasis_open_pressure",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 1,
+      "rounding": 0,
+      "ll": 5,
+      "ul": 45
+    },
+    {
+      "caption": "atelectasis opening pressure sd (cmH2O)",
+      "target": "atelectasis_open_sd",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0.5,
+      "ul": 10
+    },
+    {
+      "caption": "atelectasis closing pressure (cmH2O)",
+      "target": "atelectasis_close_pressure",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 25
+    },
+    {
+      "caption": "atelectasis closing pressure sd (cmH2O)",
+      "target": "atelectasis_close_sd",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0.5,
+      "ul": 10
+    },
+    {
+      "caption": "atelectasis recruitment time constant (s)",
+      "target": "atelectasis_tau_open",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0.5,
+      "ul": 60
+    },
+    {
+      "caption": "atelectasis derecruitment time constant (s)",
+      "target": "atelectasis_tau_close",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 5,
+      "rounding": 0,
+      "ll": 1,
+      "ul": 600
+    },
+    {
+      "caption": "atelectasis left lung (set collapsed fraction)",
+      "target": "set_atelectasis_left",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "collapsed fraction (0–0.9)",
+          "target": "atelectasis_left",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.05,
+          "rounding": 2,
+          "ll": 0,
+          "ul": 0.9
+        }
+      ]
+    },
+    {
+      "caption": "atelectasis right lung (set collapsed fraction)",
+      "target": "set_atelectasis_right",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "collapsed fraction (0–0.9)",
+          "target": "atelectasis_right",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.05,
+          "rounding": 2,
+          "ll": 0,
+          "ul": 0.9
+        }
+      ]
+    },
+    {
+      "caption": "left main bronchus obstructed (plug)",
+      "target": "airway_obstructed_left",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "right main bronchus obstructed (plug)",
+      "target": "airway_obstructed_right",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "obstruct left main bronchus",
+      "target": "set_airway_obstructed_left",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "obstructed",
+          "target": "airway_obstructed_left",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "caption": "obstruct right main bronchus",
+      "target": "set_airway_obstructed_right",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "obstructed",
+          "target": "airway_obstructed_right",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "caption": "resorption time constant, trapped air (s)",
+      "target": "atelectasis_resorb_tau_air",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 60,
+      "rounding": 0,
+      "ll": 10,
+      "ul": 36000
+    },
+    {
+      "caption": "resorption time constant, trapped oxygen (s)",
+      "target": "atelectasis_resorb_tau_o2",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "factor": 1,
+      "delta": 10,
+      "rounding": 0,
+      "ll": 10,
+      "ul": 36000
     }
   ],
   "Resuscitation": [
@@ -35519,6 +36873,58 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "dynamic resistance (cmH2O/(L/s))",
       "factor": 1,
       "rounding": 0
+    },
+    {
+      "caption": "tube position (airway event)",
+      "target": "tube_position",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "circuit connected (airway event)",
+      "target": "circuit_connected",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "move the endotracheal tube",
+      "target": "set_tube_position",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "position",
+          "target": "tube_position",
+          "type": "list",
+          "custom_options": true,
+          "choices": [
+            "trachea",
+            "right_main",
+            "extubated"
+          ]
+        }
+      ]
+    },
+    {
+      "caption": "connect / disconnect the circuit",
+      "target": "set_circuit_connected",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "connected",
+          "target": "circuit_connected",
+          "type": "boolean"
+        }
+      ]
     }
   ],
   "Sle6000": [
@@ -35636,6 +37042,74 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         {
           "caption": "on",
           "target": "state",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "caption": "OxyGenie (closed-loop O2)",
+      "target": "sle_oxygenie",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "on",
+          "target": "state",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "caption": "SpO2 monitoring",
+      "target": "sle_spo2_monitoring",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "on",
+          "target": "state",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "caption": "OxyGenie SpO2 target range (%)",
+      "target": "sle_set_spo2_target",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "range",
+          "target": "range",
+          "type": "list",
+          "options": [],
+          "choices": [
+            "90-94",
+            "91-95",
+            "92-96",
+            "94-98"
+          ],
+          "custom_options": true,
+          "default": "91-95"
+        }
+      ]
+    },
+    {
+      "caption": "SpO2 probe on the patient",
+      "target": "set_spo2_probe",
+      "type": "function",
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "attached",
+          "target": "attached",
           "type": "boolean",
           "default": true
         }
@@ -36145,6 +37619,56 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 0
     },
     {
+      "target": "mon_spo2",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "SpO2 (ventilator, %)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "oxy_state",
+      "type": "string",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "OxyGenie state"
+    },
+    {
+      "target": "oxy_ref_o2",
+      "type": "number",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "OxyGenie reference O2 (%)",
+      "factor": 1,
+      "rounding": 1
+    },
+    {
+      "target": "oxy_override_remaining",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "OxyGenie manual override remaining (s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "sle_spo2_target",
+      "type": "string",
+      "edit_mode": "basic",
+      "readonly": true,
+      "caption": "SpO2 target range (%)"
+    },
+    {
+      "target": "sle_spo2_avg",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "SpO2 averaging time (s)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
       "target": "o2_boost_remaining",
       "type": "number",
       "edit_mode": "advanced",
@@ -36188,6 +37712,58 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "end-tidal co2 (mmHg)",
       "factor": 1,
       "rounding": 0
+    },
+    {
+      "caption": "tube position (airway event)",
+      "target": "tube_position",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "circuit connected (airway event)",
+      "target": "circuit_connected",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "move the endotracheal tube",
+      "target": "set_tube_position",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "position",
+          "target": "tube_position",
+          "type": "list",
+          "custom_options": true,
+          "choices": [
+            "trachea",
+            "right_main",
+            "extubated"
+          ]
+        }
+      ]
+    },
+    {
+      "caption": "connect / disconnect the circuit",
+      "target": "set_circuit_connected",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "connected",
+          "target": "circuit_connected",
+          "type": "boolean"
+        }
+      ]
     }
   ]
 };
@@ -37148,8 +38724,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **438 settable params**, **40 functions**
-(+ 51 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **452 settable params**, **52 functions**
+(+ 66 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -37162,6 +38738,10 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `call` `Ventilator.sle_standby` — SLE6000: standby, stop ventilation (no args)
 - `call` `Ventilator.sle_manual_breath` — SLE6000: one manual breath (no args)
 - `call` `Ventilator.sle_o2_boost` — SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)
+- `call` `Ventilator.sle_oxygenie` — SLE6000: OxyGenie closed-loop O2 on/off (arg: boolean); needs SpO2 monitoring and a running ventilator
+- `call` `Ventilator.sle_spo2_monitoring` — SLE6000: SpO2 monitoring on/off (arg: boolean)
+- `call` `Ventilator.sle_set_spo2_target` — SLE6000: OxyGenie SpO2 target range (arg: 90-94, 91-95, 92-96 or 94-98)
+- `call` `Ventilator.set_spo2_probe` — SpO2 probe on the patient (arg: boolean; false = detached, no signal: OxyGenie waits for a signal)
 - `call` `Ventilator.sle_sigh` — SLE6000 HFOV: one sigh at Sigh P for Sigh Ti (no args)
 - `call` `Ventilator.sle_osc_pause` — SLE6000 HFOV: oscillation pause at MAP for up to 60 s; call again to cancel (no args)
 - `setProp` `Heart.heart_rate_ref` — reference heart rate (bpm)
@@ -37205,9 +38785,20 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `revert`  — undo all live changes — reload the patient as it was loaded
 - `tune`  — tune the live model to target value(s): map, sys+dia (together), co, hr, pap_m/pap_s, po2/spo2, pco2, be/ph, blood_volume (Full scope)
 - `loadDefinition`  — load+run a bot-built calibrated patient (Full scope; definition rides in response.artifact)
+- `call` `Respiration.set_atelectasis_left` — Atelectasis left lung (collapsed fraction) — directional nudge lever (arg: new value)
+- `call` `Respiration.set_atelectasis_right` — Atelectasis right lung (collapsed fraction) — directional nudge lever (arg: new value)
 - `setProp` `Pda.diameter_relative` — Ductus arteriosus (PDA) size — directional nudge lever
 - `setProp` `Shunts.diameter_fo` — Foramen ovale size — directional nudge lever
 - `setProp` `Shunts.diameter_vsd` — Ventricular septal defect (VSD) size — directional nudge lever
+- `call` `Ventilator.set_ettube_diameter` — Endotracheal tube internal diameter — directional nudge lever (arg: new value, mm)
+- `call` `Ventilator.set_ettube_length` — Endotracheal tube length — directional nudge lever (arg: new value, mm)
+- `setProp` `Ventilator.leak_size` — Leak around the endotracheal tube — directional nudge lever
+- `setProp` `VENT_ETTUBE.r_factor_ps` — Endotracheal tube obstruction (secretions, kink) — directional nudge lever
+- `call` `Ventilator.set_temp` — Humidifier temperature — directional nudge lever (arg: new value, °C)
+- `call` `Ventilator.set_tube_position` — Endotracheal tube position — airway event (arg: one of "trachea" / "right_main" / "extubated")
+- `call` `Ventilator.set_circuit_connected` — Ventilator circuit connection — airway event (arg: one of true / false)
+- `call` `Respiration.set_airway_obstructed_left` — Bronchial plug, left main bronchus — airway event (arg: one of false / true)
+- `call` `Respiration.set_airway_obstructed_right` — Bronchial plug, right main bronchus — airway event (arg: one of false / true)
 
 ---
 
@@ -37734,12 +39325,32 @@ _setProp_:
 ### Respiration
 
 _setProp_:
+- `atelectasis_left` — atelectasis left lung (% collapsed) (number, % collapsed, range 0–90)
+- `atelectasis_right` — atelectasis right lung (% collapsed) (number, % collapsed, range 0–90)
+- `atelectasis_recruitable` — atelectasis recruitable (off = obstructive) (boolean, off = obstructive)
+- `airway_obstructed_left` — left main bronchus obstructed (plug) (boolean, plug)
+- `airway_obstructed_right` — right main bronchus obstructed (plug) (boolean, plug)
 - `el_lungs_factor` — lung elastance factor (factor, range -10–10) _(factors)_
 - `el_thorax_factor` — thorax elastance factor (factor, range -10–10) _(factors)_
 - `res_upper_airways_factor` — upper airway resistance factor (factor, range -100–100) _(factors)_
 - `res_lower_airways_factor` — lower airway resistance factor (factor, range -100–100) _(factors)_
 - `gex_factor` — gasexchange factor (factor, range -100–100) _(factors)_
+- `atelectasis_hpv` — atelectasis hypoxic vasoconstriction (share diverted) (number, share diverted, range 0–1) _(advanced)_
+- `atelectasis_open_pressure` — atelectasis opening pressure (cmH2O) (number, cmH2O, range 5–45) _(advanced)_
+- `atelectasis_open_sd` — atelectasis opening pressure sd (cmH2O) (number, cmH2O, range 0.5–10) _(advanced)_
+- `atelectasis_close_pressure` — atelectasis closing pressure (cmH2O) (number, cmH2O, range 0–25) _(advanced)_
+- `atelectasis_close_sd` — atelectasis closing pressure sd (cmH2O) (number, cmH2O, range 0.5–10) _(advanced)_
+- `atelectasis_tau_open` — atelectasis recruitment time constant (s) (number, s, range 0.5–60) _(advanced)_
+- `atelectasis_tau_close` — atelectasis derecruitment time constant (s) (number, s, range 1–600) _(advanced)_
+- `atelectasis_resorb_tau_air` — resorption time constant, trapped air (s) (number, s, range 10–36000) _(advanced)_
+- `atelectasis_resorb_tau_o2` — resorption time constant, trapped oxygen (s) (number, s, range 10–36000) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
+
+_call_:
+- `set_atelectasis_left(atelectasis_left (number, 0–0.9, range 0–0.9))` — atelectasis left lung (set collapsed fraction)
+- `set_atelectasis_right(atelectasis_right (number, 0–0.9, range 0–0.9))` — atelectasis right lung (set collapsed fraction)
+- `set_airway_obstructed_left(airway_obstructed_left (boolean))` — obstruct left main bronchus
+- `set_airway_obstructed_right(airway_obstructed_right (boolean))` — obstruct right main bronchus
 
 ### Resuscitation
 
@@ -37782,6 +39393,10 @@ _call_:
 - `sle_set(name (list, one of rr/ti/peep/pip/rise/trig_sens/term_sens/rr_backup/p_support/vtv/o2/freq/ie/map/dp/hfo_vtv/sigh_rr/sigh_ti/sigh_p/hfo_activity); value (number))` — change a setting
 - `sle_manual_breath()` — manual breath
 - `sle_o2_boost(state (boolean))` — O2 Boost (+10 % for 2 min)
+- `sle_oxygenie(state (boolean))` — OxyGenie (closed-loop O2)
+- `sle_spo2_monitoring(state (boolean))` — SpO2 monitoring
+- `sle_set_spo2_target(range (list, one of 90-94/91-95/92-96/94-98))` — OxyGenie SpO2 target range (%)
+- `set_spo2_probe(attached (boolean))` — SpO2 probe on the patient
 - `sle_sigh()` — HFOV sigh (Sigh P for Sigh Ti)
 - `sle_osc_pause()` — HFOV oscillation pause (60 s, again to cancel)
 - `sle_set_circuit(diameter (number, mm, range 10–15))` — patient circuit (mm)
@@ -37789,6 +39404,8 @@ _call_:
 - `set_ettube_length(ettube_length (number, mm))` — endotracheal tube length (mm)
 - `set_humidity(humidity (number, range 0–1))` — humidity
 - `set_temp(temp (number, C, range 0–42))` — temperature (C)
+- `set_tube_position(tube_position (list, one of trachea/right_main/extubated))` — move the endotracheal tube
+- `set_circuit_connected(circuit_connected (boolean))` — connect / disconnect the circuit
 
 ### Surfactant
 
@@ -37892,13 +39509,15 @@ _call_:
 - `set_humidity(humidity (number, range 0–1))` — humidity
 - `set_temp(temp (number, C, range 0–42))` — temperature (C)
 - `trigger_breath()` — trigger a manual breath
+- `set_tube_position(tube_position (list, one of trachea/right_main/extubated))` — move the endotracheal tube
+- `set_circuit_connected(circuit_connected (boolean))` — connect / disconnect the circuit
 
 ---
 
 ## Common tasks — directional nudges
 
 Curated relative adjustments ("raise PVR 30%", "halve contractility"). Each maps onto an EXISTING
-`setProp` or `scale` op — there is no special nudge op. Two resolution rules:
+`setProp`, `scale` or `call` op — there is no special nudge op. Resolution rules:
 
 - **setProp levers** (a `*_factor_ps` factor or a plain number): if the field's value is shown in the
   live monitor context, multiply by (1+step) to raise / 1/(1+step) to lower; otherwise set an ABSOLUTE
@@ -37910,9 +39529,53 @@ Curated relative adjustments ("raise PVR 30%", "halve contractility"). Each maps
 - **absolute setProp levers** (shunt sizes — PDA/foramen ovale/VSD): set an ABSOLUTE value in DISPLAY
   units within the stated range; 0 = closed/none. The engine treats diameter 0 as a hard-closed fast
   path, so open a closed shunt by setting a positive diameter (e.g. PDA 50 = ~half-open).
+- **call levers** (ventilator tube size/length, humidifier temperature): call the setter with the
+  ABSOLUTE new value within the stated range; the setter recomputes what depends on it.
 
 For inverse quantities (lung compliance ↔ elastance; preload ↔ unstressed volume) raising the
 physiological quantity LOWERS the lever — noted per task.
+
+### Lung mechanics
+
+- **Lung compliance** — scale `left_lung_elastances` + `right_lung_elastances`, default ±20%. _(inverse: raising the quantity lowers the lever)_ Down = stiffer lungs (RDS / hypoplasia); up = more compliant.
+  - e.g. `{"op":"scale","group":"left_lung_elastances","factor":<absolute, 1.0=baseline>,"reason":"Lung compliance nudge"}`
+- **Airway resistance** — scale `airway_lower_resistances`, default ±30%. Up = bronchospasm / obstruction.
+  - e.g. `{"op":"scale","group":"airway_lower_resistances","factor":<absolute, 1.0=baseline>,"reason":"Airway resistance nudge"}`
+- **Atelectasis left lung (collapsed fraction)** — call `Respiration.set_atelectasis_left` (current value `atelectasis_left`), step ±0.1, range 0–0.9. Fraction of the left lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. A high PIP, sigh or sustained inflation (~25 cmH2O) reopens it, PEEP ≥ 8 keeps it open, low PEEP or no support lets it collapse again; the value tracks this live. Recruitable off (Model editor → Respiration) = obstructive: pressure has no effect.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_atelectasis_left","args":[<0–0.9>],"reason":"set Atelectasis L"}`
+- **Atelectasis right lung (collapsed fraction)** — call `Respiration.set_atelectasis_right` (current value `atelectasis_right`), step ±0.1, range 0–0.9. Fraction of the right lung collapsed (0 = aerated, 0.9 = near-total). Lowers that lung's FRC, compliance and diffusion and shunts its collapsed units' blood: SpO2 and Vte fall, pCO2 rises. A high PIP, sigh or sustained inflation (~25 cmH2O) reopens it, PEEP ≥ 8 keeps it open, low PEEP or no support lets it collapse again; the value tracks this live. Recruitable off (Model editor → Respiration) = obstructive: pressure has no effect.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_atelectasis_right","args":[<0–0.9>],"reason":"set Atelectasis R"}`
+
+### Ventilation drive
+
+- **Ventilation drive (reference minute volume)** — setProp `Breathing.minute_volume_ref`, default ±20%. Up = hyperventilation (↓pCO2); down = hypoventilation (↑pCO2).
+  - e.g. `{"op":"setProp","model":"Breathing","target":"minute_volume_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Ventilation drive"}`
+
+### Ventilator
+
+- **Endotracheal tube internal diameter** — call `Ventilator.set_ettube_diameter` (current value `ettube_diameter`), step ±0.5 mm, range 2–9. Tube resistance rises steeply as the tube narrows (about d⁻⁴); the tube lumen is dead space too.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_diameter","args":[<2–9 mm>],"reason":"set ETT size"}`
+- **Endotracheal tube length** — call `Ventilator.set_ettube_length` (current value `ettube_length`), step ±10 mm, range 50–300. Resistance and tube dead space grow with length (e.g. an uncut tube).
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_ettube_length","args":[<50–300 mm>],"reason":"set ETT length"}`
+- **Leak around the endotracheal tube** — setProp `Ventilator.leak_size`, step ±0.1 mm, range 0–3. Gap around an uncuffed tube. 0 = no leak. The SLE6000 compensates leaks up to 35 %; above that it autotriggers.
+  - e.g. `{"op":"setProp","model":"Ventilator","target":"leak_size","value":<0–3 mm; 0=closed/none>,"reason":"set Tube leak"}`
+- **Endotracheal tube obstruction (secretions, kink)** — setProp `VENT_ETTUBE.r_factor_ps`, default ±50%. Multiplies the tube resistance. Up = secretions / kinked tube: same pressures, less volume.
+  - e.g. `{"op":"setProp","model":"VENT_ETTUBE","target":"r_factor_ps","value":<target in display units, or current×(1±50%) if shown>,"reason":"adjust Tube obstruction"}`
+- **Humidifier temperature** — call `Ventilator.set_temp` (current value `temp`), step ±1 °C, range 20–42. Temperature of the inspired gas from the heated humidifier.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_temp","args":[<20–42 °C>],"reason":"set Humidifier temp"}`
+
+### Airway events
+
+- **Endotracheal tube position** — call `Ventilator.set_tube_position` (current value `tube_position`), choices `"trachea"` (Trachea), `"right_main"` (Right main), `"extubated"` (Extubated). While ventilating. Right main: all gas to the right lung, the left lung collapses by resorption (faster on O2); pull back and recruit it. Extubated: the ventilator blows into the room, the baby breathes on its own without PEEP (or not at all if apnoeic).
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_tube_position","args":[<"trachea" | "right_main" | "extubated">],"reason":"Tube"}`
+- **Ventilator circuit connection** — call `Ventilator.set_circuit_connected` (current value `circuit_connected`), choices `true` (Connected), `false` (Disconnected). While ventilating. Disconnected: circuit pressure falls to ~0, no PEEP, only the baby's own breaths through the tube.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_circuit_connected","args":[<true | false>],"reason":"Circuit"}`
+- **SpO2 probe (ventilator's sensor)** — call `Ventilator.set_spo2_probe` (current value `spo2_probe_attached`), choices `true` (Attached), `false` (Detached). The SLE6000's SpO2 sensor. Detached: no SpO2 signal; with OxyGenie on it waits for a signal, holds the O2 for 60 s, then moves it slowly towards the reference O2.
+  - e.g. `{"op":"call","model":"Ventilator","target":"set_spo2_probe","args":[<true | false>],"reason":"SpO2 probe"}`
+- **Bronchial plug, left main bronchus** — call `Respiration.set_airway_obstructed_left` (current value `airway_obstructed_left`), choices `false` (Open), `true` (Plugged). A plug in the left main bronchus: no gas in or out, and the trapped gas is absorbed, so the left lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_airway_obstructed_left","args":[<false | true>],"reason":"Bronchial plug L"}`
+- **Bronchial plug, right main bronchus** — call `Respiration.set_airway_obstructed_right` (current value `airway_obstructed_right`), choices `false` (Open), `true` (Plugged). A plug in the right main bronchus: no gas in or out, and the trapped gas is absorbed, so the right lung collapses (faster on O2). Clearing it leaves the collapse for recruitment.
+  - e.g. `{"op":"call","model":"Respiration","target":"set_airway_obstructed_right","args":[<false | true>],"reason":"Bronchial plug R"}`
 
 ### Vascular tone
 
@@ -37935,13 +39598,6 @@ physiological quantity LOWERS the lever — noted per task.
 - **Heart rate (reference)** — setProp `Heart.heart_rate_ref`, default ±20%. Tachycardia (up) / bradycardia (down).
   - e.g. `{"op":"setProp","model":"Heart","target":"heart_rate_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Heart rate"}`
 
-### Lung mechanics
-
-- **Lung compliance** — scale `left_lung_elastances` + `right_lung_elastances`, default ±20%. _(inverse: raising the quantity lowers the lever)_ Down = stiffer lungs (RDS / hypoplasia); up = more compliant.
-  - e.g. `{"op":"scale","group":"left_lung_elastances","factor":<absolute, 1.0=baseline>,"reason":"Lung compliance nudge"}`
-- **Airway resistance** — scale `airway_lower_resistances`, default ±30%. Up = bronchospasm / obstruction.
-  - e.g. `{"op":"scale","group":"airway_lower_resistances","factor":<absolute, 1.0=baseline>,"reason":"Airway resistance nudge"}`
-
 ### Gas exchange
 
 - **O2 diffusion capacity** — setProp `dif_o2_factor_ps` on each `GasExchanger` instance, default ±30%. Down = impaired alveolar O2 transfer.
@@ -37956,20 +39612,15 @@ physiological quantity LOWERS the lever — noted per task.
 - **Ventricular septal defect (VSD) size** — setProp `Shunts.diameter_vsd`, step ±1 mm, range 0–10. Ventricular-level shunt. 0 = none.
   - e.g. `{"op":"setProp","model":"Shunts","target":"diameter_vsd","value":<0–10 mm; 0=closed/none>,"reason":"set VSD"}`
 
-### Ventilation drive
+### Blood & acid-base
 
-- **Ventilation drive (reference minute volume)** — setProp `Breathing.minute_volume_ref`, default ±20%. Up = hyperventilation (↓pCO2); down = hypoventilation (↑pCO2).
-  - e.g. `{"op":"setProp","model":"Breathing","target":"minute_volume_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Ventilation drive"}`
+- **Blood volume** — scale `blood_volume`, default ±10%. Down = hemorrhage; up = fluid overload.
+  - e.g. `{"op":"scale","group":"blood_volume","factor":<absolute, 1.0=baseline>,"reason":"Blood volume nudge"}`
 
 ### Metabolic & thermal
 
 - **Metabolic demand (VO2)** — setProp `Metabolism.vo2`, default ±20%. Up = sepsis/hypermetabolism; down = hypothermia/sedation.
   - e.g. `{"op":"setProp","model":"Metabolism","target":"vo2","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust VO2"}`
-
-### Blood & acid-base
-
-- **Blood volume** — scale `blood_volume`, default ±10%. Down = hemorrhage; up = fluid overload.
-  - e.g. `{"op":"scale","group":"blood_volume","factor":<absolute, 1.0=baseline>,"reason":"Blood volume nudge"}`
 
 ---
 
@@ -38077,7 +39728,6 @@ Available scenarios are listed in `public/model_definitions/index.json`.
   "tapvc_obstructed",
   "term_fetus",
   "term_neonate",
-  "term_neonate_sle6000",
   "tof",
   "tof_pa",
   "tof_pink",
