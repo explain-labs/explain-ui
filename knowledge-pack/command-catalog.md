@@ -25,7 +25,7 @@ Rules of thumb:
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
 Snapshot: **45 model_types**, **452 settable params**, **52 functions**
-(+ 66 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+(+ 67 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -90,15 +90,16 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Pda.diameter_relative` — Ductus arteriosus (PDA) size — directional nudge lever
 - `setProp` `Shunts.diameter_fo` — Foramen ovale size — directional nudge lever
 - `setProp` `Shunts.diameter_vsd` — Ventricular septal defect (VSD) size — directional nudge lever
+- `call` `Breathing.switch_breathing` — Spontaneous breathing — choice of states (arg: one of true / false)
 - `call` `Ventilator.set_ettube_diameter` — Endotracheal tube internal diameter — directional nudge lever (arg: new value, mm)
 - `call` `Ventilator.set_ettube_length` — Endotracheal tube length — directional nudge lever (arg: new value, mm)
 - `setProp` `Ventilator.leak_size` — Leak around the endotracheal tube — directional nudge lever
 - `setProp` `VENT_ETTUBE.r_factor_ps` — Endotracheal tube obstruction (secretions, kink) — directional nudge lever
 - `call` `Ventilator.set_temp` — Humidifier temperature — directional nudge lever (arg: new value, °C)
-- `call` `Ventilator.set_tube_position` — Endotracheal tube position — airway event (arg: one of "trachea" / "right_main" / "extubated")
-- `call` `Ventilator.set_circuit_connected` — Ventilator circuit connection — airway event (arg: one of true / false)
-- `call` `Respiration.set_airway_obstructed_left` — Bronchial plug, left main bronchus — airway event (arg: one of false / true)
-- `call` `Respiration.set_airway_obstructed_right` — Bronchial plug, right main bronchus — airway event (arg: one of false / true)
+- `call` `Ventilator.set_tube_position` — Endotracheal tube position — choice of states (arg: one of "trachea" / "right_main" / "extubated")
+- `call` `Ventilator.set_circuit_connected` — Ventilator circuit connection — choice of states (arg: one of true / false)
+- `call` `Respiration.set_airway_obstructed_left` — Bronchial plug, left main bronchus — choice of states (arg: one of false / true)
+- `call` `Respiration.set_airway_obstructed_right` — Bronchial plug, right main bronchus — choice of states (arg: one of false / true)
 
 ---
 
@@ -850,6 +851,8 @@ physiological quantity LOWERS the lever — noted per task.
 
 - **Ventilation drive (reference minute volume)** — setProp `Breathing.minute_volume_ref`, default ±20%. Up = hyperventilation (↓pCO2); down = hypoventilation (↑pCO2).
   - e.g. `{"op":"setProp","model":"Breathing","target":"minute_volume_ref","value":<target in display units, or current×(1±20%) if shown>,"reason":"adjust Ventilation drive"}`
+- **Spontaneous breathing** — call `Breathing.switch_breathing` (current value `breathing_enabled`), choices `true` (On), `false` (Off). Off = apnoea (e.g. sedation or relaxation): only the ventilator breathes. On a ventilator, see how the triggered modes (PTV, PSV, SIMV) fall back to their backup rate.
+  - e.g. `{"op":"call","model":"Breathing","target":"switch_breathing","args":[<true | false>],"reason":"Own breathing"}`
 
 ### Ventilator
 

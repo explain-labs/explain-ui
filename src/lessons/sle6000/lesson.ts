@@ -53,7 +53,7 @@ export default defineLesson({
   controls: [],
   layout: {
     centre: ["sle6000", "diagram"],
-    tasks: { categories: ["lung_mechanics", "ventilator", "airway_events"] },
+    tasks: { categories: ["ventilation_drive", "lung_mechanics", "ventilator", "airway_events"] },
   },
   monitorLanes: ["ecg", "spo2_pre", "co2", "abp"],
   numerics: [

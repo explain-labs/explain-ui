@@ -8,7 +8,7 @@ Start de beademing met de knop hieronder. Die zet **CMV** aan (continue verplich
 | Ti | 0,35 s |
 | O₂ | 21 % |
 
-In deze les staat de eigen ademhaling van de baby uit, zodat elke ademteug die je ziet van de machine komt. (Bij de getriggerde modi komt die terug.)
+In deze les staat de eigen ademhaling van de baby uit, zodat elke ademteug die je ziet van de machine komt. (Bij de getriggerde modi komt die terug, en je kunt hem zelf aan- en uitzetten onder **Patiënt → Ventilation drive**.)
 
 Je kunt het ook zelf starten: **Mode → CMV → Confirm**.
 
