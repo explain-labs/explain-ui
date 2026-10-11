@@ -95,7 +95,7 @@ and is the app's only ventilator UI.
 - **`ParamTile.vue`.** One parameter control: an SVG 270° arc gauge, coloured by type (time blue,
   pressure orange, O2 green, sensitivity white). Its states are available, selected (white) and
   preview (black). A tap selects it. A hold emits `hold`: 2 s switches on an Off function (VTV, RR
-  Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 opens the O2
+  Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 2 s on O2 opens the O2
   menu (see OxyGenie below). `display` / `ends` show a list setting by name, and `tag` puts a
   text under the value at nearly its size (OxyGenie's "Auto" / "---", as "25 / Auto" on the device).
 - **Tap vs hold** (`press.ts`, `usePress`), shared by the tiles, the monitored values (1 s) and
@@ -138,8 +138,8 @@ and is the app's only ventilator UI.
 - **SpO2 and OxyGenie** (IFU ch. 19, pp 118–121; engine: [`Sle6000` OxyGenie](../../explain-engine/docs/Sle6000.md#oxygenie)).
   - With SpO2 monitoring on, `MonitoredValues` adds an SpO2 box at the bottom (`mon_spo2`; `---`
     without a signal).
-  - **Hold O2 3 s.** As on the device (pp 119, 128, and a capture of the device), two buttons
-    appear stacked above the O2 tile: **OxyGenie (target %)** over **O2 Boost (+inc% 2min)**.
+  - **Hold O2 2 s** (3 s on the device, pp 119, 128; shortened as it felt slow on screen). As on
+    the device (and a capture of it), two buttons appear stacked above the O2 tile: **OxyGenie (target %)** over **O2 Boost (+inc% 2min)**.
     Press one, then Confirm. O2 Boost previews first ("O2 Boost in Standby", the tile renamed O2
     Boost with the red arc). OxyGenie switches it on, or off when it is on. OxyGenie is greyed
     without SpO2 monitoring, and O2 Boost while OxyGenie is on (p121). A running Boost stops on

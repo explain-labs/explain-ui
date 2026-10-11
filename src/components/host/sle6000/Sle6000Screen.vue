@@ -109,9 +109,11 @@ const previewMode = ref<string | null>(null);
 const pendingCircuit = ref<number | null>(null);
 const selected = ref<string | null>(null);
 const panel = ref<"mode" | "layout" | "utilities" | null>(null);
-// holding O2 for 3 s (pp 119, 128; the device: two buttons stacked above the O2 control,
+// holding O2 (pp 119, 128; the device: two buttons stacked above the O2 control,
 // "OxyGenie (91 - 95%)" over "O2 Boost (+10% 2min)"): "menu" before either is pressed, "boost"
 // previews O2 Boost, "oxygenie" has the OxyGenie button pressed. Confirm acts on the pressed one.
+// The hold is 3 s on the device, shortened to 2 s here as it felt slow on screen.
+const O2_HOLD_MS = 2000;
 const o2Menu = ref<"boost" | "oxygenie" | "menu" | null>(null);
 const showExtra = ref(false);
 const doubleColumn = ref(true); // as on the device photos; a 1 s hold switches to single
@@ -180,7 +182,7 @@ function nudge(dir: number) {
 }
 function hold(name: string) {
   if (name === "o2") {
-    // hold the O2 tile 3 s: a running O2 Boost stops; otherwise the OxyGenie and O2 Boost buttons
+    // hold the O2 tile 2 s: a running O2 Boost stops; otherwise the OxyGenie and O2 Boost buttons
     // appear above it (pp 119, 128). OxyGenie needs SpO2 monitoring; with OxyGenie on there is no
     // O2 Boost (p121) and the OxyGenie button switches it off.
     if (!ventilating.value) return;
@@ -764,7 +766,7 @@ onBeforeUnmount(() => {
             :kind="PARAMS[n].kind"
             :state="tileState(n)"
             :can-be-off="!!PARAMS[n].off"
-            :hold-ms="n === 'o2' ? 3000 : PARAMS[n].off ? 2000 : 0"
+            :hold-ms="n === 'o2' ? O2_HOLD_MS : PARAMS[n].off ? 2000 : 0"
             :boost="n === 'o2' && (boostLeft > 0 || o2Menu === 'boost') ? (boostInc >= 100 ? 100 : Math.min(100, shown.o2 + boostInc)) : null"
             :tag="n === 'o2' ? o2Tag : null"
             :display="displayOf(n)"

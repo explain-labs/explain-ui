@@ -7,7 +7,7 @@ import { usePress } from "./press";
 // sleTheme.ts): a dark rounded tile with the label on top, the value on a dark disc ringed by a 270°
 // arc gauge (black track, a fill coloured by parameter type from the minimum to the value), and the
 // range ends and unit under it. A tap selects it; holding it emits
-// `hold` (2 s switches an Off function on, 3 s on O2 opens O2 Boost / OxyGenie). With OxyGenie on,
+// `hold` (2 s switches an Off function on, and on O2 opens O2 Boost / OxyGenie). With OxyGenie on,
 // the O2 control carries "Auto", or "---" while it waits for a signal or is overridden (pp 118-119).
 const props = withDefaults(
   defineProps<{
