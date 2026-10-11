@@ -143,8 +143,11 @@ and is the app's only ventilator UI.
     monitoring on, an **OxyGenie (target %)** button takes the Additional Parameters slot. Pressing
     it and Confirm calls `sle_oxygenie(true)`. With OxyGenie on the hold offers only that button,
     and Confirm switches it off (no Boost while it is on, p121).
-  - **Status box** beside the O2 tile, where the +/− buttons go (p120): "Auto", "Waiting for
-    Signal" (no valid SpO2), or blue "Manual Override" with its 30 s countdown. The O2 tile shows
+  - **Status box** beside the O2 tile, where the +/− buttons and Confirm go (p120). It is drawn
+    as on a ward photo of the device: about 1.5 tiles wide, solid green (#72dc20, sampled) with
+    white "OxyGenie" / the state / the target range. The states are "Auto", "Waiting for Signal"
+    (no valid SpO2; its colour is not documented, so it stays green), and a blue "Manual
+    Override" with its 30 s countdown. It is hidden while a setting is being edited. The O2 tile shows
     the delivered O2 with "Auto", or "---" in the other two states.
   - **Manual override.** Tapping O2 in Auto and confirming is an ordinary `sle_apply({o2})`; the
     engine treats any `o2` it receives while OxyGenie is on as the override.

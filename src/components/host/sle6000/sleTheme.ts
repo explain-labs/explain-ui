@@ -34,6 +34,10 @@ export const SLE_THEME = {
   // tile arcs by parameter type
   arc: { time: "#90d0f0", pressure: "#e88028", o2: "#84c428", sens: "#f2f2f2" } as Record<string, string>,
   boost: "#e53935", // O2 Boost portion of the O2 arc (IFU p129)
+  // the OxyGenie status box: solid green with white text (sampled from a ward photo of the device
+  // in HFO with OxyGenie on); blue during a manual override (IFU p120)
+  oxygenie: "#72dc20",
+  oxyOverride: "#1f5fae",
   mute: "#f2c200", // alarm-mute button outline and bell
 };
 
@@ -48,4 +52,6 @@ export const SLE_CSS_VARS: Record<string, string> = {
   "--sle-label": SLE_THEME.label,
   "--sle-mute": SLE_THEME.mute,
   "--sle-o2": SLE_THEME.arc.o2,
+  "--sle-oxygenie": SLE_THEME.oxygenie,
+  "--sle-oxy-override": SLE_THEME.oxyOverride,
 };

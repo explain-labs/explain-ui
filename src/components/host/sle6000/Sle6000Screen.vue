@@ -250,12 +250,16 @@ function confirmSpo2(settings: Partial<Spo2Settings>) {
 }
 // the O2 control with OxyGenie on: "Auto", or "---" waiting for a signal or overridden (pp 118-119)
 const o2Tag = computed(() => (!oxyOn.value ? null : oxyState.value === "auto" ? "Auto" : "---"));
-// the OxyGenie status box beside the O2 control; the +/- buttons take its place (p120)
+// the OxyGenie status box beside the O2 control, as on the device (ward photo, HFO): green, about
+// 1.5 tiles wide, "OxyGenie" over the state over the target range; blue with the countdown in a
+// manual override (p120). The +/- buttons and Confirm take its place (p120).
 const oxyStatus = computed(() => {
-  if (!oxyOn.value || !ventilating.value) return null;
-  if (oxyState.value === "override") return { text: "Manual Override", sub: `(${Math.ceil(oxyOverrideLeft.value)}s)`, blue: true };
-  if (oxyState.value === "fallback") return { text: "Waiting for Signal", sub: "", blue: false };
-  return { text: "Auto", sub: "", blue: false };
+  if (!oxyOn.value || !ventilating.value || dirty.value) return null;
+  const range = `(${spo2.value.target.replace("-", " - ")}%)`;
+  if (oxyState.value === "override")
+    return { text: "Manual Override", sub: `${Math.ceil(oxyOverrideLeft.value)}s`, blue: true };
+  if (oxyState.value === "fallback") return { text: "Waiting for Signal", sub: range, blue: false };
+  return { text: "Auto", sub: range, blue: false };
 });
 function openMode() {
   if (panel.value === "mode") {
@@ -784,8 +788,9 @@ onBeforeUnmount(() => {
         <button :aria-label="`${trendCtl} minus`" @click="trendNudge(-1)">−</button>
       </div>
       <div v-else-if="oxyStatus" class="sle-oxy-status" :class="{ blue: oxyStatus.blue }">
-        <div>{{ oxyStatus.text }}</div>
-        <div v-if="oxyStatus.sub" class="sub">{{ oxyStatus.sub }}</div>
+        <div class="head">OxyGenie</div>
+        <div class="state" :class="{ long: oxyStatus.text.length > 10 }">{{ oxyStatus.text }}</div>
+        <div class="sub">{{ oxyStatus.sub }}</div>
       </div>
       <button v-if="dirty" class="sle-confirm" aria-label="Confirm" @click="confirm">✓</button>
 
@@ -1164,25 +1169,32 @@ button:disabled {
   position: absolute;
   left: 788px;
   top: 654px;
-  width: 106px;
+  width: 160px;
   height: 108px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   text-align: center;
-  background: var(--sle-panel);
+  background: var(--sle-oxygenie);
+  color: #fff;
   border: 1px solid #000;
   border-radius: 8px;
-  font-size: 15px;
-  padding: 4px;
+  padding: 6px 4px;
 }
 .sle-oxy-status.blue {
-  background: #1f5fae;
+  background: var(--sle-oxy-override);
 }
+.sle-oxy-status .head,
 .sle-oxy-status .sub {
-  margin-top: 4px;
-  font-size: 14px;
+  font-size: 13px;
+}
+.sle-oxy-status .state {
+  font-size: 22px;
+  line-height: 1.1;
+}
+.sle-oxy-status .state.long {
+  font-size: 17px;
 }
 .sle-oxy-btn {
   line-height: 1.4;
