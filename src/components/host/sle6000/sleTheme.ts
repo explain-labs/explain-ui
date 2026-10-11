@@ -39,6 +39,8 @@ export const SLE_THEME = {
   // looks; blue during a manual override (IFU p120)
   oxygenie: "#57a61b",
   spo2: "#40d8d0", // the SpO2 monitored value is cyan (sampled from a ward photo of the device)
+  spo2Band: "rgba(64, 128, 255, 0.28)", // the SpO2 target range on the SpO2 trend: a blue bar (IFU p120)
+  refO2: "#d8d8d8", // the reference O2 on the set O2 trend: dashed (IFU p120)
   oxyOverride: "#1f5fae",
   mute: "#f2c200", // alarm-mute button outline and bell
 };
