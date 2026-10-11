@@ -6,7 +6,8 @@ import { SLE_THEME } from "./sleTheme";
 // sleTheme.ts): a dark rounded tile with the label on top, the value on a dark disc ringed by a 270°
 // arc gauge (black track, a fill coloured by parameter type from the minimum to the value), and the
 // range ends and unit under it. A tap selects it; holding it emits
-// `hold` (2 s switches an Off function on, 3 s on O2 starts O2 Boost).
+// `hold` (2 s switches an Off function on, 3 s on O2 opens O2 Boost / OxyGenie). With OxyGenie on,
+// the O2 control carries "Auto", or "---" while it waits for a signal or is overridden (pp 118-119).
 const props = withDefaults(
   defineProps<{
     label: string;
@@ -22,8 +23,9 @@ const props = withDefaults(
     boost?: number | null; // O2 Boost level shown as a red arc segment
     display?: string | null; // the text instead of the number (a list setting, e.g. I:E "1:2")
     ends?: [string, string] | null; // the range-end labels instead of min/max
+    tag?: string | null; // a small text under the value (OxyGenie "Auto" / "---")
   }>(),
-  { state: "available", canBeOff: false, holdMs: 0, boost: null, display: null, ends: null },
+  { state: "available", canBeOff: false, holdMs: 0, boost: null, display: null, ends: null, tag: null },
 );
 const emit = defineEmits<{ (e: "tap"): void; (e: "hold"): void }>();
 
@@ -100,6 +102,7 @@ onBeforeUnmount(cancel);
       <path v-if="fillPath" :d="fillPath" class="fill" :style="{ stroke: COLORS[kind] }" />
       <path v-if="boostPath" :d="boostPath" class="fill" :style="{ stroke: BOOST }" />
       <text :x="CX" :y="CY + 6" class="value" :class="{ off }">{{ text }}</text>
+      <text v-if="tag" :x="CX" :y="CY + 15" class="tag">{{ tag }}</text>
       <text :x="pt(135)[0] - 1" :y="90" class="end" text-anchor="start">{{ ends ? ends[0] : fmtEnd(min) }}</text>
       <text :x="pt(45)[0] + 1" :y="90" class="end" text-anchor="end">{{ ends ? ends[1] : fmtEnd(max) }}</text>
       <text :x="CX" :y="98" class="unit">{{ unit }}</text>
@@ -170,6 +173,11 @@ onBeforeUnmount(cancel);
 }
 .value.off {
   font-size: 17px;
+}
+.tag {
+  fill: currentColor;
+  font-size: 7.5px;
+  text-anchor: middle;
 }
 .end,
 .unit {
