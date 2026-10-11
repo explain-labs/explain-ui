@@ -63,6 +63,7 @@ export function decimalsOf(name: string): number {
 // the tile label in a mode (CPAP for PEEP in CPAP, Ti Max in PSV; PIP MAX / VTV Target with VTV
 // on; in HFOV ΔP Max / Vte Target with its VTV on, as on the device's HFOV screen)
 export function labelOf(name: string, mode: string, s: Record<string, number>): string {
+  if (name === "o2") return "O2 %"; // as on the device's O2 control (ward photo)
   const base = MODES[mode]?.labels?.[name] ?? PARAMS[name].label;
   if (mode === "HFOV" && s.hfo_vtv > 0) {
     if (name === "dp") return "ΔP Max";
