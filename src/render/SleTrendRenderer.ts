@@ -12,12 +12,24 @@ import { TREND_DEFS, decimate, clockText, type TrendStore } from "@/components/h
 // stops in background tabs, and the trends move at 1 Hz anyway). Never Vue-reactive.
 
 export type TrendLine = [string | null, string | null]; // trend ids (null = Off)
+// extras for one display line (the SpO2 layout, IFU p120): a fixed scale, a shaded band (the SpO2
+// target range), horizontal lines (alarm thresholds, the reference O2 dashed), the first trend's
+// colour and the text at the right of the header strip
+export interface TrendDecor {
+  range?: { lo: number; hi: number; step: number };
+  band?: { lo: number; hi: number; color: string };
+  marks?: { v: number; color: string; dash?: boolean }[];
+  color?: string;
+  right?: string;
+}
 export interface TrendView {
   t0: number; // window start (model s)
   t1: number; // window end
   cursorT: number | null;
   lines: TrendLine[];
   grid: boolean;
+  decor?: (TrendDecor | null)[]; // per line
+  relative?: boolean; // time labels as "-10 min" from the window end, as on the SpO2 layout
 }
 export interface TrendColors {
   first: string;
@@ -110,13 +122,14 @@ export class SleTrendRenderer {
     const lines = this.view.lines;
     const n = Math.max(1, lines.length);
     const panelH = (h - LOCATOR_H - 6) / n;
-    for (let k = 0; k < lines.length; k++) this.drawLine(lines[k], k * panelH, panelH, w);
+    for (let k = 0; k < lines.length; k++) this.drawLine(lines[k], k * panelH, panelH, w, this.view.decor?.[k] ?? null);
     this.drawLocator(w, h);
   }
 
-  private drawLine(line: TrendLine, top: number, ph: number, w: number) {
+  private drawLine(line: TrendLine, top: number, ph: number, w: number, decor: TrendDecor | null) {
     const ctx = this.ctx;
-    const { t0, t1, cursorT, grid } = this.view;
+    const { t0, t1, cursorT, grid, relative } = this.view;
+    const firstColor = decor?.color ?? this.colors.first;
     const L = AXIS_W, R = w - BOX_W - 6;
     const T = top + HEADER_H + 8, B = top + ph - 14;
     // header strip: left name blue, right name yellow
@@ -125,12 +138,12 @@ export class SleTrendRenderer {
     ctx.font = "italic 10px Arial, Helvetica, sans-serif";
     ctx.textBaseline = "middle";
     const name = (id: string | null) => (id ? `${TREND_DEFS[id].label}${TREND_DEFS[id].unit ? ` (${TREND_DEFS[id].unit})` : ""}` : "");
-    ctx.fillStyle = this.colors.first;
+    ctx.fillStyle = firstColor;
     ctx.textAlign = "left";
     ctx.fillText(name(line[0]), L + 6, top + 2 + HEADER_H / 2);
-    ctx.fillStyle = this.colors.second;
+    ctx.fillStyle = decor?.right ? this.pal.title : this.colors.second;
     ctx.textAlign = "right";
-    ctx.fillText(name(line[1]), R, top + 2 + HEADER_H / 2);
+    ctx.fillText(decor?.right ?? name(line[1]), R, top + 2 + HEADER_H / 2);
 
     // plot frame, grid and time labels
     ctx.strokeStyle = this.pal.axis;
@@ -141,9 +154,11 @@ export class SleTrendRenderer {
     ctx.font = "8px Arial, Helvetica, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    // ticks on round times since the first stored sample (the clock's origin)
+    // ticks on round times since the first stored sample (the clock's origin), or back from the
+    // window end ("-10 min")
     const origin = this.store.firstTime() ?? 0;
-    for (let t = origin + Math.ceil((t0 - origin) / tStep) * tStep; t <= t1; t += tStep) {
+    const first = relative ? t1 - Math.floor(span / tStep) * tStep : origin + Math.ceil((t0 - origin) / tStep) * tStep;
+    for (let t = first; t <= t1 + 1e-6; t += tStep) {
       const x = Math.round(L + ((t - t0) / span) * (R - L)) + 0.5;
       if (grid) {
         ctx.strokeStyle = this.pal.zero;
@@ -153,7 +168,8 @@ export class SleTrendRenderer {
         ctx.stroke();
       }
       ctx.fillStyle = this.pal.tick;
-      ctx.fillText(clockText(t - origin).slice(0, 5), x, B + 2);
+      const label = relative ? (t1 - t < 1 ? "0" : `-${Math.round((t1 - t) / 60)} min`) : clockText(t - origin).slice(0, 5);
+      ctx.fillText(label, x, B + 2);
     }
 
     // the two trends, each on its own round range
@@ -161,7 +177,7 @@ export class SleTrendRenderer {
     line.forEach((id, j) => {
       if (!id) return;
       const def = TREND_DEFS[id];
-      const color = j === 0 ? this.colors.first : this.colors.second;
+      const color = j === 0 ? firstColor : this.colors.second;
       if (!def.path) {
         ctx.fillStyle = color;
         ctx.font = "italic 10px Arial, Helvetica, sans-serif";
@@ -173,14 +189,35 @@ export class SleTrendRenderer {
       const s = this.store.slice(def.path, t0, t1);
       const vals = s.v.map((v) => v * (def.scale ?? 1));
       const fin = vals.filter(Number.isFinite);
-      const rg = niceRange(fin.length ? Math.min(...fin) : 0, fin.length ? Math.max(...fin) : 1);
-      const y = (v: number) => B - ((v - rg.lo) / (rg.hi - rg.lo || 1)) * (B - T);
+      const rg =
+        j === 0 && decor?.range ? decor.range : niceRange(fin.length ? Math.min(...fin) : 0, fin.length ? Math.max(...fin) : 1);
+      const y = (v: number) => B - ((Math.min(rg.hi, Math.max(rg.lo, v)) - rg.lo) / (rg.hi - rg.lo || 1)) * (B - T);
+      // the first trend's band and horizontal lines, under the trace
+      if (j === 0 && decor?.band) {
+        const ya = y(decor.band.hi), yb = y(decor.band.lo);
+        ctx.fillStyle = decor.band.color;
+        ctx.fillRect(L + 1, ya, R - L - 1, yb - ya);
+      }
+      if (j === 0 && decor?.marks) {
+        for (const m of decor.marks) {
+          if (!Number.isFinite(m.v)) continue;
+          const ym = Math.round(y(m.v)) + 0.5;
+          ctx.strokeStyle = m.color;
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash(m.dash ? [6, 4] : []);
+          ctx.beginPath();
+          ctx.moveTo(L + 1, ym);
+          ctx.lineTo(R, ym);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
       // scale ticks: first trend on the left axis, second along the right inside edge
       ctx.font = "8px Arial, Helvetica, sans-serif";
       ctx.textBaseline = "middle";
       ctx.fillStyle = color;
-      ctx.textAlign = j === 0 ? "right" : "right";
-      for (let v = rg.lo; v <= rg.hi + 1e-9; v += rg.step * 2) {
+      ctx.textAlign = "right";
+      for (let v = rg.lo; v <= rg.hi + 1e-9; v += j === 0 && decor?.range ? rg.step : rg.step * 2) {
         ctx.fillText(tickText(v, rg.step), j === 0 ? L - 3 : R - 3, y(v));
       }
       // min / max per pixel column, joined
@@ -224,7 +261,7 @@ export class SleTrendRenderer {
       if (!id || !TREND_DEFS[id].path || ct === null) return;
       const def = TREND_DEFS[id];
       const v = this.store.valueAt(def.path!, ct);
-      ctx.fillStyle = j === 0 ? this.colors.first : this.colors.second;
+      ctx.fillStyle = j === 0 ? firstColor : this.colors.second;
       ctx.fillText(v === null ? "---" : fmt(v * (def.scale ?? 1), def.decimals), bx + (BOX_W - 4) / 2, by + 12 + j * 16);
     });
   }

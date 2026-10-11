@@ -155,6 +155,20 @@ and is the app's only ventilator UI.
     engine treats any `o2` it receives while OxyGenie is on as the override.
   - "O2 > N %" appears in the message bar while `oxy_high_o2_flag` is set (there is no alarm
     system yet).
+  - **SpO2** (IFU §19.3, p120; a ward photo of the device): from top to bottom:
+    - one waveform (pressure by default, picked in the tab);
+    - the pleth: a second `Sle6000Renderer` on `Monitor.signals.sat_pre`, the patient monitor's
+      preductal pulse, in the SpO2 cyan. SIQ is not modelled, and the y-axis shows the source's
+      mmHg ticks, which the device doesn't;
+    - two trend lines from a second `SleTrendRenderer`, over a fixed last hour labelled "-10 min"
+      (`relative`):
+      - **SpO2** (`Ventilator.mon_spo2`, the ventilator's sensor) on 70–100 % with the target
+        range as a blue band and the alarm limits 1 % outside it in orange; "Target range: …" in
+        the header. A lost signal leaves a gap.
+      - **Set O2** on 20–100 % with, while OxyGenie is on, the reference O2 dashed and the
+        O2 > N % level in orange; "Reference O2: …%" in the header.
+    The extras come from `TrendView.decor` (per line: fixed range, band, horizontal marks, colour,
+    right header text).
 - **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons (CPAP to SIMV, HFOV, HFOV+CMV)
   and the 10/15 mm circuit picker. Non-invasive is shown disabled.
 - **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: coloured traces

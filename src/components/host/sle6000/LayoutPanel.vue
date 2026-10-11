@@ -8,7 +8,8 @@ import { TREND_DEFS, TREND_IDS } from "./sleTrends";
 // applies; nothing changes before. Waveforms: up to two of the three waveforms off, filled or
 // lines. Loops: the waveform on top, the primary loop (V/P default) and the secondary loop (F/V
 // default). Trends: four display lines of up to two trends (first blue, second yellow; the same
-// trend may be shown twice) and a background grid (pp 146-148).
+// trend may be shown twice) and a background grid (pp 146-148). SpO2 (IFU §19.3, p120): the waveform
+// on top of the pleth, the SpO2 trend and the set O2 trend.
 const props = defineProps<{ layout: SleLayout }>();
 const emit = defineEmits<{ (e: "confirm", layout: SleLayout): void; (e: "close"): void }>();
 
@@ -31,6 +32,7 @@ const changed = computed(() => JSON.stringify(draft) !== JSON.stringify(props.la
       <button :class="{ on: draft.kind === 'waveforms' }" @click="draft.kind = 'waveforms'">Waveforms</button>
       <button :class="{ on: draft.kind === 'loops' }" @click="draft.kind = 'loops'">Loops</button>
       <button :class="{ on: draft.kind === 'trends' }" @click="draft.kind = 'trends'">Trends</button>
+      <button :class="{ on: draft.kind === 'spo2' }" @click="draft.kind = 'spo2'">SpO2</button>
       <button class="close" aria-label="Close" @click="emit('close')">✕</button>
     </div>
 
@@ -48,6 +50,19 @@ const changed = computed(() => JSON.stringify(draft) !== JSON.stringify(props.la
         </button>
       </div>
       <div class="hint">Two of the three waveforms can be turned off.</div>
+    </div>
+
+    <div v-else-if="draft.kind === 'spo2'" class="body">
+      <div class="row">
+        <div class="cap">Waveform</div>
+        <button v-for="w in WAVES" :key="w" class="opt" :class="{ sel: draft.spo2Wave === w }" @click="draft.spo2Wave = w">
+          {{ WAVE_LABEL[w] }}
+        </button>
+      </div>
+      <div class="hint">
+        The waveform, the pleth, the SpO2 trend with the target range (blue) and its alarm limits, and the set O2
+        trend with the reference O2 (dashed) and the O2 &gt; N % level, over the last hour.
+      </div>
     </div>
 
     <div v-else-if="draft.kind === 'trends'" class="body">

@@ -31,7 +31,7 @@ export const TREND_DEFS: Record<string, TrendDef> = {
   r: { label: "Resistance", unit: "mbar/L/s", path: "Ventilator.mon_r", decimals: 0 },
   c: { label: "Compliance", unit: "mL/mbar", path: "Ventilator.mon_c", decimals: 1 },
   dco2: { label: "DCO2", unit: "", path: "Ventilator.mon_dco2", decimals: 0 },
-  spo2: { label: "SpO2", unit: "%", path: "Monitor.sao2_pre", decimals: 0 },
+  spo2: { label: "SpO2", unit: "%", path: "Ventilator.mon_spo2", decimals: 0 }, // the ventilator's own sensor
   siq: { label: "SIQ", unit: "", path: null, decimals: 0 }, // pleth signal quality: not modelled
 };
 export const TREND_IDS = Object.keys(TREND_DEFS);
@@ -125,7 +125,9 @@ export class TrendStore {
       else this.head = (this.head + 1) % this.capacity;
       this.t[k] = time;
       for (const [p, col] of this.cols) {
-        const v = Number(s[p]);
+        // a missing value (null: e.g. no SpO2 signal) is a gap, not 0
+        const raw = s[p];
+        const v = raw === null || raw === undefined ? NaN : Number(raw);
         col[k] = Number.isFinite(v) ? v : NaN;
       }
       added++;

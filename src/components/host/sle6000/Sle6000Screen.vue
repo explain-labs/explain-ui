@@ -333,19 +333,22 @@ watch(pausedLeft, (v) => {
   loopA?.setPaused(v > 0);
   loopB?.setPaused(v > 0);
   trendR?.setPaused(v > 0);
+  plethR?.setPaused(v > 0);
+  spo2R?.setPaused(v > 0);
 });
 
 // ---- layout (IFU §21.1.8): waveforms, loops or trends ------------------------------------------
 const layout = ref<SleLayout>(loadLayout());
 const loopsOn = computed(() => layout.value.kind === "loops");
 const trendsOn = computed(() => layout.value.kind === "trends");
+const spo2LayoutOn = computed(() => layout.value.kind === "spo2");
 const loopAEl = ref<HTMLDivElement | null>(null);
 const loopBEl = ref<HTMLDivElement | null>(null);
 let loopA: SleLoopRenderer | null = null;
 let loopB: SleLoopRenderer | null = null;
 function applyLayout() {
   const l = layout.value;
-  const shownWaves = l.kind === "loops" ? [l.loopWave] : l.waves;
+  const shownWaves = l.kind === "loops" ? [l.loopWave] : l.kind === "spo2" ? [l.spo2Wave] : l.waves;
   renderer?.setHidden(WAVES.map((w, i) => (shownWaves.includes(w) ? -1 : i)).filter((i) => i >= 0));
   renderer?.setFilled(l.filled && !isHfo(liveMode.value)); // HFO traces are lines on the device
   loopA?.setConfig(LOOPS[l.primary]);
@@ -354,7 +357,71 @@ function applyLayout() {
   capture.value = "none";
   trendCtl.value = null;
   pushTrendView();
+  pushSpo2View();
 }
+
+// ---- SpO2 layout (IFU §19.3, p120; a ward photo of the device): the waveform, the pleth, the SpO2
+// trend with the target range as a blue band flanked by the alarm limits (1 % outside it, p118) and
+// the set O2 trend with the reference O2 dashed and the O2 > N % level, over the last hour ---------
+const plethEl = ref<HTMLDivElement | null>(null);
+const spo2TrendEl = ref<HTMLDivElement | null>(null);
+let plethR: Sle6000Renderer | null = null;
+let spo2R: SleTrendRenderer | null = null;
+const SPO2_WINDOW = 3600;
+const PLETH: SleChannel = {
+  // the patient monitor's preductal pleth (the aortic pressure pulse); SIQ is not modelled
+  signal: "Monitor.signals.sat_pre",
+  title: "Plethysmogram",
+  ranges: [[20, 60], [30, 90], [40, 120], [0, 160]],
+  color: T.spo2,
+  fill: null,
+};
+function pushSpo2View() {
+  if (!spo2R) return;
+  const first = trendStore.firstTime() ?? 0;
+  const t1 = Math.max(trendStore.lastTime() ?? 0, first + SPO2_WINDOW);
+  const [lo, hi] = spo2.value.target.split("-").map(Number);
+  const ref = Number(read("oxy_ref_o2"));
+  const highO2 = Number(read("sle_oxy_high_o2") ?? 60);
+  spo2R.setView({
+    t0: t1 - SPO2_WINDOW,
+    t1,
+    cursorT: null,
+    lines: [
+      ["spo2", null],
+      ["set_o2", null],
+    ],
+    grid: false,
+    relative: true,
+    decor: [
+      {
+        range: { lo: 70, hi: 100, step: 10 },
+        band: { lo, hi, color: T.spo2Band },
+        marks: [
+          { v: lo - 1, color: T.alarmLimit },
+          { v: hi + 1, color: T.alarmLimit },
+        ],
+        color: T.spo2,
+        right: `Target range: ${lo}-${hi}%`,
+      },
+      {
+        range: { lo: 20, hi: 100, step: 20 },
+        marks: oxyOn.value
+          ? [
+              { v: ref, color: T.refO2, dash: true },
+              { v: highO2, color: T.alarmLimit },
+            ]
+          : [],
+        color: T.arc.o2,
+        right: oxyOn.value && Number.isFinite(ref) ? `Reference O2: ${Math.round(ref)}%` : "",
+      },
+    ],
+  });
+}
+watch(
+  () => [spo2LayoutOn.value, spo2.value.target, read("oxy_ref_o2"), read("sle_oxy_high_o2"), oxyOn.value],
+  () => pushSpo2View(),
+)
 
 // ---- trends (IFU §21.1.9.4, pp 148-149): Zoom / Cursor / Scroll on the +/- buttons -------------
 const trendEl = ref<HTMLDivElement | null>(null);
@@ -381,6 +448,7 @@ function pushTrendView() {
 }
 // new samples (realtime or a fast-forward) move the live window and the clock
 const offTrendAppend = onTrendAppend(() => {
+  if (spo2LayoutOn.value) pushSpo2View();
   if (trendsOn.value && endT.value === null) pushTrendView();
 });
 function pickTrendCtl(c: "zoom" | "cursor" | "scroll") {
@@ -536,7 +604,13 @@ const PALETTE = {
 // the loops' breath edges (inspiration counter) and HFO cycle edges (oscillator phase); the
 // patient-triggered inspirations drawn yellow (a trigger, not a mandatory breath, in inspiration)
 const TRIGGER_MARK = ["Ventilator.triggered_breath", "Ventilator._mandatory_breath", "Ventilator._inspiration"];
-const FAST_PATHS = [...CHANNELS.map((c) => c.signal), "Ventilator.ncc_insp", "Ventilator._hfo_phase", ...TRIGGER_MARK];
+const FAST_PATHS = [
+  ...CHANNELS.map((c) => c.signal),
+  PLETH.signal,
+  "Ventilator.ncc_insp",
+  "Ventilator._hfo_phase",
+  ...TRIGGER_MARK,
+];
 
 function rewatch() {
   watchProps(FAST_PATHS);
@@ -564,6 +638,9 @@ onMounted(() => {
   loopB = new SleLoopRenderer(loopBEl.value!, LOOPS[layout.value.secondary], PALETTE, loopColors);
   addRenderer(loopA);
   addRenderer(loopB);
+  plethR = new Sle6000Renderer(plethEl.value!, [PLETH], PALETTE, 6);
+  addRenderer(plethR);
+  spo2R = new SleTrendRenderer(spo2TrendEl.value!, trendStore, PALETTE, { first: T.trend1, second: T.trend2 });
   applyLayout();
   rewatch();
   ro = new ResizeObserver(() => {
@@ -573,6 +650,8 @@ onMounted(() => {
     loopA?.setCssScale(scale.value);
     trendR?.setCssScale(scale.value);
     loopB?.setCssScale(scale.value);
+    plethR?.setCssScale(scale.value);
+    spo2R?.setCssScale(scale.value);
   });
   ro.observe(host.value!);
   clockTimer = setInterval(() => (now.value = new Date()), 1000);
@@ -581,7 +660,8 @@ onBeforeUnmount(() => {
   ro?.disconnect();
   trendR?.dispose();
   offTrendAppend();
-  for (const r of [renderer, loopA, loopB]) {
+  spo2R?.dispose();
+  for (const r of [renderer, loopA, loopB, plethR]) {
     if (!r) continue;
     removeRenderer(r);
     r.dispose();
@@ -653,7 +733,12 @@ onBeforeUnmount(() => {
 
       <!-- waveforms -->
       <div class="sle-wave">
-        <div ref="wave" class="sle-wave-canvas" :class="{ top: loopsOn, off: trendsOn }"></div>
+        <div ref="wave" class="sle-wave-canvas" :class="{ top: loopsOn || spo2LayoutOn, off: trendsOn }"></div>
+        <!-- SpO2 layout (IFU §19.3): the pleth and the SpO2 / set O2 trends under the waveform -->
+        <div v-show="spo2LayoutOn" class="sle-spo2">
+          <div ref="plethEl" class="sle-pleth"></div>
+          <div ref="spo2TrendEl" class="sle-spo2-trends"></div>
+        </div>
         <!-- trends layout (IFU pp 146-149): four display lines and the Zoom / Cursor / Scroll column -->
         <div v-show="trendsOn" class="sle-trends">
           <div ref="trendEl" class="sle-trends-canvas"></div>
@@ -1061,6 +1146,24 @@ button:disabled {
 .sle-trend-ctl .z {
   font-size: 11px;
   color: var(--sle-label);
+}
+.sle-spo2 {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 154px;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--sle-screen);
+}
+.sle-pleth {
+  height: 120px;
+}
+.sle-spo2-trends {
+  flex: 1;
+  min-height: 0;
 }
 .sle-wave-canvas.top {
   bottom: auto;

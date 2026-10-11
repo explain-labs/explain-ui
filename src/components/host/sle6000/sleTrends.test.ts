@@ -79,3 +79,21 @@ describe("helpers", () => {
     expect(clockText(3725)).toBe("01:02:05");
   });
 });
+
+describe("TrendStore missing values", () => {
+  it("stores a null (e.g. no SpO2 signal) as a gap, not 0", () => {
+    const s = new TrendStore(["Ventilator.mon_spo2"], 10);
+    s.append([
+      { time: 1, "Ventilator.mon_spo2": 95 },
+      { time: 2, "Ventilator.mon_spo2": null },
+      { time: 3 },
+      { time: 4, "Ventilator.mon_spo2": 0 },
+    ]);
+    const v = s.slice("Ventilator.mon_spo2", 0, 10).v;
+    expect(v[0]).toBe(95);
+    expect(Number.isNaN(v[1])).toBe(true);
+    expect(Number.isNaN(v[2])).toBe(true);
+    expect(v[3]).toBe(0);
+    expect(s.valueAt("Ventilator.mon_spo2", 2)).toBeNull();
+  });
+});

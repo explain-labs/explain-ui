@@ -179,10 +179,12 @@ export const SLOW_PATHS = [
 // Waveforms: up to two of the three waveforms off, filled or lines. Loops: one waveform, a primary
 // loop (V/P default) and a secondary loop (F/V default). Trends: four display lines of up to two
 // trends each (defaults as on the brochure's Trends capture), with an optional background grid.
+// SpO2 (IFU §19.3, p120): one waveform, the pleth, the SpO2 trend with the target band and the set
+// O2 trend with the reference O2.
 export type WaveName = "pressure" | "flow" | "volume";
 export type LoopKind = "VP" | "FV" | "FP";
 export interface SleLayout {
-  kind: "waveforms" | "loops" | "trends";
+  kind: "waveforms" | "loops" | "trends" | "spo2";
   waves: WaveName[]; // Waveforms layout: the channels shown
   filled: boolean;
   loopWave: WaveName; // Loops layout: the waveform on top
@@ -190,6 +192,7 @@ export interface SleLayout {
   secondary: LoopKind;
   trends: [string | null, string | null][]; // trend ids (sleTrends.ts), null = Off
   trendGrid: boolean;
+  spo2Wave: WaveName; // SpO2 layout: the waveform on top (pressure by default, p120)
 }
 export const WAVES: WaveName[] = ["pressure", "flow", "volume"];
 export const WAVE_LABEL: Record<WaveName, string> = { pressure: "Pressure", flow: "Flow", volume: "Volume" };
@@ -208,6 +211,7 @@ export const DEFAULT_LAYOUT: SleLayout = {
     ["r", "c"],
   ],
   trendGrid: false,
+  spo2Wave: "pressure",
 };
 
 // the axes of each loop (cmH2O -> mbar for pressure; flow l/min; volume ml)
@@ -245,6 +249,7 @@ export function loadLayout(): SleLayout {
     if (!raw) return copyLayout(DEFAULT_LAYOUT);
     const l = { ...DEFAULT_LAYOUT, ...JSON.parse(raw) } as SleLayout;
     l.waves = l.waves.filter((w) => WAVES.includes(w));
+    if (!WAVES.includes(l.spo2Wave)) l.spo2Wave = DEFAULT_LAYOUT.spo2Wave;
     if (!l.waves.length) l.waves = [...DEFAULT_LAYOUT.waves];
     const trends = Array.isArray(l.trends) && l.trends.length === 4 ? l.trends : DEFAULT_LAYOUT.trends;
     l.trends = trends.map((t) => [t[0] ?? null, t[1] ?? null]); // own copy, never the defaults' arrays
