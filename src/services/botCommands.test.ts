@@ -103,6 +103,23 @@ describe("validateCommand SLE6000 HFO (Guided scope)", () => {
   });
 });
 
+describe("validateCommand SLE6000 OxyGenie (Guided scope)", () => {
+  const state = { models: { Ventilator: { name: "Ventilator", model_type: "Sle6000" } } };
+  const guided = (cmd: object) => validateCommand({ reason: "t", ...cmd } as any, state, "guided");
+
+  it("accepts OxyGenie, SpO2 monitoring, the target range and the probe event", () => {
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_oxygenie", args: [true] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_spo2_monitoring", args: [false] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_set_spo2_target", args: ["92-96"] }).ok).toBe(true);
+    expect(guided({ op: "call", model: "Ventilator", target: "set_spo2_probe", args: [false] }).ok).toBe(true);
+  });
+
+  it("rejects a target range the device doesn't offer and wrong-typed args", () => {
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_set_spo2_target", args: ["88-92"] }).ok).toBe(false);
+    expect(guided({ op: "call", model: "Ventilator", target: "sle_oxygenie", args: ["on"] }).ok).toBe(false);
+  });
+});
+
 describe("validateCommand atelectasis and airway events", () => {
   const state = {
     models: {

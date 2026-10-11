@@ -77,8 +77,8 @@ and is the app's only ventilator UI.
   - the information bar: mode button, messages, lock, pause, clock;
   - the button column: Additional Parameters and Manual Breath. In HFOV, Manual Breath becomes
     **Sigh** and an **Oscillation Pause** button (with its 60 s countdown) sits above Additional
-    Parameters, as on the vendor HFOV screen. Layout opens the Layout panel; Alarms and Utilities
-    are disabled for now;
+    Parameters, as on the vendor HFOV screen. Layout opens the Layout panel and Utilities the
+    Utilities panel; Alarms is disabled for now;
   - the mode name with its sub-labels (VTV, and Sigh in HFOV), lit when on;
   - the waveforms;
   - the monitored values;
@@ -95,8 +95,9 @@ and is the app's only ventilator UI.
 - **`ParamTile.vue`.** One parameter control: an SVG 270° arc gauge, coloured by type (time blue,
   pressure orange, O2 green, sensitivity white). Its states are available, selected (white) and
   preview (black). A tap selects it. A hold emits `hold`: 2 s switches on an Off function (VTV, RR
-  Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 toggles O2 Boost.
-  `display` / `ends` show a list setting by name.
+  Backup, P Support, Sigh RR; the HFO VTV at the last measured Vte), and 3 s on O2 opens the O2
+  menu (see OxyGenie below). `display` / `ends` show a list setting by name, and `tag` puts a small
+  text under the value (OxyGenie's "Auto" / "---").
 - **`MonitoredValues.vue`.** The grouped value column, in a single (8) or double (16) layout. A
   1 s hold switches between them. Sized from a ward photo of the device: the group boxes share the
   column height by their number of rows, and values are 36 px (single) / 32 px (double) with 13 px
@@ -127,6 +128,24 @@ and is the app's only ventilator UI.
       a fast-forward), so fast-forwarding fills the trends with no gap.
     - **Time axis.** Model time, labelled from the first stored sample. SIQ is listed but not
       modelled.
+- **`UtilitiesPanel.vue`** (IFU §18.3, p104). Only Sensors → SpO2 is modelled: SpO2 monitoring
+  on/off, the OxyGenie target range (90–94, 91–95, 92–96, 94–98 %) and the averaging time (greyed at
+  2–4 s while OxyGenie is on). Confirm sends the changed fields as one `sle_set_spo2`.
+- **SpO2 and OxyGenie** (IFU ch. 19, pp 118–121; engine: [`Sle6000` OxyGenie](../../explain-engine/docs/Sle6000.md#oxygenie)).
+  - With SpO2 monitoring on, `MonitoredValues` adds an SpO2 box at the bottom (`mon_spo2`; `---`
+    without a signal).
+  - **Hold O2 3 s.** Without OxyGenie this previews O2 Boost ("O2 Boost in Standby", the tile
+    renamed O2 Boost with the red +`sle_o2_boost_inc` arc; a running Boost stops instead). With SpO2
+    monitoring on, an **OxyGenie (target %)** button takes the Additional Parameters slot. Pressing
+    it and Confirm calls `sle_oxygenie(true)`. With OxyGenie on the hold offers only that button,
+    and Confirm switches it off (no Boost while it is on, p121).
+  - **Status box** beside the O2 tile, where the +/− buttons go (p120): "Auto", "Waiting for
+    Signal" (no valid SpO2), or blue "Manual Override" with its 30 s countdown. The O2 tile shows
+    the delivered O2 with "Auto", or "---" in the other two states.
+  - **Manual override.** Tapping O2 in Auto and confirming is an ordinary `sle_apply({o2})`; the
+    engine treats any `o2` it receives while OxyGenie is on as the override.
+  - "O2 > N %" appears in the message bar while `oxy_high_o2_flag` is set (there is no alarm
+    system yet).
 - **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons (CPAP to SIMV, HFOV, HFOV+CMV)
   and the 10/15 mm circuit picker. Non-invasive is shown disabled.
 - **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: coloured traces
@@ -160,7 +179,8 @@ the etCO2 yellow and the orange-red alarm-limit lines for later phases.
 **Write rule.** Edits are local until Confirm: `pending` settings, `previewMode`, `pendingCircuit`.
 Confirm sends one `call("Ventilator.sle_apply", [settings])`, so every change goes through the
 engine's clamping and interlocks. The screen never `setProp`s.
-- Manual Breath calls `sle_manual_breath`, and O2 Boost calls `sle_o2_boost`.
+- Manual Breath calls `sle_manual_breath`, O2 Boost `sle_o2_boost`, the OxyGenie button
+  `sle_oxygenie` and the Utilities panel `sle_set_spo2`.
 - The settings read off the slow stream (`Ventilator.sle_*`). The values just sent overlay them until
   two slow samples have arrived.
 - Timeouts follow the device: a selected parameter is discarded after 15 s, a panel or preview after

@@ -4,6 +4,8 @@ import {
   SLE_PARAMS,
   SLE_MODES,
   SLE_HFO_MODES,
+  SLE_SPO2_TARGETS,
+  SLE_SPO2_AVG,
   sle_step,
   sle_interlocks,
   sle_clamp,
@@ -40,6 +42,11 @@ export const interlocks = sle_interlocks as (
 export const clampParam = sle_clamp as (name: string, value: number) => number;
 export const HFO_MODES = SLE_HFO_MODES as string[];
 export const isHfo = (mode: string | null | undefined) => !!mode && HFO_MODES.includes(mode);
+
+// SpO2 and OxyGenie (IFU §18.3 p104, ch. 19 pp 118-121): the target ranges and averaging times
+export const SPO2_TARGETS = SLE_SPO2_TARGETS as string[];
+export const SPO2_AVG = SLE_SPO2_AVG as number[];
+export const spo2AvgLabel = (s: number) => (s === 3 ? "2-4" : s === 5 ? "4-6" : String(s));
 
 // the text on a tile: a list setting by its name, an Off function as "Off"
 export function formatParam(name: string, value: number, decimals: number): string {
@@ -130,14 +137,19 @@ export const MON_HFOCMV_DOUBLE: MonCell[][] = [
   [mv("mon_r", "R", "mbar/l/s", 0), null, mv("mon_c", "C", "ml/mbar", 1), null],
 ];
 
+// SpO2, at the bottom of the monitored values while SpO2 monitoring is on (IFU §18.14)
+export const MON_SPO2: MonValue[] = [mv("mon_spo2", "SpO2", "%", 0)];
+
 // the monitored-value groups for a mode
-export function monGroups(mode: string | null, double: boolean): MonCell[][] {
-  if (mode === "HFOV+CMV") return double ? MON_HFOCMV_DOUBLE : MON_HFO_SINGLE;
-  if (mode === "HFOV") return double ? MON_HFO_DOUBLE : MON_HFO_SINGLE;
-  return double ? MON_DOUBLE : MON_SINGLE;
+export function monGroups(mode: string | null, double: boolean, spo2 = false): MonCell[][] {
+  let g: MonCell[][];
+  if (mode === "HFOV+CMV") g = double ? MON_HFOCMV_DOUBLE : MON_HFO_SINGLE;
+  else if (mode === "HFOV") g = double ? MON_HFO_DOUBLE : MON_HFO_SINGLE;
+  else g = double ? MON_DOUBLE : MON_SINGLE;
+  return spo2 ? [...g, MON_SPO2] : g;
 }
 
-const ALL_MON = [MON_SINGLE, MON_DOUBLE, MON_HFO_SINGLE, MON_HFO_DOUBLE, MON_HFOCMV_DOUBLE]
+const ALL_MON = [MON_SINGLE, MON_DOUBLE, MON_HFO_SINGLE, MON_HFO_DOUBLE, MON_HFOCMV_DOUBLE, [MON_SPO2]]
   .flat(2)
   .filter((m): m is MonValue => m !== null);
 
@@ -148,6 +160,15 @@ export const SLOW_PATHS = [
   "Ventilator.sle_circuit",
   "Ventilator.hfo_pause_remaining",
   "Ventilator.hfo_sigh_remaining",
+  "Ventilator.sle_o2_boost_inc",
+  "Ventilator.sle_spo2_on",
+  "Ventilator.sle_spo2_target",
+  "Ventilator.sle_spo2_avg",
+  "Ventilator.sle_oxy_high_o2",
+  "Ventilator.oxy_state",
+  "Ventilator.oxy_ref_o2",
+  "Ventilator.oxy_override_remaining",
+  "Ventilator.oxy_high_o2_flag",
   ...SETTING_NAMES.map((k) => `Ventilator.sle_${k}`),
   ...new Set(ALL_MON.map((m) => m.path)),
 ];

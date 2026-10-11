@@ -8,10 +8,17 @@ import { monGroups, type MonValue } from "./sleUi";
 // The sets follow the mode (conventional, HFOV, HFOV+CMV); an empty cell keeps the device's layout.
 // Sizes from a ward photo of the device (HFO, double column): the boxes share the column height by
 // their number of rows, values about 36 px (single) / 32 px (double), captions 13 px.
-const props = defineProps<{ values: Record<string, unknown>; double: boolean; active: boolean; mode: string | null }>();
+// SpO2 monitoring on adds an SpO2 box at the bottom (IFU §18.14).
+const props = defineProps<{
+  values: Record<string, unknown>;
+  double: boolean;
+  active: boolean;
+  mode: string | null;
+  spo2?: boolean;
+}>();
 const emit = defineEmits<{ (e: "toggle"): void }>();
 
-const groups = computed(() => monGroups(props.mode, props.double));
+const groups = computed(() => monGroups(props.mode, props.double, props.spo2));
 const rows = (g: unknown[]) => (props.double ? Math.ceil(g.length / 2) : g.length);
 function show(m: MonValue): string {
   const v = props.values[m.path];

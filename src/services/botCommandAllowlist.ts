@@ -55,6 +55,25 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
   { op: "call", model: "Ventilator", target: "sle_standby", note: "SLE6000: standby, stop ventilation (no args)" },
   { op: "call", model: "Ventilator", target: "sle_manual_breath", note: "SLE6000: one manual breath (no args)" },
   { op: "call", model: "Ventilator", target: "sle_o2_boost", note: "SLE6000: O2 Boost +10 % for 2 minutes (arg: boolean)" },
+  {
+    op: "call",
+    model: "Ventilator",
+    target: "sle_oxygenie",
+    note: "SLE6000: OxyGenie closed-loop O2 on/off (arg: boolean); needs SpO2 monitoring and a running ventilator",
+  },
+  { op: "call", model: "Ventilator", target: "sle_spo2_monitoring", note: "SLE6000: SpO2 monitoring on/off (arg: boolean)" },
+  {
+    op: "call",
+    model: "Ventilator",
+    target: "sle_set_spo2_target",
+    note: "SLE6000: OxyGenie SpO2 target range (arg: 90-94, 91-95, 92-96 or 94-98)",
+  },
+  {
+    op: "call",
+    model: "Ventilator",
+    target: "set_spo2_probe",
+    note: "SpO2 probe on the patient (arg: boolean; false = detached, no signal: OxyGenie waits for a signal)",
+  },
   { op: "call", model: "Ventilator", target: "sle_sigh", note: "SLE6000 HFOV: one sigh at Sigh P for Sigh Ti (no args)" },
   {
     op: "call",

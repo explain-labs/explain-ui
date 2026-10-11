@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type ComputedRef } from "vue";
 import { useExplain } from "@/composables/useExplain";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { Sle6000Renderer, type SleChannel } from "@/render/Sle6000Renderer";
@@ -20,6 +20,7 @@ import ParamTile from "./ParamTile.vue";
 import MonitoredValues from "./MonitoredValues.vue";
 import ModePanel from "./ModePanel.vue";
 import LayoutPanel from "./LayoutPanel.vue";
+import UtilitiesPanel, { type Spo2Settings } from "./UtilitiesPanel.vue";
 import {
   PARAMS,
   MODES,
@@ -43,8 +44,8 @@ import { SLE_THEME as T, SLE_CSS_VARS } from "./sleTheme";
 // On-screen replica of the SLE6000 touchscreen (IFU V2.0 §21, pp 138-155), drawn as a 1024 x 768
 // frame scaled to the pane: information bar, button column, three waveforms, monitored values and
 // the parameter row with +/- and Confirm. It drives the engine's Sle6000 model (instance
-// "Ventilator") only through sle_apply / sle_manual_breath / sle_sigh / sle_osc_pause / sle_o2_boost,
-// so every change is
+// "Ventilator") only through sle_apply / sle_manual_breath / sle_sigh / sle_osc_pause / sle_o2_boost /
+// sle_oxygenie / sle_set_spo2, so every change is
 // validated by the device's own ranges and interlocks. Settings and monitored values come off the
 // 1 Hz slow stream, waveforms off the fast stream (never Vue-reactive).
 
@@ -87,6 +88,17 @@ const boostLeft = computed(() => Number(read("o2_boost_remaining") ?? 0));
 const oscPauseLeft = computed(() => Number(read("hfo_pause_remaining") ?? 0));
 const sighing = computed(() => Number(read("hfo_sigh_remaining") ?? 0) > 0);
 const ventilating = computed(() => liveMode.value !== "Standby");
+const boostInc = computed(() => Number(read("sle_o2_boost_inc") ?? 10));
+// SpO2 and OxyGenie (IFU §18.3 p104, ch. 19 pp 118-121)
+const spo2: ComputedRef<Spo2Settings> = computed(() => ({
+  on: read("sle_spo2_on") !== false,
+  target: String(read("sle_spo2_target") ?? "91-95"),
+  avg: Number(read("sle_spo2_avg") ?? 8),
+}));
+const oxyState = computed(() => String(read("oxy_state") ?? "off"));
+const oxyOn = computed(() => oxyState.value !== "off");
+const oxyOverrideLeft = computed(() => Number(read("oxy_override_remaining") ?? 0));
+const oxyHighO2 = computed(() => read("oxy_high_o2_flag") === true);
 
 // ---- local edit state -----------------------------------------------------------------------
 const pending = reactive<Record<string, number>>({});
@@ -95,7 +107,10 @@ let sentAge = 0;
 const previewMode = ref<string | null>(null);
 const pendingCircuit = ref<number | null>(null);
 const selected = ref<string | null>(null);
-const panel = ref<"mode" | "layout" | null>(null);
+const panel = ref<"mode" | "layout" | "utilities" | null>(null);
+// holding O2 for 3 s (pp 119, 128): "boost" previews O2 Boost, "oxygenie" has the OxyGenie button
+// pressed, "menu" is OxyGenie on (no Boost) before the button is pressed. Confirm acts on it.
+const o2Menu = ref<"boost" | "oxygenie" | "menu" | null>(null);
 const showExtra = ref(false);
 const doubleColumn = ref(true); // as on the device photos; a 1 s hold switches to single
 const locked = ref(false);
@@ -112,7 +127,12 @@ const shown = computed(() => {
   return rowMode.value ? interlocks(s, rowMode.value, Object.keys(pending)) : s;
 });
 const dirty = computed(
-  () => Object.keys(pending).length > 0 || previewMode.value !== null || pendingCircuit.value !== null,
+  () =>
+    Object.keys(pending).length > 0 ||
+    previewMode.value !== null ||
+    pendingCircuit.value !== null ||
+    o2Menu.value === "boost" ||
+    o2Menu.value === "oxygenie",
 );
 const row = (which: "main" | "extra") => (rowMode.value ? MODES[rowMode.value][which] : []);
 
@@ -133,7 +153,7 @@ function touch() {
   if (idle) clearTimeout(idle);
   idle = null;
   if (panel.value || previewMode.value) idle = setTimeout(discard, 120_000);
-  else if (selected.value || dirty.value) idle = setTimeout(discard, 15_000);
+  else if (selected.value || dirty.value || o2Menu.value) idle = setTimeout(discard, 15_000);
 }
 function discard() {
   for (const k of Object.keys(pending)) delete pending[k];
@@ -141,10 +161,12 @@ function discard() {
   pendingCircuit.value = null;
   selected.value = null;
   panel.value = null;
+  o2Menu.value = null;
 }
 
 // ---- interactions ---------------------------------------------------------------------------
 function tap(name: string) {
+  o2Menu.value = null;
   selected.value = selected.value === name ? null : name;
   touch();
 }
@@ -156,8 +178,18 @@ function nudge(dir: number) {
 }
 function hold(name: string) {
   if (name === "o2") {
-    // O2 Boost (p128): hold the O2 tile, toggles on/off
-    if (ventilating.value) call("Ventilator.sle_o2_boost", [!(boostLeft.value > 0)]);
+    // hold the O2 tile 3 s: a running O2 Boost stops; otherwise O2 Boost waits for Confirm (p128)
+    // and, with SpO2 monitoring on, the OxyGenie button appears (p119). With OxyGenie on there is no
+    // O2 Boost (p121): the button switches it off.
+    if (!ventilating.value) return;
+    if (boostLeft.value > 0) {
+      call("Ventilator.sle_o2_boost", [false]);
+      return;
+    }
+    selected.value = null;
+    for (const k of Object.keys(pending)) delete pending[k];
+    o2Menu.value = oxyOn.value ? "menu" : "boost";
+    touch();
     return;
   }
   // Off functions switch on with their start value (p150)
@@ -170,8 +202,19 @@ function hold(name: string) {
     touch();
   }
 }
+function pickOxygenie() {
+  if (o2Menu.value === "oxygenie") o2Menu.value = oxyOn.value ? "menu" : "boost";
+  else o2Menu.value = "oxygenie";
+  touch();
+}
 function confirm() {
   if (!dirty.value) return;
+  if (o2Menu.value) {
+    if (o2Menu.value === "oxygenie") call("Ventilator.sle_oxygenie", [!oxyOn.value]);
+    else if (o2Menu.value === "boost") call("Ventilator.sle_o2_boost", [true]);
+    discard();
+    return;
+  }
   const settings: Record<string, unknown> = { ...pending };
   if (previewMode.value) settings.mode = previewMode.value;
   else if (!ventilating.value) return; // nothing to apply in Standby without a mode
@@ -191,6 +234,28 @@ function openLayout() {
   panel.value = "layout";
   touch();
 }
+function openUtilities() {
+  if (panel.value === "utilities") {
+    discard();
+    return;
+  }
+  discard();
+  panel.value = "utilities";
+  touch();
+}
+function confirmSpo2(settings: Partial<Spo2Settings>) {
+  call("Ventilator.sle_set_spo2", [settings]);
+  discard();
+}
+// the O2 control with OxyGenie on: "Auto", or "---" waiting for a signal or overridden (pp 118-119)
+const o2Tag = computed(() => (!oxyOn.value ? null : oxyState.value === "auto" ? "Auto" : "---"));
+// the OxyGenie status box beside the O2 control; the +/- buttons take its place (p120)
+const oxyStatus = computed(() => {
+  if (!oxyOn.value || !ventilating.value) return null;
+  if (oxyState.value === "override") return { text: "Manual Override", sub: `(${Math.ceil(oxyOverrideLeft.value)}s)`, blue: true };
+  if (oxyState.value === "fallback") return { text: "Waiting for Signal", sub: "", blue: false };
+  return { text: "Auto", sub: "", blue: false };
+});
 function openMode() {
   if (panel.value === "mode") {
     discard();
@@ -409,6 +474,9 @@ const message = computed(() => {
   if (!isRunning.value) return "Simulation stopped: settings apply when it runs";
   if (oscPauseLeft.value > 0) return `Oscillation Paused ${Math.ceil(oscPauseLeft.value)} secs`;
   if (boostLeft.value > 0) return `O2 Boost in Progress ${mmss(boostLeft.value)}`;
+  if (o2Menu.value === "boost") return "O2 Boost in Standby";
+  if (o2Menu.value === "oxygenie") return oxyOn.value ? "Confirm to switch OxyGenie off" : "Confirm to switch OxyGenie on";
+  if (oxyOn.value && ventilating.value && oxyHighO2.value) return `O2 > ${Number(read("sle_oxy_high_o2") ?? 60)}%`;
   if (!ventilating.value) return "Standby: Patient not ventilated";
   return "";
 });
@@ -549,10 +617,21 @@ onBeforeUnmount(() => {
       <!-- left button column -->
       <button class="sle-side" :class="{ on: panel === 'mode' }" style="top: 104px" @click="openMode">Mode</button>
       <button class="sle-side" style="top: 150px" disabled title="Alarms come in a later phase">Alarms</button>
-      <button class="sle-side" style="top: 196px" disabled title="Not modelled">Utilities</button>
+      <button class="sle-side" :class="{ on: panel === 'utilities' }" style="top: 196px" @click="openUtilities">
+        Utilities
+      </button>
       <button class="sle-side" :class="{ on: panel === 'layout' }" style="top: 242px" @click="openLayout">Layout</button>
+      <!-- the OxyGenie button (p119, p267: "OxyGenie (91-95%)"), while O2 is held -->
       <button
-        v-if="rowMode && MODES[rowMode].extra.length"
+        v-if="o2Menu && (spo2.on || oxyOn)"
+        class="sle-extra-btn sle-oxy-btn"
+        :class="{ on: o2Menu === 'oxygenie' }"
+        @click="pickOxygenie"
+      >
+        OxyGenie<br />({{ spo2.target }}%)
+      </button>
+      <button
+        v-else-if="rowMode && MODES[rowMode].extra.length"
         class="sle-extra-btn"
         :class="{ on: showExtra }"
         @click="toggleExtra"
@@ -614,6 +693,13 @@ onBeforeUnmount(() => {
           <button @click="openMode">Start / Resume Ventilation</button>
         </div>
         <LayoutPanel v-if="panel === 'layout'" :layout="layout" @confirm="confirmLayout" @close="discard" />
+        <UtilitiesPanel
+          v-if="panel === 'utilities'"
+          :spo2="spo2"
+          :oxygenie="oxyOn"
+          @confirm="confirmSpo2"
+          @close="discard"
+        />
         <ModePanel
           v-if="panel === 'mode'"
           :current="liveMode"
@@ -655,6 +741,7 @@ onBeforeUnmount(() => {
           :double="doubleColumn"
           :active="ventilating"
           :mode="ventilating ? liveMode : null"
+          :spo2="spo2.on"
           @toggle="doubleColumn = !doubleColumn"
         />
       </div>
@@ -664,7 +751,7 @@ onBeforeUnmount(() => {
         <template v-for="(n, i) in row('main')" :key="'m' + i">
           <ParamTile
             v-if="n"
-            :label="labelOf(n, rowMode!, shown)"
+            :label="n === 'o2' && o2Menu === 'boost' ? 'O2 Boost' : labelOf(n, rowMode!, shown)"
             :unit="PARAMS[n].unit"
             :min="PARAMS[n].min"
             :max="PARAMS[n].max"
@@ -674,7 +761,8 @@ onBeforeUnmount(() => {
             :state="tileState(n)"
             :can-be-off="!!PARAMS[n].off"
             :hold-ms="n === 'o2' ? 3000 : PARAMS[n].off ? 2000 : 0"
-            :boost="n === 'o2' && boostLeft > 0 ? Math.min(100, shown.o2 + 10) : null"
+            :boost="n === 'o2' && (boostLeft > 0 || o2Menu === 'boost') ? (boostInc >= 100 ? 100 : Math.min(100, shown.o2 + boostInc)) : null"
+            :tag="n === 'o2' ? o2Tag : null"
             :display="displayOf(n)"
             :ends="endsOf(n)"
             @tap="tap(n)"
@@ -692,6 +780,10 @@ onBeforeUnmount(() => {
       <div v-else-if="trendsOn && trendCtl" class="sle-plusminus">
         <button :aria-label="`${trendCtl} plus`" @click="trendNudge(1)">+</button>
         <button :aria-label="`${trendCtl} minus`" @click="trendNudge(-1)">−</button>
+      </div>
+      <div v-else-if="oxyStatus" class="sle-oxy-status" :class="{ blue: oxyStatus.blue }">
+        <div>{{ oxyStatus.text }}</div>
+        <div v-if="oxyStatus.sub" class="sub">{{ oxyStatus.sub }}</div>
       </div>
       <button v-if="dirty" class="sle-confirm" aria-label="Confirm" @click="confirm">✓</button>
 
@@ -1065,6 +1157,33 @@ button:disabled {
   border-radius: 6px;
   font-size: 26px;
   line-height: 1;
+}
+.sle-oxy-status {
+  position: absolute;
+  left: 788px;
+  top: 654px;
+  width: 106px;
+  height: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: var(--sle-panel);
+  border: 1px solid #000;
+  border-radius: 8px;
+  font-size: 15px;
+  padding: 4px;
+}
+.sle-oxy-status.blue {
+  background: #1f5fae;
+}
+.sle-oxy-status .sub {
+  margin-top: 4px;
+  font-size: 14px;
+}
+.sle-oxy-btn {
+  line-height: 1.4;
 }
 .sle-confirm {
   position: absolute;

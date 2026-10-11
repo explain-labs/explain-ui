@@ -436,6 +436,19 @@ export const COMMON_TASKS: CommonTask[] = [
     ],
     help: "While ventilating. Disconnected: circuit pressure falls to ~0, no PEEP, only the baby's own breaths through the tube.",
   },
+  {
+    id: "spo2_probe",
+    label: "SpO2 probe (ventilator's sensor)",
+    short: "SpO2 probe",
+    category: "airway_events",
+    lever: { kind: "call", model: "Ventilator", fn: "set_spo2_probe", read: "spo2_probe_attached" },
+    step: 0,
+    choices: [
+      { value: true, label: "Attached" },
+      { value: false, label: "Detached" },
+    ],
+    help: "The SLE6000's SpO2 sensor. Detached: no SpO2 signal; with OxyGenie on it waits for a signal, holds the O2 for 60 s, then moves it slowly towards the reference O2.",
+  },
   ...(["left", "right"] as const).map(
     (side): CommonTask => ({
       id: `bronchial_plug_${side}`,
