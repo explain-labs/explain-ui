@@ -1,5 +1,6 @@
 // Shared definitions for the SLE6000 screen replica: the settings table comes from the engine
 // (device_models/sle6000_params.js, one source for ranges and resolutions), the rest is display.
+import { SLE_THEME } from "./sleTheme";
 import {
   SLE_PARAMS,
   SLE_MODES,
@@ -84,6 +85,7 @@ export interface MonValue {
   unit: string;
   d: number;
   fmt?: (v: number) => string;
+  color?: string; // the value's colour, when not the default white
 }
 const mv = (p: string, label: string, unit: string, d: number, fmt?: (v: number) => string): MonValue => ({
   path: `Ventilator.${p}`,
@@ -138,7 +140,7 @@ export const MON_HFOCMV_DOUBLE: MonCell[][] = [
 ];
 
 // SpO2, at the bottom of the monitored values while SpO2 monitoring is on (IFU §18.14)
-export const MON_SPO2: MonValue[] = [mv("mon_spo2", "SpO2", "%", 0)];
+export const MON_SPO2: MonValue[] = [{ ...mv("mon_spo2", "SpO2", "%", 0), color: SLE_THEME.spo2 }];
 
 // the monitored-value groups for a mode
 export function monGroups(mode: string | null, double: boolean, spo2 = false): MonCell[][] {

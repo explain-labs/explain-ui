@@ -35,8 +35,8 @@ const { down, move, up, cancel } = usePress({ holdMs: () => 1000, onHold: () => 
   <div class="sle-mon" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="cancel">
     <div v-for="(g, gi) in groups" :key="gi" class="sle-mon-group" :class="{ double }" :style="{ flexGrow: rows(g) }">
       <template v-for="(m, i) in g" :key="(m?.path ?? 'gap') + i">
-        <div v-if="m" class="sle-mon-cell">
-          <div class="sle-mon-val">{{ show(m) }}</div>
+        <div v-if="m" class="sle-mon-cell" :class="{ wide: g.length === 1 }">
+          <div class="sle-mon-val" :style="m.color ? { color: m.color } : undefined">{{ show(m) }}</div>
           <div class="sle-mon-cap">{{ m.unit ? `${m.label} (${m.unit})` : m.label }}</div>
         </div>
         <div v-else class="sle-mon-cell"></div>
@@ -68,6 +68,10 @@ const { down, move, up, cancel } = usePress({ holdMs: () => 1000, onHold: () => 
 .sle-mon-group.double {
   grid-template-columns: 1fr 1fr;
   column-gap: 12px;
+}
+/* a group with one value (SpO2) spans the box, right-aligned as on the device */
+.sle-mon-group.double .sle-mon-cell.wide {
+  grid-column: 1 / -1;
 }
 .sle-mon-cell {
   display: flex;

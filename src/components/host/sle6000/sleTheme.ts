@@ -38,6 +38,7 @@ export const SLE_THEME = {
   // device in HFO with OxyGenie on; the photo is overexposed (#72dc20), so darker, as the screen
   // looks; blue during a manual override (IFU p120)
   oxygenie: "#57a61b",
+  spo2: "#40d8d0", // the SpO2 monitored value is cyan (sampled from a ward photo of the device)
   oxyOverride: "#1f5fae",
   mute: "#f2c200", // alarm-mute button outline and bell
 };
