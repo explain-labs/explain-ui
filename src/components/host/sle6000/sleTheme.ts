@@ -34,9 +34,10 @@ export const SLE_THEME = {
   // tile arcs by parameter type
   arc: { time: "#90d0f0", pressure: "#e88028", o2: "#84c428", sens: "#f2f2f2" } as Record<string, string>,
   boost: "#e53935", // O2 Boost portion of the O2 arc (IFU p129)
-  // the OxyGenie status box: solid green with white text (sampled from a ward photo of the device
-  // in HFO with OxyGenie on); blue during a manual override (IFU p120)
-  oxygenie: "#72dc20",
+  // the OxyGenie status box: solid green with white text, the hue (94°) of a ward photo of the
+  // device in HFO with OxyGenie on; the photo is overexposed (#72dc20), so darker, as the screen
+  // looks; blue during a manual override (IFU p120)
+  oxygenie: "#57a61b",
   oxyOverride: "#1f5fae",
   mute: "#f2c200", // alarm-mute button outline and bell
 };
