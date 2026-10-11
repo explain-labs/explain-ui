@@ -21,6 +21,7 @@ import MonitoredValues from "./MonitoredValues.vue";
 import ModePanel from "./ModePanel.vue";
 import LayoutPanel from "./LayoutPanel.vue";
 import UtilitiesPanel, { type Spo2Settings } from "./UtilitiesPanel.vue";
+import { usePress } from "./press";
 import {
   PARAMS,
   MODES,
@@ -449,22 +450,22 @@ function dropLoops() {
   capture.value = "none";
 }
 
-// lock (p154): lock with a press, unlock with a 1 s hold
-let lockTimer: ReturnType<typeof setTimeout> | null = null;
-function lockDown() {
+// lock (p154): lock with a press, unlock with a 1 s hold (press.ts: safe against Safari's
+// pointerleave, as the clock beside it re-renders every second)
+const lockPress = usePress({
+  holdMs: () => 1000,
+  onHold: () => {
+    locked.value = false;
+    lockHint.value = false;
+  },
+});
+function lockDown(e: PointerEvent) {
   if (!locked.value) {
     locked.value = true;
     discard();
     return;
   }
-  lockTimer = setTimeout(() => {
-    locked.value = false;
-    lockHint.value = false;
-  }, 1000);
-}
-function lockUp() {
-  if (lockTimer) clearTimeout(lockTimer);
-  lockTimer = null;
+  lockPress.down(e);
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}min ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
@@ -572,7 +573,7 @@ onBeforeUnmount(() => {
     removeRenderer(r);
     r.dispose();
   }
-  for (const t of [idle, extraTimer, lockTimer]) if (t) clearTimeout(t);
+  for (const t of [idle, extraTimer]) if (t) clearTimeout(t);
   for (const t of [pauseTimer, clockTimer]) if (t) clearInterval(t);
 });
 </script>
@@ -599,8 +600,9 @@ onBeforeUnmount(() => {
           class="sle-lock"
           :class="{ on: locked }"
           @pointerdown="lockDown"
-          @pointerup="lockUp"
-          @pointerleave="lockUp"
+          @pointermove="lockPress.move"
+          @pointerup="lockPress.up"
+          @pointercancel="lockPress.cancel"
         >
           {{ locked ? "🔒" : "Lock Screen" }}
         </button>
