@@ -137,7 +137,8 @@ and is the app's only ventilator UI.
   2–4 s while OxyGenie is on). Confirm sends the changed fields as one `sle_set_spo2`.
 - **SpO2 and OxyGenie** (IFU ch. 19, pp 118–121; engine: [`Sle6000` OxyGenie](../../explain-engine/docs/Sle6000.md#oxygenie)).
   - With SpO2 monitoring on, `MonitoredValues` adds an SpO2 box at the bottom (`mon_spo2`; `---`
-    without a signal).
+    without a signal). The value is cyan and right-aligned across the box, as on the device
+    (`SLE_THEME.spo2`, sampled from a ward photo; a `MonValue` can carry its own `color`).
   - **Hold O2 2 s** (3 s on the device, pp 119, 128; shortened as it felt slow on screen). As on
     the device (and a capture of it), two buttons appear stacked above the O2 tile: **OxyGenie (target %)** over **O2 Boost (+inc% 2min)**.
     Press one, then Confirm. O2 Boost previews first ("O2 Boost in Standby", the tile renamed O2
