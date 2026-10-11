@@ -60,6 +60,7 @@ export default defineLesson({
 | `controls` | Intervention ids, in display order. A control whose `requires` models are missing from the scenario is hidden |
 | `numerics` | Groups of numeric cards: `{ key, title, collapsed?, parameters: [{ label, props, unit?, factor?, rounding?, weight_based? }] }`. These are the same display rules as `configuration.monitors` (see [Numerics](./Numerics.md)) |
 | `monitorLanes?` | Bedside-monitor lanes (`ecg`, `spo2_pre`, `spo2_post`, `abp`, `resp`, `co2`). Default is the first four |
+| `layout?` | Page layout beyond the default; see [Layout](#layout) |
 | `steps` | The step sequence |
 
 ### `LessonStep`
@@ -77,7 +78,19 @@ export default defineLesson({
 | `source?` | Folder the step's markdown/images come from (default: the lesson's own). The shared intro uses `"_shared"` |
 | `controls?` | Intervention ids to spotlight. All controls stay usable on every step |
 | `onEnter?` | Ops applied when the learner arrives on the step (and on the first load if the page opens on it) |
+| `centreTab?` | Switch the centre column to this tab (`"diagram"` / `"sle6000"`) on arrival. It is ignored if the lesson's `layout.centre` doesn't list it |
 | `draft?` | Shown only in dev builds, with a "draft" tag |
+
+### Layout
+
+By default the centre column is the diagram and the left column has the Lesson and Interventions tabs. The Interventions tab is hidden when `controls` is empty. `layout` adds to this:
+
+| Field | Effect |
+|---|---|
+| `centre?: ("diagram" \| "sle6000")[]` | With more than one entry, the centre column becomes tabs, in this order, and the first is shown on load. `"sle6000"` is the SLE6000 replica (`Sle6000Screen.vue`). It needs a scenario whose `Ventilator` is `model_type: "Sle6000"`, and its waveform layout is the one remembered per browser, shared with the simulator |
+| `tasks?: { categories?, ids? }` | Adds a **Patient** tab on the left with the Common tasks panel (`CommonTasksPanel.vue`). The panel is narrowed to these `TaskCategory`s and/or task ids from `src/services/commonTasks.ts`, with its sections open. Task labels are English only |
+
+The SLE6000 lesson (`src/lessons/sle6000/`) uses both.
 
 ### Ops
 
@@ -87,6 +100,7 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 |---|---|
 | `{ kind: "set", path, value, it?, at? }` | `setProp(path, value, it=1, at=0)`: numbers tween over `it` s of model time, booleans/strings swap |
 | `{ kind: "call", fn, args?, at? }` | `call(fn, args, at)`, e.g. `fn: "Drugs.set_infusion", args: ["pge1", 0.05]` |
+| `{ kind: "scale", group, factor }` | `scale(group, factor)` for each group: an absolute ModelScaler factor (1 = baseline). This is the lever of Common tasks' scale tasks, e.g. `["left_lung_elastances", "right_lung_elastances"]` for lung compliance (elastance ×2 = compliance ÷2) |
 | `{ kind: "control", id, state }` | Drive an intervention: `"on"`/`"off"` for toggles, a raw number for sliders |
 | `{ kind: "calculate", seconds }` | Fast-forward model time synchronously |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |
