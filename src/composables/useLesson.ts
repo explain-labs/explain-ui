@@ -13,7 +13,7 @@ import {
   type SliderIntervention,
   type ToggleIntervention,
 } from "@/lessons/interventions";
-import type { Lesson, LessonStep, Op } from "@/lessons/types";
+import type { CentreTab, Lesson, LessonStep, Op } from "@/lessons/types";
 import { renderMarkdown } from "@/utils/markdown";
 
 // Runtime for one lesson page: loads the lesson's starting state, tracks the
@@ -65,6 +65,13 @@ export function useLesson(lesson: Lesson) {
     if (modelReady.value) applyOps(steps[next].onEnter ?? []);
   }
   const next = () => goTo(stepIndex.value + 1);
+
+  // centre column tab: the lesson's first, then whatever a step asks for
+  const centreTabs: CentreTab[] = lesson.layout?.centre?.length ? lesson.layout.centre : ["diagram"];
+  const centreTab = ref<CentreTab>(step.value.centreTab ?? centreTabs[0]);
+  watch(step, (s) => {
+    if (s.centreTab && centreTabs.includes(s.centreTab)) centreTab.value = s.centreTab;
+  });
   const prev = () => goTo(stepIndex.value - 1);
 
   // where a step's markdown + images live (shared intro steps name "_shared")
@@ -304,6 +311,9 @@ export function useLesson(lesson: Lesson) {
       case "call":
         explain.call(op.fn, (op.args ?? []) as any[], op.at ?? 0);
         break;
+      case "scale":
+        for (const g of Array.isArray(op.group) ? op.group : [op.group]) explain.scale(g, op.factor);
+        break;
       case "control":
         applyControl(op.id, op.state);
         break;
@@ -323,7 +333,7 @@ export function useLesson(lesson: Lesson) {
     }
   }
 
-  const ENGINE_OPS = new Set<Op["kind"]>(["set", "call", "control"]);
+  const ENGINE_OPS = new Set<Op["kind"]>(["set", "call", "scale", "control"]);
   function applyOps(ops: Op[]) {
     if (!ops.length) return;
     // queued changes only take effect while the model steps
@@ -398,6 +408,8 @@ export function useLesson(lesson: Lesson) {
     stepImageUrl,
     diagramHighlight,
     monitorHighlight,
+    centreTabs,
+    centreTab,
     isFirst,
     isLast,
     goTo,

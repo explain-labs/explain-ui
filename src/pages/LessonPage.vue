@@ -14,6 +14,8 @@ import NumericReadoutPanel from "@/components/numerics/NumericReadoutPanel.vue";
 import LessonStepPanel from "@/components/lesson/LessonStepPanel.vue";
 import LessonControls from "@/components/lesson/LessonControls.vue";
 import DiagramLegend from "@/components/lesson/DiagramLegend.vue";
+import Sle6000Screen from "@/components/host/sle6000/Sle6000Screen.vue";
+import CommonTasksPanel from "@/components/controls/CommonTasksPanel.vue";
 import { useAuthStore } from "@/stores/auth";
 import type { MonitorGroup } from "@/stores/monitors";
 import { LessonKey, useLesson } from "@/composables/useLesson";
@@ -34,7 +36,14 @@ const rt = useLesson(lesson);
 provide(LessonKey, rt);
 const { lang, modelReady, isRunning, error, step } = rt;
 
-const leftTab = ref<"lesson" | "interventions">("lesson");
+const leftTab = ref<"lesson" | "interventions" | "patient">("lesson");
+const showInterventions = lesson.controls.length > 0;
+const tasks = lesson.layout?.tasks;
+const { centreTabs, centreTab } = rt;
+const CENTRE_TAB = {
+  diagram: { icon: "pi pi-sitemap", label: UI.diagram },
+  sle6000: { icon: "pi pi-tablet", label: UI.ventilator },
+} as const;
 
 const langOptions =LANGS.map((l) => ({ label: l.toUpperCase(), value: l }));
 
@@ -158,7 +167,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <Tab value="lesson">
               <i class="pi pi-book mr-2"></i>{{ t(UI.lesson, lang) }}
             </Tab>
-            <Tab value="interventions">
+            <Tab v-if="tasks" value="patient">
+              <i class="pi pi-user mr-2"></i>{{ t(UI.patient, lang) }}
+            </Tab>
+            <Tab v-if="showInterventions" value="interventions">
               <i class="pi pi-sliders-h mr-2"></i>{{ t(UI.interventions, lang) }}
               <!-- a tween is running (e.g. the duct closing): visible from the lesson tab too -->
               <i v-if="rt.anyPending.value" class="pi pi-spin pi-spinner ml-2 text-amber-400"></i>
@@ -168,7 +180,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <TabPanel value="lesson" class="h-full">
               <LessonStepPanel />
             </TabPanel>
-            <TabPanel value="interventions" class="h-full overflow-y-auto">
+            <TabPanel v-if="tasks" value="patient" class="h-full overflow-y-auto">
+              <CommonTasksPanel
+                v-if="modelReady"
+                :categories="tasks.categories"
+                :task-ids="tasks.ids"
+                expand-all
+              />
+              <span v-else class="opacity-60"><i class="pi pi-spin pi-spinner mr-2"></i>{{ t(UI.loading, lang) }}</span>
+            </TabPanel>
+            <TabPanel v-if="showInterventions" value="interventions" class="h-full overflow-y-auto">
               <div v-if="modelReady" class="flex flex-col gap-2">
                 <p v-if="!isRunning" class="text-xs rounded border border-surface-700 bg-surface-800/60 p-2 opacity-80">
                   <i class="pi pi-pause mr-1"></i>{{ t(UI.paused, lang) }}
@@ -182,7 +203,30 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </aside>
 
       <template v-if="modelReady">
-        <section class="relative min-w-0 min-h-0">
+        <section v-if="centreTabs.length > 1" class="min-w-0 min-h-0 lg:overflow-y-auto">
+          <Tabs v-model:value="centreTab">
+            <TabList>
+              <Tab v-for="c in centreTabs" :key="c" :value="c">
+                <i :class="[CENTRE_TAB[c].icon, 'mr-2']"></i>{{ t(CENTRE_TAB[c].label, lang) }}
+              </Tab>
+            </TabList>
+            <TabPanels>
+              <TabPanel v-for="c in centreTabs" :key="c" :value="c">
+                <Sle6000Screen v-if="c === 'sle6000'" />
+                <div v-else class="relative">
+                  <Diagram
+                    :toolbar="false"
+                    height="calc(100vh - 10rem)"
+                    min-height="420px"
+                    :highlight="rt.diagramHighlight.value"
+                  />
+                  <DiagramLegend />
+                </div>
+              </TabPanel>
+            </TabPanels>
+          </Tabs>
+        </section>
+        <section v-else class="relative min-w-0 min-h-0">
           <Diagram
             :toolbar="false"
             height="calc(100vh - 7rem)"

@@ -21,6 +21,13 @@ import {
 // Quick-action directional nudges ("raise PVR 30%", "halve contractility").
 // Human surface like ScalerPanel — routes straight through useExplain (not the
 // bot validate gate). The catalog (COMMON_TASKS) is shared with the bot.
+// A lesson can narrow the list to some categories and/or task ids, and open
+// its sections; MainPage passes nothing and gets everything, collapsed.
+const props = defineProps<{
+  categories?: TaskCategory[];
+  taskIds?: string[];
+  expandAll?: boolean;
+}>();
 const { scale, setProp, call, modelState, refreshState, modelReady, isRunning, watchSlow, slowValues } =
   useExplain();
 
@@ -89,9 +96,9 @@ function rawStep(t: CommonTask): number {
   return t.mode === "absolute" ? sel : sel / 100;
 }
 
-// Per-category collapse state — sections start COLLAPSED.
+// Per-category collapse state — sections start COLLAPSED (open with expandAll).
 const collapsed = reactive<Record<string, boolean>>({});
-const isCollapsed = (cat: TaskCategory) => collapsed[cat] !== false; // default true
+const isCollapsed = (cat: TaskCategory) => collapsed[cat] ?? !props.expandAll;
 const toggle = (cat: TaskCategory) => {
   collapsed[cat] = !isCollapsed(cat);
 };
@@ -189,6 +196,8 @@ function isAvailable(task: CommonTask): boolean {
 const categories = computed<{ category: TaskCategory; label: string; tasks: CommonTask[] }[]>(() => {
   const out: { category: TaskCategory; label: string; tasks: CommonTask[] }[] = [];
   for (const task of COMMON_TASKS) {
+    if (props.categories && !props.categories.includes(task.category)) continue;
+    if (props.taskIds && !props.taskIds.includes(task.id)) continue;
     if (!isAvailable(task)) continue;
     let group = out.find((g) => g.category === task.category);
     if (!group) {

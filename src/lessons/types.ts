@@ -1,5 +1,9 @@
 import type { L10n } from "@/lessons/i18n";
 import type { LaneId } from "@/render/monitorLanes";
+import type { TaskCategory } from "@/services/commonTasks";
+
+// what the lesson page's centre column can show
+export type CentreTab = "diagram" | "sle6000";
 
 // One thing a lesson does to the engine. Lesson actions, step `onEnter` hooks
 // and interventions are all lists of ops, applied in order by useLesson.
@@ -9,6 +13,9 @@ export type Op =
   | { kind: "set"; path: string; value: number | boolean | string; it?: number; at?: number }
   // call a model method — useExplain().call, e.g. fn "Drugs.set_infusion"
   | { kind: "call"; fn: string; args?: unknown[]; at?: number }
+  // set a ModelScaler group to an absolute factor (1 = baseline) — useExplain().scale,
+  // the lever of Common tasks' scale tasks, e.g. "lung_compliance"'s elastance groups
+  | { kind: "scale"; group: string | string[]; factor: number }
   // drive a registered intervention (see interventions.ts) to on/off, or a
   // slider to a raw value
   | { kind: "control"; id: string; state: "on" | "off" | number }
@@ -62,6 +69,7 @@ export interface LessonStep {
   monitorHighlight?: LaneId[]; // bedside-monitor lanes to frame
   controls?: string[]; // intervention ids to spotlight (all stay usable)
   onEnter?: Op[]; // applied when the learner arrives on this step
+  centreTab?: CentreTab; // switch the centre column to this tab on arrival
   draft?: boolean; // only shown in development builds
 }
 
@@ -75,7 +83,17 @@ export interface Lesson {
   controls: string[]; // intervention ids from interventions.ts, in display order
   numerics: LessonNumericGroup[];
   monitorLanes?: LaneId[]; // default: ecg, spo2_pre, spo2_post, abp
+  layout?: LessonLayout;
   steps: LessonStep[];
+}
+
+// Optional page layout beyond the default (diagram in the centre, no tasks).
+export interface LessonLayout {
+  // centre column tabs in order; the first is shown on load. Default ["diagram"]
+  centre?: CentreTab[];
+  // adds a "Patient" tab on the left with the Common tasks panel, narrowed to
+  // these categories and/or task ids (commonTasks.ts), sections opened
+  tasks?: { categories?: TaskCategory[]; ids?: string[] };
 }
 
 // identity helper so lesson files get type checking and completion
