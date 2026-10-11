@@ -138,11 +138,12 @@ and is the app's only ventilator UI.
 - **SpO2 and OxyGenie** (IFU ch. 19, pp 118–121; engine: [`Sle6000` OxyGenie](../../explain-engine/docs/Sle6000.md#oxygenie)).
   - With SpO2 monitoring on, `MonitoredValues` adds an SpO2 box at the bottom (`mon_spo2`; `---`
     without a signal).
-  - **Hold O2 3 s.** Without OxyGenie this previews O2 Boost ("O2 Boost in Standby", the tile
-    renamed O2 Boost with the red +`sle_o2_boost_inc` arc; a running Boost stops instead). With SpO2
-    monitoring on, an **OxyGenie (target %)** button takes the Additional Parameters slot. Pressing
-    it and Confirm calls `sle_oxygenie(true)`. With OxyGenie on the hold offers only that button,
-    and Confirm switches it off (no Boost while it is on, p121).
+  - **Hold O2 3 s.** As on the device (pp 119, 128, and a capture of the device), two buttons
+    appear stacked above the O2 tile: **OxyGenie (target %)** over **O2 Boost (+inc% 2min)**.
+    Press one, then Confirm. O2 Boost previews first ("O2 Boost in Standby", the tile renamed O2
+    Boost with the red arc). OxyGenie switches it on, or off when it is on. OxyGenie is greyed
+    without SpO2 monitoring, and O2 Boost while OxyGenie is on (p121). A running Boost stops on
+    the hold instead.
   - **Status box** beside the O2 tile, where the +/− buttons and Confirm go (p120). It is drawn
     as on a ward photo of the device: about 1.5 tiles wide, solid green (#57a61b: the hue of the photo, darker than its overexposed #72dc20) with
     white "OxyGenie" / the state / the target range. The states are "Auto", "Waiting for Signal"

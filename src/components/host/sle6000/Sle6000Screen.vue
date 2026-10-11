@@ -109,8 +109,9 @@ const previewMode = ref<string | null>(null);
 const pendingCircuit = ref<number | null>(null);
 const selected = ref<string | null>(null);
 const panel = ref<"mode" | "layout" | "utilities" | null>(null);
-// holding O2 for 3 s (pp 119, 128): "boost" previews O2 Boost, "oxygenie" has the OxyGenie button
-// pressed, "menu" is OxyGenie on (no Boost) before the button is pressed. Confirm acts on it.
+// holding O2 for 3 s (pp 119, 128; the device: two buttons stacked above the O2 control,
+// "OxyGenie (91 - 95%)" over "O2 Boost (+10% 2min)"): "menu" before either is pressed, "boost"
+// previews O2 Boost, "oxygenie" has the OxyGenie button pressed. Confirm acts on the pressed one.
 const o2Menu = ref<"boost" | "oxygenie" | "menu" | null>(null);
 const showExtra = ref(false);
 const doubleColumn = ref(true); // as on the device photos; a 1 s hold switches to single
@@ -179,9 +180,9 @@ function nudge(dir: number) {
 }
 function hold(name: string) {
   if (name === "o2") {
-    // hold the O2 tile 3 s: a running O2 Boost stops; otherwise O2 Boost waits for Confirm (p128)
-    // and, with SpO2 monitoring on, the OxyGenie button appears (p119). With OxyGenie on there is no
-    // O2 Boost (p121): the button switches it off.
+    // hold the O2 tile 3 s: a running O2 Boost stops; otherwise the OxyGenie and O2 Boost buttons
+    // appear above it (pp 119, 128). OxyGenie needs SpO2 monitoring; with OxyGenie on there is no
+    // O2 Boost (p121) and the OxyGenie button switches it off.
     if (!ventilating.value) return;
     if (boostLeft.value > 0) {
       call("Ventilator.sle_o2_boost", [false]);
@@ -189,7 +190,7 @@ function hold(name: string) {
     }
     selected.value = null;
     for (const k of Object.keys(pending)) delete pending[k];
-    o2Menu.value = oxyOn.value ? "menu" : "boost";
+    o2Menu.value = "menu";
     touch();
     return;
   }
@@ -203,11 +204,17 @@ function hold(name: string) {
     touch();
   }
 }
-function pickOxygenie() {
-  if (o2Menu.value === "oxygenie") o2Menu.value = oxyOn.value ? "menu" : "boost";
-  else o2Menu.value = "oxygenie";
+function pickO2Menu(which: "boost" | "oxygenie") {
+  o2Menu.value = o2Menu.value === which ? "menu" : which;
   touch();
 }
+// the O2 hold buttons sit above the O2 control (its column in the parameter row)
+const o2MenuLeft = computed(() => {
+  const r = row("main");
+  const w = r.length > 6 ? 94 : 108;
+  return 112 + Math.max(0, r.indexOf("o2")) * (w + 2);
+});
+const o2MenuWidth = computed(() => (row("main").length > 6 ? 94 : 108));
 function confirm() {
   if (!dirty.value) return;
   if (o2Menu.value) {
@@ -627,17 +634,8 @@ onBeforeUnmount(() => {
         Utilities
       </button>
       <button class="sle-side" :class="{ on: panel === 'layout' }" style="top: 242px" @click="openLayout">Layout</button>
-      <!-- the OxyGenie button (p119, p267: "OxyGenie (91-95%)"), while O2 is held -->
       <button
-        v-if="o2Menu && (spo2.on || oxyOn)"
-        class="sle-extra-btn sle-oxy-btn"
-        :class="{ on: o2Menu === 'oxygenie' }"
-        @click="pickOxygenie"
-      >
-        OxyGenie<br />({{ spo2.target }}%)
-      </button>
-      <button
-        v-else-if="rowMode && MODES[rowMode].extra.length"
+        v-if="rowMode && MODES[rowMode].extra.length"
         class="sle-extra-btn"
         :class="{ on: showExtra }"
         @click="toggleExtra"
@@ -778,6 +776,27 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
+      <!-- holding O2: OxyGenie over O2 Boost, stacked above the O2 control (as on the device) -->
+      <div v-if="o2Menu" class="sle-o2menu" :style="{ left: `${o2MenuLeft}px`, width: `${o2MenuWidth}px` }">
+        <button
+          :class="{ on: o2Menu === 'oxygenie' }"
+          :disabled="!spo2.on && !oxyOn"
+          :title="!spo2.on && !oxyOn ? 'Needs SpO2 monitoring (Utilities)' : undefined"
+          @click="pickO2Menu('oxygenie')"
+        >
+          <span class="t">OxyGenie</span>
+          <span class="s">({{ spo2.target.replace("-", " - ") }}%)</span>
+        </button>
+        <button
+          :class="{ on: o2Menu === 'boost' }"
+          :disabled="oxyOn"
+          :title="oxyOn ? 'Not while OxyGenie is on' : undefined"
+          @click="pickO2Menu('boost')"
+        >
+          <span class="t">O2 Boost</span>
+          <span class="s">({{ boostInc >= 100 ? "100%" : `+${boostInc}%` }} 2min)</span>
+        </button>
+      </div>
       <!-- +/- for the selected parameter (+ above −, in the parameter row as on the device), and Confirm -->
       <div v-if="selected" class="sle-plusminus">
         <button aria-label="Increase" @click="nudge(1)">+</button>
@@ -1196,8 +1215,39 @@ button:disabled {
 .sle-oxy-status .state.long {
   font-size: 17px;
 }
-.sle-oxy-btn {
-  line-height: 1.4;
+.sle-o2menu {
+  position: absolute;
+  top: 442px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 6;
+}
+.sle-o2menu button {
+  height: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 4px 12px;
+  background: var(--sle-button);
+  color: var(--sle-text);
+  border: 1px solid #000;
+  border-radius: 8px;
+}
+.sle-o2menu button.on {
+  background: var(--sle-text);
+  color: #000;
+}
+.sle-o2menu button:disabled {
+  color: #8a8b8d; /* greyed, but solid over the waveform behind */
+}
+.sle-o2menu .t {
+  font-size: 15px;
+}
+.sle-o2menu .s {
+  font-size: 11px;
+  opacity: 0.75;
 }
 .sle-confirm {
   position: absolute;
