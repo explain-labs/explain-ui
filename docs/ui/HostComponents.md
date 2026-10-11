@@ -87,7 +87,7 @@ and is the app's only ventilator UI.
   (`@explain/device_models/sle6000_params`), so ranges, resolutions, per-mode rows and interlocks
   have one source. It adds the display parts:
   - decimals;
-  - labels such as PIP MAX / VTV Target, and ΔP Max / Vte Target in HFOV;
+  - labels such as PIP MAX / VTV Target, ΔP Max / Vte Target in HFOV, and "O2 %" on the O2 tile (ward photo);
   - list texts (`formatParam`: I:E "1:2", HFO Activity);
   - the monitored-value groups per mode (`monGroups`: conventional, HFOV, HFOV+CMV; a `null` cell
     keeps the device's layout);
