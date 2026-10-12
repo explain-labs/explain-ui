@@ -42,6 +42,8 @@ const SETTINGS: Field[] = [
   { p: "gas_fico2", label: "Sweep FiCO₂", unit: "%", min: 0, max: 10, step: 0.01, rounding: 2, factor: 100 },
   { p: "gas_humidity", label: "Humidity", unit: "", min: 0, max: 1, step: 0.05, rounding: 2 },
   { p: "gas_temp", label: "Gas temp", unit: "°C", min: 0, max: 42, step: 0.5, rounding: 1 },
+  // transducers sit at pump level: the blood column to the patient shifts the measured pressures
+  { p: "pump_height", label: "Pump below patient", unit: "cm", min: -50, max: 150, step: 5, rounding: 0 },
 ];
 
 // Component resistance-factor multipliers (advanced tuning).

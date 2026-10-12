@@ -24,8 +24,8 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **452 settable params**, **52 functions**
-(+ 69 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+Snapshot: **45 model_types**, **453 settable params**, **52 functions**
+(+ 70 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -73,6 +73,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ecls.gas_flow` — sweep gas flow (L/min, 0-10)
 - `setProp` `Ecls.gas_fio2` — sweep gas O2 fraction (0.21-1.0)
 - `setProp` `Ecls.gas_fico2` — sweep gas CO2 fraction (0-0.1)
+- `setProp` `Ecls.pump_height` — height of the pump/pressure transducers below the patient (cm, default 30; negative = above). Shifts the displayed circuit pressures by ~0.78 mmHg/cm; does not change the flow
 - `setProp` `Ecls.drainage_res_factor` — drainage cannula resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.return_res_factor` — return cannula resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.tubing_res_factor` — circuit tubing resistance multiplier (1.0 = baseline)
@@ -299,6 +300,7 @@ _setProp_:
 - `gas_fico2` — sweep gas fico2 (fraction) (number, fraction, range 0–0.1)
 - `drainage_site` — drainage site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber)
 - `return_site` — return site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber)
+- `pump_height` — pump height below the patient (cm; shifts the measured circuit pressures, not the flow) (number, cm; shifts the measured circuit pressures, not the flow, range -50–150) _(extra)_
 - `gas_humidity` — sweep gas humidity (fraction) (number, fraction, range 0–1) _(extra)_
 - `gas_temp` — sweep gas temperature (°C) (number, °C, range 0–42) _(extra)_
 - `dif_o2` — o2 diffusion constant (number, range 0–0.1) _(extra)_

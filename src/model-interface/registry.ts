@@ -1684,6 +1684,18 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "choices": ["Getinge Quadrox-i Neonatal", "Getinge Quadrox-i Pediatric", "Getinge Quadrox-i Small Adult", "Medtronic Nautilus (Adult)"]
     },
     {
+      "caption": "pump height below the patient (cm; shifts the measured circuit pressures, not the flow)",
+      "target": "pump_height",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "factor": 1,
+      "delta": 5,
+      "rounding": 0,
+      "ll": -50,
+      "ul": 150
+    },
+    {
       "caption": "cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula)",
       "target": "cannulation",
       "type": "list",

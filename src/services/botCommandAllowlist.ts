@@ -195,6 +195,12 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
   {
     op: "setProp",
     model: "Ecls",
+    target: "pump_height",
+    note: "height of the pump/pressure transducers below the patient (cm, default 30; negative = above). Shifts the displayed circuit pressures by ~0.78 mmHg/cm; does not change the flow",
+  },
+  {
+    op: "setProp",
+    model: "Ecls",
     target: "drainage_res_factor",
     note: "drainage cannula resistance multiplier (1.0 = baseline)",
   },
