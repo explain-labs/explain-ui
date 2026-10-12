@@ -1684,6 +1684,24 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "choices": ["Getinge Quadrox-i Neonatal", "Getinge Quadrox-i Pediatric", "Getinge Quadrox-i Small Adult", "Medtronic Nautilus (Adult)"]
     },
     {
+      "caption": "cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula)",
+      "target": "cannulation",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "custom_options": true,
+      "choices": ["VA", "VV-DL"]
+    },
+    {
+      "caption": "double-lumen cannula (VV-DL)",
+      "target": "dl_cannula_type",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "custom_options": true,
+      "choices": ["Avalon Elite 13 Fr", "Avalon Elite 16 Fr"]
+    },
+    {
       "caption": "pump mode (0 = centrifugal, 1 = roller; set by the pump)",
       "target": "pump_mode",
       "type": "number",
@@ -1940,8 +1958,8 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "type": "number",
       "build_prop": true,
       "edit_mode": "advanced",
-      "readonly": false,
-      "caption": "tubing in resistance (mmHg/(L/s))",
+      "readonly": true,
+      "caption": "tubing in resistance (computed from geometry, mmHg/(L/s))",
       "factor": 1,
       "delta": 1,
       "rounding": 0,
@@ -1953,8 +1971,8 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "type": "number",
       "build_prop": true,
       "edit_mode": "advanced",
-      "readonly": false,
-      "caption": "tubing out resistance (mmHg/(L/s))",
+      "readonly": true,
+      "caption": "tubing out resistance (computed from geometry, mmHg/(L/s))",
       "factor": 1,
       "delta": 1,
       "rounding": 0,
@@ -2028,6 +2046,24 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "advanced",
       "readonly": true,
       "caption": "return cannula resistance (computed, mmHg/(L/s))",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "drainage_dp",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "drainage cannula pressure drop (mmHg)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "return_dp",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "return cannula pressure drop (mmHg)",
       "factor": 1,
       "rounding": 0
     },

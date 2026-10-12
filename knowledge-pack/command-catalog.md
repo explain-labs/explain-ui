@@ -25,7 +25,7 @@ Rules of thumb:
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
 Snapshot: **45 model_types**, **452 settable params**, **52 functions**
-(+ 67 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+(+ 69 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -78,8 +78,10 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ecls.tubing_res_factor` — circuit tubing resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.pump_res_factor` — pump resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.oxy_res_factor` — oxygenator resistance multiplier (1.0 = baseline)
-- `setProp` `Ecls.drainage_cannula_type` — drainage cannula key from the scenario's cannula library (string)
-- `setProp` `Ecls.return_cannula_type` — return cannula key from the scenario's cannula library (string)
+- `setProp` `Ecls.cannulation` — cannulation (list: VA, VV-DL). VA = separate drainage + return cannula and sites; VV-DL = one double-lumen cannula, return follows the drainage site (right atrium)
+- `setProp` `Ecls.dl_cannula_type` — double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr)
+- `setProp` `Ecls.drainage_cannula_type` — VA drainage cannula (list: Biomedicus venous 8/10/12/14/21/23/25 Fr, e.g. "Biomedicus venous 12 Fr")
+- `setProp` `Ecls.return_cannula_type` — VA return cannula (list: Biomedicus arterial 8/10/12/15/17/19/21 Fr, e.g. "Biomedicus arterial 10 Fr")
 - `start`  — start the realtime simulation loop
 - `stop`  — stop the realtime simulation loop
 - `revert`  — undo all live changes — reload the patient as it was loaded
@@ -289,6 +291,8 @@ _setProp_:
 - `ecls_clamped` — ECLS clamped (boolean)
 - `pump_type` — pump (list, one of Abbott PediMag/Abbott CentriMag/Getinge Rotaflow RF-32/Medtronic Bio-Pump BP-50/Generic roller pump)
 - `oxygenator_type` — oxygenator (list, one of Getinge Quadrox-i Neonatal/Getinge Quadrox-i Pediatric/Getinge Quadrox-i Small Adult/Medtronic Nautilus (Adult))
+- `cannulation` — cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula) (list, VA = separate cannulas, VV-DL = one double-lumen cannula, one of VA/VV-DL)
+- `dl_cannula_type` — double-lumen cannula (VV-DL) (list, VV-DL, one of Avalon Elite 13 Fr/Avalon Elite 16 Fr)
 - `pump_rpm` — pump speed (rpm) (number, rpm, range 0–5500)
 - `gas_flow` — sweep gas flow (L/min) (number, L/min, range 0–10)
 - `gas_fio2` — sweep gas fio2 (fraction) (number, fraction, range 0.21–1)
@@ -305,8 +309,6 @@ _setProp_:
 - `tubing_out_length` — tubing out length (m) (number, m, range 0–5) _(extra)_
 - `oxy_vol` — oxygenator volume (L) (number, L, range 0–1) _(extra)_
 - `pump_vol` — pump volume (L) (number, L, range 0–1) _(extra)_
-- `tubing_in_res` — tubing in resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
-- `tubing_out_res` — tubing out resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
 - `pump_res_for` — pump forward resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
 - `pump_res_back` — pump backward resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
 - `oxy_res_for` — oxygenator forward resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
