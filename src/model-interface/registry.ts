@@ -1711,7 +1711,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": true,
       "edit_mode": "basic",
       "custom_options": true,
-      "choices": ["Avalon Elite 13 Fr", "Avalon Elite 16 Fr"]
+      "choices": ["Avalon Elite 13 Fr", "Avalon Elite 16 Fr", "Crescent RA 13 Fr", "Crescent RA 15 Fr", "Crescent RA 19 Fr"]
     },
     {
       "caption": "pump mode (0 = centrifugal, 1 = roller; set by the pump)",

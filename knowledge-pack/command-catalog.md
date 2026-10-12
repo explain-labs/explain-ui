@@ -80,7 +80,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ecls.pump_res_factor` — pump resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.oxy_res_factor` — oxygenator resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.cannulation` — cannulation (list: VA, VV-DL). VA = separate drainage + return cannula and sites; VV-DL = one double-lumen cannula, return follows the drainage site (right atrium)
-- `setProp` `Ecls.dl_cannula_type` — double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr)
+- `setProp` `Ecls.dl_cannula_type` — double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr, Crescent RA 13 Fr, Crescent RA 15 Fr, Crescent RA 19 Fr)
 - `setProp` `Ecls.drainage_cannula_type` — VA drainage cannula (list: Biomedicus venous 8/10/12/14/21/23/25 Fr, e.g. "Biomedicus venous 12 Fr")
 - `setProp` `Ecls.return_cannula_type` — VA return cannula (list: Biomedicus arterial 8/10/12/15/17/19/21 Fr, e.g. "Biomedicus arterial 10 Fr")
 - `start`  — start the realtime simulation loop
@@ -293,7 +293,7 @@ _setProp_:
 - `pump_type` — pump (list, one of Abbott PediMag/Abbott CentriMag/Getinge Rotaflow RF-32/Medtronic Bio-Pump BP-50/Generic roller pump)
 - `oxygenator_type` — oxygenator (list, one of Getinge Quadrox-i Neonatal/Getinge Quadrox-i Pediatric/Getinge Quadrox-i Small Adult/Medtronic Nautilus (Adult))
 - `cannulation` — cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula) (list, VA = separate cannulas, VV-DL = one double-lumen cannula, one of VA/VV-DL)
-- `dl_cannula_type` — double-lumen cannula (VV-DL) (list, VV-DL, one of Avalon Elite 13 Fr/Avalon Elite 16 Fr)
+- `dl_cannula_type` — double-lumen cannula (VV-DL) (list, VV-DL, one of Avalon Elite 13 Fr/Avalon Elite 16 Fr/Crescent RA 13 Fr/Crescent RA 15 Fr/Crescent RA 19 Fr)
 - `pump_rpm` — pump speed (rpm) (number, rpm, range 0–5500)
 - `gas_flow` — sweep gas flow (L/min) (number, L/min, range 0–10)
 - `gas_fio2` — sweep gas fio2 (fraction) (number, fraction, range 0.21–1)
