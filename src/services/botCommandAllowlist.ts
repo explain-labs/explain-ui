@@ -225,14 +225,26 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
   {
     op: "setProp",
     model: "Ecls",
+    target: "cannulation",
+    note: "cannulation (list: VA, VV-DL). VA = separate drainage + return cannula and sites; VV-DL = one double-lumen cannula, return follows the drainage site (right atrium)",
+  },
+  {
+    op: "setProp",
+    model: "Ecls",
+    target: "dl_cannula_type",
+    note: "double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr)",
+  },
+  {
+    op: "setProp",
+    model: "Ecls",
     target: "drainage_cannula_type",
-    note: "drainage cannula key from the scenario's cannula library (string)",
+    note: "VA drainage cannula (list: Biomedicus venous 8/10/12/14/21/23/25 Fr, e.g. \"Biomedicus venous 12 Fr\")",
   },
   {
     op: "setProp",
     model: "Ecls",
     target: "return_cannula_type",
-    note: "return cannula key from the scenario's cannula library (string)",
+    note: "VA return cannula (list: Biomedicus arterial 8/10/12/15/17/19/21 Fr, e.g. \"Biomedicus arterial 10 Fr\")",
   },
 
   // --- Simulation control ---

@@ -1858,7 +1858,7 @@ library carries these per device:
 
 | Pump | `hq_a` | `hq_b` | `hq_c` | deadhead @ max rpm | rated flow |
 |---|---|---|---|---|---|
-| Abbott PediMag | 17.85 | 30.3 | 0 | ~540 mmHg @5500 | ~1.5 L/min |
+| Abbott PediMag | 21.16 | 5.2 | 15.4 | ~640 mmHg @5500 | ~1.5 L/min |
 | Abbott CentriMag | 23.17 | 0.85 | 0.38 | ~710 mmHg @5500 | 10 L/min |
 | Getinge Rotaflow RF-32 | 28 | 13.0 | 0 | ~700 mmHg @5000 | ~10 L/min |
 | Medtronic Bio-Pump BP-50 | 20 | 28.9 | 0 | ~180 mmHg @3000 | neonatal |
@@ -1872,11 +1872,18 @@ flow (≈ −6 mmHg per L/min at 3000 rpm), so `hq_b`/`hq_c` are small. Before 2
 `hq_b = 11.1`, `hq_c = 0`, which made the curve 5–7× too steep. The manual's "maximum pressure head of
 600 mmHg" is a rated limit; the 5500 rpm curve starts at ≈ 710 mmHg.
 
-PediMag `hq_a` comes from its published maximum outflow pressure, 540 mmHg at 5500 rpm (Wang et al
-2020). With the unchanged `hq_b = 30.3` it reproduces the independent operating points PediVAS 2800 rpm →
-0.6 L/min and 3200 rpm → 0.8 L/min (10 Fr return cannula). In the Ecls circuit those come out at
-≈ 0.56 / 0.78 L/min against ≈ 57 mmHg afterload. Before 2026-10-01 it was 9.9, fitted to an assumed
-~300 mmHg deadhead, which made the pump about 45% too weak. The remaining
+PediMag (recalibrated 2026-10-12 together with the ECLS circuit; see
+[Ecls › Circuit calibration](./Ecls.md#circuit-calibration)): no H-Q curve is published.
+- **Deadhead.** ≈ 640 mmHg at 5500 rpm (`hq_a` 21.16). The published 540 mmHg maximum outflow
+  pressure (Wang et al 2020) is read as a rated limit, like the CentriMag's 600 against its 710
+  deadhead.
+- **Shape.** The CentriMag fit scaled to the PediMag's head and flow range (`hq_b` 5.2, `hq_c` 15.4).
+- **Operating point.** In the calibrated circuit this gives ≈ 0.56 L/min at 2800 rpm on VA
+  (`term_neonate`, 12/10 Fr), close to the PediVAS point of 0.6 L/min.
+- **History.** The earlier `hq_a` 17.85 / `hq_b` 30.3 reproduced those operating points only because
+  the steep slip term made up for circuit losses that the old circuit lacked.
+
+The remaining Rotaflow / Bio-Pump
 coefficients are anchored to each pump's published deadhead magnitude and rated flow; they are **not**
 digitized from the full manufacturer H-Q figures (which were not accessible), so the mid-curve shape is
 the theoretical Euler-slip (linear) default. Sources: Wang et al 2020 *Artif Organs*
@@ -3745,8 +3752,12 @@ at build, and reached by name; `Ecls` itself contributes no compartment physics,
 
 - A drainage → pump → oxygenator → return blood circuit wired into two named patient compartments
   (`drainage_site`, `return_site`).
-- A selectable cannula library (real Biomedicus / Medtronic Crescent devices, neonatal 8 Fr through
-  adult 25 Fr venous / 21 Fr arterial) that sets cannula geometry and resistance.
+- VA cannulation (separate drainage and return cannula) or VV cannulation with one double-lumen
+  cannula (`cannulation`), with cannula libraries calibrated to the manufacturers' pressure-drop
+  charts (Bio-Medicus 8–25 Fr, Avalon Elite 13/16 Fr dual-lumen), converted from water to blood.
+- Circuit resistances that scale realistically with flow: nonlinear cannula pressure drops, laminar
+  tubing from its geometry, and a per-device oxygenator pressure drop. See
+  [Circuit calibration](#circuit-calibration).
 - Centrifugal or roller pump drive, applied as an external pressure across the pump or oxygenator.
 - A sweep-gas side feeding the oxygenator's gas exchanger, with adjustable FiO₂/FiCO₂ and diffusion
   constants.
@@ -3790,18 +3801,20 @@ Sub-model references (`_ecls_drainage`, `_ecls_pump`, …, `_ecls_gasex`) are re
 |---|---|---|
 | `ecls_running` | bool | Master on/off for the circuit |
 | `ecls_clamped` | bool | Clamp the blood path (`no_flow` on every blood sub-model; disables the gas exchanger) |
+| `cannulation` | string | `"VA"` (default; separate drainage + return cannula) or `"VV-DL"` (one double-lumen cannula: both lumens in `drainage_site`) |
+| `dl_cannula_type` | string | Key into `dl_cannulas`, used in `VV-DL` (default `Avalon Elite 13 Fr`) |
 | `drainage_site` | string | Patient compartment the drainage cannula drains (default `RA`) |
-| `return_site` | string | Patient compartment the return cannula feeds (default `AAR`) |
-| `drainage_cannula_type` | string | Key into `drainage_cannulas` (default `Biomedicus venous 12 Fr`) |
-| `return_cannula_type` | string | Key into `return_cannulas` (default `Biomedicus arterial 10 Fr`) |
+| `return_site` | string | Patient compartment the return cannula feeds (default `AAR`). In `VV-DL` it is forced to `drainage_site`; the VA site is remembered and restored on the way back to `VA` |
+| `drainage_cannula_type` | string | Key into `drainage_cannulas`, used in `VA` (default `Biomedicus venous 12 Fr`) |
+| `return_cannula_type` | string | Key into `return_cannulas`, used in `VA` (default `Biomedicus arterial 10 Fr`) |
 | `drainage_res_factor` | × | Multiplier on drainage-cannula resistance (default 1.0) |
 | `return_res_factor` | × | Multiplier on return-cannula resistance |
 | `tubing_res_factor` | × | Multiplier on both tubing resistances |
 | `pump_res_factor` | × | Multiplier on pump resistance |
 | `oxy_res_factor` | × | Multiplier on oxygenator resistance |
-| `oxy_res_for` / `oxy_res_back` | mmHg/(L/s) | Oxygenator resistance (default 1500/1500) |
+| `oxy_res_for` / `oxy_res_back` | mmHg/(L/s) | Oxygenator resistance; set from the selected oxygenator's `dp_a` (Quadrox-i Neonatal 2700) whenever `oxygenator_type` is applied, editable in between |
 | `oxy_vol` | L | Oxygenator volume (default 0.09) |
-| `pump_res_for` / `pump_res_back` | mmHg/(L/s) | Pump resistance (default 50/50) |
+| `pump_res_for` / `pump_res_back` | mmHg/(L/s) | Pump internal resistance (default 50/50); the inflow tubing's `tubing_in_res` is added in series on the same resistor |
 | `pump_vol` | L | Pump volume (default 0.031) |
 | `pump_rpm` | rpm | Pump speed — the primary control (default 1500) |
 | `pump_type` | string | Key into `pumps` (default `Abbott PediMag`); selecting it copies the H-Q/roller coefficients and sets `pump_mode` |
@@ -3822,12 +3835,13 @@ Sub-model references (`_ecls_drainage`, `_ecls_pump`, …, `_ecls_gasex`) are re
 | `oxygenator_type` | string | Key into `oxygenators` (default `Getinge Quadrox-i Neonatal`); copies the membrane transfer caps |
 | `oxy_o2_cap` / `oxy_co2_cap` | mmol/s | Active O₂/CO₂ membrane transfer ceilings, pushed onto `ECLS_GASEX` |
 | `oxy_surface_area` / `oxy_rated_flow` | m², L/min | Selected oxygenator's surface area / rated blood flow (informational) |
-| `oxygenators` | dict | Oxygenator device library (surface area, rated flow, `o2_cap`/`co2_cap`, prime per device) |
+| `oxygenators` | dict | Oxygenator device library (surface area, rated flow, `o2_cap`/`co2_cap`, prime and blood-side pressure drop `dp_a` per device) |
 | `drainage_cannula_diameter` / `_length` | m | Drainage cannula geometry (copied from the selected library entry) |
 | `return_cannula_diameter` / `_length` | m | Return cannula geometry (copied from the selected library entry) |
-| `tubing_in_diameter`/`_length`, `tubing_out_diameter`/`_length` | m | Tubing geometry |
-| `cannula_sizes_single`, `cannula_size_double` | Fr | Available cannula sizes (UI metadata) |
-| `return_cannulas`, `drainage_cannulas` | dict | Cannula library (inner diameter, length, resistance per device) |
+| `tubing_in_diameter`/`_length`, `tubing_out_diameter`/`_length` | m | Tubing geometry; sets the tubing resistances (Poiseuille, blood) |
+| `cannula_sizes_single`, `cannula_size_double` | Fr | Legacy size lists, not used by the engine |
+| `return_cannulas`, `drainage_cannulas` | dict | VA cannula libraries (inner diameter, length, water-chart fit `dp_a`/`dp_b` per device) |
+| `dl_cannulas` | dict | Double-lumen (VV) cannula library: per device a `drainage` and a `return` lumen fit (`dp_a`/`dp_b`) |
 
 ### Computed (dependent) read-outs
 
@@ -3842,8 +3856,9 @@ Sub-model references (`_ecls_drainage`, `_ecls_pump`, …, `_ecls_gasex`) are re
 | `sat_ven_o2` | % | Venous (pre-oxygenator) O₂ saturation — tapped at the drainage tubing `ECLS_TUBING_IN` |
 | `sat_postoxy_o2` | % | Post-oxygenator O₂ saturation — tapped at the oxygenator blood compartment `ECLS_OXY` |
 | `pco2_postoxy` | mmHg | Post-oxygenator pCO₂ — tapped at `ECLS_OXY` |
-| `drainage_res` / `return_res` | mmHg/(L/s) | Active cannula resistances (from the selected library entry) |
-| `tubing_in_res` / `tubing_out_res` | mmHg/(L/s) | Tubing resistances. `tubing_out_res` drives the `ECLS_OXY → ECLS_TUBING_OUT` resistor; `tubing_in_res` is **vestigial** — it is not applied (see calc-cycle step 5) |
+| `drainage_res` / `return_res` | mmHg/(L/s) | Cannula (or lumen) resistance in blood at the current circuit flow — the chord dP(Q)/Q of the device's pressure-drop curve, before `*_res_factor` |
+| `drainage_dp` / `return_dp` | mmHg | Pressure drop over the drainage / return cannula (lumen) at the current flow, factor included |
+| `tubing_in_res` / `tubing_out_res` | mmHg/(L/s) | Poiseuille tubing resistances (blood) from the tubing geometry, recomputed each update (a scenario value is overwritten). `tubing_out_res` drives the `ECLS_OXY → ECLS_TUBING_OUT` resistor; `tubing_in_res` is added to the pump's inlet resistor |
 | `tubing_in_vol` / `tubing_out_vol` | L | Tubing volumes |
 
 ### Internal (`_`-prefixed) and moving averages
@@ -3857,16 +3872,86 @@ size the four [`RealTimeMovingAverage`](./RealTimeMovingAverage.md) filters
 
 ## Cannula library
 
-`drainage_cannulas` / `return_cannulas` are dictionaries of real devices (Biomedicus venous 8–25 Fr /
-arterial 8–21 Fr, Medtronic Crescent dual-lumen), each with an `inner_diameter` (m), `length` (m) and
-measured `resistance` (mmHg/(L/s)). Keys use the `Biomedicus` spelling that `drainage_cannula_type` /
+`drainage_cannulas` / `return_cannulas` (VA) are dictionaries of real devices (Biomedicus venous
+8–25 Fr / arterial 8–21 Fr), each with an `inner_diameter` (m), `length` (m) and the fit
+`dP = dp_a·Q + dp_b·Q²` (mmHg, Q in L/min) of its manufacturer pressure-drop chart, measured in water.
+`dl_cannulas` (VV) holds double-lumen devices (Avalon Elite 13 / 16 Fr), with a separate fit for the
+drainage and the return lumen. Keys use the `Biomedicus` spelling that `drainage_cannula_type` /
 `return_cannula_type` reference, so a selection resolves. The **constructor is the single source of
-truth** for the catalogue (neonatal 8 Fr through adult 25 Fr venous / 21 Fr arterial) — scenario
-definitions no longer embed their own `drainage_cannulas` / `return_cannulas` snapshot, so every scenario
-sees the full catalogue and any cannula (neonatal or adult) can be selected in any scenario.
-Setting `drainage_cannula_type` / `return_cannula_type` copies the matching entry's geometry and
-resistance into the active `*_cannula_*` / `*_res` parameters — once in the constructor, and re-checked
-each tick in `calc_model`.
+truth** for the catalogue: scenario definitions do not embed their own copy (the last eight that did
+were cleaned up on 2026-10-12), so every scenario sees the full catalogue and any cannula can be
+selected in any scenario. Each update, `calc_model` copies the selected VA cannulas' geometry into
+`*_cannula_diameter`/`_length` and turns the selected fits into the live resistances (next section).
+
+## Circuit calibration
+
+The circuit was recalibrated on 2026-10-12 so that the pump speed needed for a given flow comes out of
+realistic circuit losses. Before, the whole neonatal circuit cost only ≈ 31 mmHg at 0.47 L/min, so the
+patient's arterial pressure dominated the pump head on VA. VV (no arterial afterload) then needed
+≈ 35 % fewer rpm than VA, which bedside practice does not show. With the calibration below, a 13 Fr
+double-lumen VV run needs about the same or slightly more rpm than 12/10 Fr VA. That is because the
+narrow return lumen costs more than the arterial cannula plus the arterial pressure.
+
+**Cannulas: manufacturer charts, converted to blood.** Each chart was fitted (non-negative least
+squares) as `dP = dp_a·Q + dp_b·Q²`. Cannula pressure drop is mostly inertial (entrance and exit
+losses), so the quadratic term dominates and the drop rises steeply with flow. The charts are measured
+in water at room temperature. Blood (≈ 3 cP at 37 °C and Hct 30–35 %, 1.06 kg/L) is handled by scaling
+the linear term by `BLOOD_VISCOSITY_RATIO` (3.0) and the quadratic term by `BLOOD_DENSITY_RATIO` (1.06).
+At neonatal flows that puts blood 30–60 % above the water chart. This is inside the 10–80 % excess
+Broman et al measured in blood (*Perfusion* 2020, doi:10.1177/0267659120926009).
+
+| Library entry | Chart used (water) | `dp_a` | `dp_b` | blood dP @ 0.5 L/min |
+|---|---|---|---|---|
+| Biomedicus arterial 8 / 10 / 12 Fr | Medtronic DLP pediatric one-piece arterial 77008 / 77010 / 77012 (proxy: the Bio-Medicus neck cannula's chart is not published as data) | 19.84 / 4.20 / 8.74 | 162.87 / 59.62 / 17.96 | 73 / 22 / 18 mmHg |
+| Biomedicus arterial 15 / 17 / 19 / 21 Fr | Bio-Medicus NextGen femoral arterial | 0 / 0 / 0 / 0.39 | 11.35 / 6.08 / 3.45 / 2.07 | — (adult) |
+| Biomedicus venous 10 / 12 / 14 Fr | Bio-Medicus NextGen pediatric venous 96830-110 / 112 / 114 | 10.78 / 6.61 / 4.79 | 47.42 / 17.08 / 9.27 | 29 / 14 / 10 mmHg |
+| Biomedicus venous 8 Fr | none published; 10 Fr scaled by (ID 2.7/2.1 mm)⁴ | 29.4 | 129.5 | 78 mmHg |
+| Biomedicus venous 21 / 23 / 25 Fr | Bio-Medicus NextGen femoral bi-caval venous 96670-121 / 123 / 125 | 3.09 / 2.91 / 1.90 | 2.52 / 1.71 / 1.18 | — (adult) |
+| Avalon Elite 13 Fr, drainage / return lumen | Getinge Avalon Elite 10013-CE | 15.18 / 13.74 | 81.78 / 342.83 | 44 / 112 mmHg |
+| Avalon Elite 16 Fr, drainage / return lumen | Getinge Avalon Elite 10016-CE | 6.27 / 0 | 32.10 / 168.95 | 18 / 45 mmHg |
+
+The digitised chart points came from the open `perfusion-tools` cannula pressure-drop dataset
+(github.com/IMhongkeun/perfusion-tools, `data/cannula-pressure-drop.json`). That dataset digitises the
+Medtronic cannulae catalog, the Bio-Medicus NextGen brochure and the Getinge Avalon Elite charts. An
+independent blood data point supports the steep return lumen: an OriGen 13 Fr VV catheter costs
+275 mmHg at 500 mL/min in lambs. The Medtronic Crescent RA entries (13/15 Fr) were dropped, because
+their charts are not available as data.
+
+**How the nonlinearity is applied.** The engine's `Resistor.r_k` term is explicit (lagged by one step).
+With these stiff curves it would oscillate. Instead `calc_model` writes the **chord resistance**
+`R = (dp_a·3.0 + dp_b·1.06·|Q|)·60` (mmHg/(L/s)) each update, with Q the pump's flow EMA (time
+constant 0.3 s, which damps the feedback). Q is held at `CANNULA_FLOW_FLOOR` (0.05 L/min) and above,
+and R at `CANNULA_RES_MIN` (100 mmHg/(L/s)) and above. That second floor is for numerical stability,
+not physiology: the stiff ECLS compartments (elastance ≈ 50 000 mmHg/L) need R ≥ ≈ 25 at the 0.5 ms
+step, and large adult cannulas at near-zero flow would otherwise fall below it.
+
+**Tubing.** Poiseuille with blood viscosity `BLOOD_VISCOSITY` 0.003 Pa·s from `tubing_*_diameter`/
+`_length`: 1/4″ × 1 m ≈ 564 mmHg/(L/s) (was a fixed 50).
+
+**Oxygenator.** `dp_a` in the oxygenator library, in mmHg per L/min of blood, linear because hollow
+fibre is laminar. Quadrox-i Neonatal 45: ≈ 8 mmHg at 0.2 and ≈ 65 at 1.5 L/min (manufacturer figures
+as cited in US patents 11759558 / 12296080), and clinically 53 ± 15 mmHg per L/min (*Perfusion* 2013,
+seven patients). The larger devices have no figure at hand. They are assumed to cost the same ≈ 65 mmHg
+at their own rated flow (`dp_a = 65 / rated_flow`). Selecting the oxygenator writes
+`oxy_res_for/back = dp_a·60`. It was a fixed 1500 mmHg/(L/s), about 25 per L/min.
+
+**PediMag H-Q.** No H-Q curve is published. See [Pump device library](#pump-device-library).
+
+**Result, `term_neonate`** (PediMag, Quadrox-i Neonatal, 1 m + 1 m of 1/4″ tubing; 40 s warm-up):
+
+| rpm | VA 12 Fr venous / 10 Fr arterial → AAR: flow, P_ven, P_pre-oxy | VV Avalon 13 Fr → RA: flow, P_ven, P_pre-oxy |
+|---|---|---|
+| 2000 | 0.18 L/min, −3, 77 mmHg | 0.29 L/min, −18, 59 mmHg |
+| 2400 | 0.38, −10, 102 | 0.37, −26, 85 |
+| 2800 | 0.56, −17, 130 | 0.45, −36, 116 |
+| 3200 | 0.75, −26, 162 | 0.53, −46, 152 |
+| 3600 | 0.93, −36, 197 | 0.61, −58, 193 |
+
+Before, the same VA run gave 0.47 L/min at 2800 rpm. VV with two single-lumen cannulas gave 0.47 L/min
+at ≈ 1800 rpm. At ≈ 0.45 L/min VV now needs ≈ 10 % more rpm than VA, and ≈ 20 % more at 0.6 L/min.
+Adult (`adult_female`, CentriMag, 25/19 Fr): 4000 rpm → 4.0 L/min (was 6.6), 5000 rpm → 6.0 (was 10.9).
+The realistic adult cannula losses also remove most of the implausibly high adult flows noted on
+2026-10-01.
 
 ## Calculation cycle (`calc_model`)
 
@@ -3885,15 +3970,19 @@ otherwise linger after a stop.
 2. Resolve the `ECLS_*` sub-model references; **skip the tick** if any of the eleven required ones is
    missing (`ECLS_GAS_EXP_VALVE` is resolved too, but its use is individually guarded rather than
    gating the tick).
-3. Apply `drainage_site` / `return_site` to the cannula resistors, and copy the selected cannula
-   geometry/resistance from the library.
+3. Apply `drainage_site` / `return_site` to the cannula resistors. Then take the pressure-drop fits
+   of the selected cannulas: both lumens of `dl_cannula_type` in `VV-DL`, or the two VA cannulas.
+   Turn them into the chord resistances `drainage_res`/`return_res` at the current flow, and compute
+   the Poiseuille `tubing_in_res`/`tubing_out_res` ([Circuit calibration](#circuit-calibration)).
+   (Before every tick, running or not, `_apply_cannulation` forces `return_site = drainage_site` in
+   `VV-DL`, or restores the remembered VA return site.)
 4. Sync every sub-model's `is_enabled` to `ecls_running` (including both sweep-gas valves); set
    `no_flow = ecls_clamped` on all blood sub-models; enable `ECLS_GASEX` only when **unclamped**
    (`is_enabled = !ecls_clamped`); block back-flow on `ECLS_GAS_EXP_VALVE`.
 5. Push resistances onto each sub-model: drainage/return cannula, pump, oxygenator and outlet-tubing
-   resistance × its `*_res_factor`. (The inlet segment's resistance is the pump's own inlet resistor;
-   `tubing_in_res` is **not** applied — `ECLS_TUBING_IN` is a bare `BloodCapacitance` that owns no
-   resistor, so writing `r_for` onto it would do nothing.)
+   resistance × its `*_res_factor`. `ECLS_TUBING_IN` is a bare `BloodCapacitance` that owns no
+   resistor, so the inflow tubing's `tubing_in_res × tubing_res_factor` is added in series to the
+   pump's own inlet resistor.
 6. Recompute the sweep-gas composition when `gas_fio2`/`gas_fico2` changed; size the inspiratory-valve
    resistance each update so sweep flow tracks `gas_flow` (see below).
 7. Update `ECLS_GASEX.dif_o2` / `dif_co2` and the membrane transfer ceilings `o2_cap` / `co2_cap`
@@ -3951,7 +4040,17 @@ or roller parameters (`ml_per_rev`/`roller_kp`/`roller_drive_max`), `type` (`cen
 fields and sets `pump_mode` from `type` (in the constructor, and re-applied each update when `pump_type`
 changes). `pump_rpm` remains the control.
 
-The H-Q coefficients are **fit to published pump characteristics** (`head = hq_a·(rpm/1000)² −
+The PediMag has no published H-Q curve. Since 2026-10-12 it uses a ≈ 640 mmHg deadhead at 5500 rpm
+(`hq_a` 21.16). The published 540 mmHg "maximum outflow pressure" is read as a rated limit, as the
+CentriMag's 600 turned out to be (measured deadhead 710, ratio 1.18). The curve shape is the CentriMag
+fit scaled to the PediMag's head (×0.91) and flow range (1.5/10 L/min): `hq_b` 5.2, `hq_c` 15.4, flat
+at neonatal flows like any mag-lev pump. The old `hq_b` 30.3 made the curve steep. It had been tuned
+against the old, far too cheap circuit, and absorbed the missing circuit losses. With the calibrated
+circuit, VA `term_neonate` gives ≈ 0.56 L/min at 2800 rpm, close to the PediVAS operating point
+(0.6 L/min). The Rotaflow and Bio-Pump `hq_b` predate the circuit calibration and have not been
+re-checked.
+
+The other H-Q coefficients are **fit to published pump characteristics** (`head = hq_a·(rpm/1000)² −
 hq_b·(rpm/1000)·Q`, with `hq_c = 0`): the deadhead (`Q=0`) scaled as rpm² fixes `hq_a`, and the rated
 flow at max rpm fixes the Euler-slip falloff `hq_b`. For the Rotaflow the deadhead is fixed by two
 independent data points (~108 mmHg shut-off at 2000 rpm and ~700 mmHg at 5000 rpm → `hq_a ≈ 28`); the
@@ -4008,7 +4107,7 @@ directly each tick.
 ## Example definition (JSON)
 
 Device-level fields from `term_neonate.json` (the full block nests eleven `ECLS_*` sub-models under
-`components`, and embeds the cannula library):
+`components`):
 
 ```json
 {
@@ -4046,9 +4145,11 @@ sub-models. On top of that, the DataCollector drops watched props of disabled mo
 
 ## Usage in the model
 
-- Used to model VA/VV ECMO support of a patient. Set `drainage_site`/`return_site` to the patient
-  compartments the cannulas are inserted into, pick cannula types, then set `ecls_running = true` and
-  `ecls_clamped = false` and dial `pump_rpm` / `gas_flow` / `gas_fio2`.
+- Used to model VA/VV ECMO support of a patient. For VA, set `drainage_site`/`return_site` to the
+  patient compartments the cannulas are inserted into and pick the two cannula types. For VV, set
+  `cannulation = "VV-DL"`, pick `dl_cannula_type` and the `drainage_site` (the return follows). Then
+  set `ecls_running = true` and `ecls_clamped = false` and dial `pump_rpm` / `gas_flow` /
+  `gas_fio2`.
 - Reports `flow_avg`, `p_ven`/`p_int`/`p_art`, `sat_ven_o2`/`sat_postoxy_o2`/`pco2_postoxy` for the
   monitor.
 - The blood sub-models exchange composition with the patient circuit through the named site
@@ -4076,6 +4177,24 @@ sub-models. On top of that, the DataCollector drops watched props of disabled mo
 - **`flow` is reported in L/min** (`× 60`) even though the source comment labels it L/s.
 
 ## Changelog
+
+### Circuit calibration and double-lumen VV cannulation (2026-10-12)
+
+- **Cannulas.** The cannulas are now flow-dependent: manufacturer pressure-drop charts, converted from
+  water to blood, applied as a chord resistance at the circuit flow.
+- **Tubing and oxygenator.** Tubing resistance now comes from the geometry (Poiseuille). The
+  oxygenator resistance now comes from the selected device. PediMag H-Q: `hq_a` 17.85 → 21.16,
+  `hq_b` 30.3 → 5.2, `hq_c` 0 → 15.4. See [Circuit calibration](#circuit-calibration).
+- **VV cannulation.** `cannulation` / `dl_cannula_type` / `dl_cannulas` added. `VV-DL` puts both
+  lumens of one Avalon Elite double-lumen cannula in the drainage site. The Medtronic Crescent
+  entries were removed from the single-lumen libraries (their resistances were unsourced, and a VV
+  cannula is one device).
+- **Scenario clean-up.** `tubing_in_res` is live (in series on the pump inlet). The read-outs
+  `drainage_dp`/`return_dp` were added. Eight scenarios (`fetus_30wk`, `term_fetus`, `tapvc`,
+  `tapvc_obstructed`, `tof`, `tof_pa`, `tof_pink`, `tof_severe`) still embedded cannula (and some
+  pump/oxygenator) library copies that override the class libraries. These were removed.
+- **Effect.** VV (13 Fr DL) now needs about the same or slightly more rpm than VA (12/10 Fr) for the
+  same flow, instead of ≈ 35 % fewer. Adult VA flows at high rpm are much lower and more plausible.
 
 ### Sweep-gas row in the diagram (2026-10-05)
 
@@ -9507,7 +9626,10 @@ block. So the expiratory resistance is only the limb's own, taken from the manua
 ## Monitored values (p175)
 
 Filtered per breath as the manual describes. In CPAP a spontaneous breath closes out at each
-inspiratory effort.
+inspiratory effort. In CMV, and in SIMV without P Support, the patient's breaths between ventilator
+breaths are breaths of their own (Ventilator.md, *Unsupported spontaneous breaths*): they update Vte,
+Vti, the leak and Vmin, and count in RR. The pressures, MAP, mechanics and timing come from the
+ventilator breaths only.
 
 | Property | Value | Filter |
 |---|---|---|
@@ -9515,7 +9637,7 @@ inspiratory effort.
 | `mon_map` | Mean airway pressure (mbar) | τ 5 breaths |
 | `mon_vte`, `mon_vti` | Expired / inspired volume (ml) | τ 3 breaths |
 | `mon_vmin` | Expired volume over the last 60 s (l/min) | sliding minute |
-| `mon_leak` | Leak (%) | 5-breath mean, then τ 10 breaths |
+| `mon_leak` | Leak (%): (ΣVti − ΣVte) / ΣVti over the last 5 breaths, so a breath out of step with the ventilator and the patient's breath after it cancel out | then τ 10 breaths |
 | `mon_rr`, `mon_trig` | Total rate; patient-triggered breaths in the last 60 s | – |
 | `mon_c` | Dynamic compliance (ml/mbar) | τ 3 breaths |
 | `mon_r` | (PIP − PEEP) / peak expiratory flow (mbar/l/s) | τ 3 breaths |
@@ -11051,15 +11173,15 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `vol` | mL | Volume integrated from ET-tube flow over the current breath (reset each inspiration) |
 | `exp_time` | s | Expiratory time = `60/vent_rate − insp_time` |
 | `trigger_volume` | L | Trigger threshold = `(tidal_volume/100) · trigger_volume_perc` |
-| `minute_volume` | L/min | `exp_tidal_volume · rate` — the set `vent_rate` for purely mandatory modes; whenever the patient can trigger (`PS`, or `synchronized`) the *measured*, breath-averaged rate; CPAP uses the patient's spontaneous rate |
+| `minute_volume` | L/min | Ventilator breaths: the last one's Vte · rate (the set `vent_rate` for purely mandatory modes; whenever the patient can trigger (`PS`, or `synchronized`) the *measured*, breath-averaged rate), plus the [unsupported spontaneous breaths](#unsupported-spontaneous-breaths)' exhaled volume per minute; CPAP uses the patient's spontaneous rate |
 | `compliance` | mL/cmH₂O | Dynamic compliance (= `compliance_dynamic`), measured per breath at end-expiration |
 | `compliance_dynamic` | mL/cmH₂O | `Vt / (p_peak − PEEP)` — always available |
 | `compliance_static` | mL/cmH₂O | `Vt / (p_plat − PEEP)` — only when an inspiratory pause produced a plateau (else 0) |
 | `resistance` | cmH₂O/(L/s) | Measured airway resistance `(p_peak − p_plat) / insp_flow` — needs a plateau; `null` when unmeasurable |
 | `p_peak` | cmH₂O | Measured peak inspiratory (circuit) pressure over the breath (in CPAP: over the spontaneous breath) |
 | `p_plat` | cmH₂O | Measured plateau pressure, sampled during the inspiratory pause |
-| `exp_tidal_volume` | L | Expired tidal volume (per breath) |
-| `insp_tidal_volume` | L | Inspired tidal volume (per breath) |
+| `exp_tidal_volume` | L | Expired tidal volume (per breath, an unsupported spontaneous breath included) |
+| `insp_tidal_volume` | L | Inspired tidal volume (per breath, an unsupported spontaneous breath included) |
 | `tv_kg` | mL/kg | Expired tidal volume per kg (`exp_tidal_volume·1000 / weight`); also in CPAP |
 | `ncc_insp` | counter | Ventilator inspiration step counter (see breath cycle counters) |
 | `ncc_exp` | counter | Ventilator expiration step counter |
@@ -11075,7 +11197,7 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `hfo_sigh_remaining` / `hfo_pause_remaining` | s | Time left of a running HFOV sigh / oscillation pause (0 = oscillating) |
 | `ti_meas` / `te_meas` | s | Measured inspiratory time of the last breath and the expiratory time before it |
 | `ie_ratio_meas` | – | `te_meas / ti_meas` (shown as 1:x) |
-| `rr_meas` | /min | Breath-averaged delivered rate; in CPAP the patient's rate while breathing |
+| `rr_meas` | /min | Breath-averaged ventilator rate plus the unsupported spontaneous breaths per minute; in CPAP the patient's rate while breathing |
 | `trig_per_min` | /min | Patient-triggered ventilator breaths over the last 60 s |
 | `r_dyn` | cmH₂O/(L/s) | `(p_peak − PEEP) / peak expiratory flow` of the last breath, the dynamic resistance neonatal ventilators report |
 
@@ -11108,6 +11230,9 @@ cycling/triggering logic. Added for the pause / VC / measured-mechanics paths: `
    - `SIMV` → `simv_cycling()` then `pressure_control()`
    - `CPAP` → `cpap_cycling()` (`cpap_control()`, or a backup/manual breath)
    - `HFOV` / `HFOV_CMV` → `hfov_control()`
+
+   Outside CPAP and HFO, `_detect_spont_breath()` then closes out an
+   [unsupported spontaneous breath](#unsupported-spontaneous-breaths) at its onset.
 4. Publish read-outs: airway `pres`, `flow` (ET-tube flow × 60), integrate `vol`, sample `co2` from
    `DS`, set `minute_volume` (using the breath-averaged measured rate whenever the patient can
    trigger; CPAP reports a spontaneous minute volume), advance the breath-interval counter, and refresh the ET-tube resistance. Compliance and
@@ -11255,9 +11380,41 @@ patient breathes unsupported on PEEP.
 - The support pressure never exceeds the mandatory pressure. With volume guarantee that is the
   working pressure, so the support can't out-ventilate the volume target.
 - Volume guarantee trims the working pressure on mandatory breaths only.
-- Unsupported spontaneous breaths are not closed out as breaths. Their exhaled volume adds to the
-  Vte of the next mandatory breath, as the expired volume of a whole window. With volume guarantee
-  and no support this under-trims the mandatory pressure.
+- Unsupported spontaneous breaths are breaths of their own in the monitoring (see
+  [Unsupported spontaneous breaths](#unsupported-spontaneous-breaths)), so volume guarantee trims on
+  the mandatory breath's own Vte.
+
+### Unsupported spontaneous breaths
+
+In CMV, and in SIMV without pressure support, the patient can breathe between ventilator breaths
+without starting one. A flow sensor at the tube sees each of these as a small breath of its own: the
+SLE6000 reports Vte as the "expired volume of large and small breaths" and RR as the "total number of
+breaths detected" (IFU §27.6.5, p175). `_detect_spont_breath()` (every step outside CPAP and HFO)
+models that:
+
+- **Onset.** In the ventilator's expiration, once the minimal expiratory time has passed, tube flow
+  above `trigger_flow` (net of the learned leak flow, as the flow trigger) that did not start a
+  ventilator breath. The detector is re-armed by expiratory flow, so one inspiration is one breath.
+- **At the onset** the breath in progress is closed: the ventilator breath with its full measurements
+  (`_close_vent_breath`: Vte, etCO₂, mechanics, leak, volume-guarantee trim), or the previous
+  spontaneous breath (`_close_spont_breath`: Vte, Vti and leak only, as no pressure was applied).
+- **Volumes.** A spontaneous breath counts its inspiratory and expiratory tube flow in the usual
+  counters until it is closed by the next onset or by the next ventilator breath.
+  - Not yet exhaling when a ventilator breath starts: the effort became that breath (it triggered
+    it, or the SIMV window opened on it) and is not a breath of its own. The volume the patient
+    inhaled so far counts in that breath's Vti, unless no patient effort was seen (flow in from an
+    uncompensated leak refilling the circuit).
+  - Cut off while exhaling (CMV): closed with the volume so far, but its Vti − Vte is not taken as a
+    leak.
+- **Rate and minute volume.** `rr_meas` adds the spontaneous breaths of the last 60 s (scaled while
+  the window fills) to the breath-averaged ventilator rate. `minute_volume` is the last ventilator
+  breath's Vte times its rate plus the spontaneous breaths' exhaled volume per minute.
+- **Hook.** Every closed breath calls `_breath_closed(spont)`; the Sle6000 updates its monitored
+  values there.
+
+Before this the patient's breaths were folded into the ventilator breath's Vte (CMV at a set rate of 20
+with a breathing term neonate: Vte 62 ml against a Vti of 36, C doubled, RR 20 instead of about 60,
+and a tube leak hidden at 0 %).
 
 ### `cpap_cycling` (CPAP with apnoea backup)
 
@@ -16072,9 +16229,9 @@ export class BloodPump extends BloodCapacitance {
     // but is kept consistent so it can be dropped into a circuit. Centrifugal head (mmHg) =
     // hq_a*(rpm/1000)^2 - hq_b*(rpm/1000)*Q - hq_c*Q^2 (Q in L/min); roller trims an integral drive to
     // hold Q_target = ml_per_rev*rpm/1000.
-    this.pump_hq_a = 17.85; // head vs rpm^2 term (mmHg per krpm^2) — default matches Ecls PediMag fit
-    this.pump_hq_b = 30.3; // head falloff vs rpm*flow (mmHg per krpm per L/min) — Euler-slip term
-    this.pump_hq_c = 0.0; // head falloff vs flow^2 (mmHg per (L/min)^2); 0 in the datasheet fit
+    this.pump_hq_a = 21.16; // head vs rpm^2 term (mmHg per krpm^2) — default matches Ecls PediMag fit
+    this.pump_hq_b = 5.2; // head falloff vs rpm*flow (mmHg per krpm per L/min) — Euler-slip term
+    this.pump_hq_c = 15.4; // head falloff vs flow^2 (mmHg per (L/min)^2)
     this.roller_ml_per_rev = 1.5; // roller stroke volume (mL per revolution)
     this.roller_kp = 30.0; // roller flow-controller gain (mmHg per (L/min) error per step)
     this.roller_drive_max = 900.0; // clamp on roller drive pressure (mmHg)
@@ -23271,6 +23428,41 @@ const ECLS_RESISTORS = [
   "ECLS_RETURN",
 ];
 
+// Circuit calibration constants (sources: docs/Ecls.md, "Circuit calibration").
+// Manufacturer cannula charts are measured with water at room temperature (~1 cP). Blood at 37 °C and
+// a neonatal ECMO haematocrit (~30-35 %) is ~3 cP and 1.06 kg/L, so the viscous (linear) part of a
+// water chart is scaled by the viscosity ratio and the inertial (quadratic) part by the density
+// ratio. This puts the blood drop 30-60 % above the water chart at neonatal flows, inside the
+// 10-80 % excess measured in blood by Broman et al (Perfusion 2020).
+const BLOOD_VISCOSITY = 0.003; // Pa·s — blood at 37 °C, Hct ~30-35 % (Poiseuille tubing resistance)
+const BLOOD_VISCOSITY_RATIO = 3.0; // blood / water-at-room-temperature viscosity (cannula linear term)
+const BLOOD_DENSITY_RATIO = 1.06; // blood / water density (cannula quadratic term)
+// The cannula resistance is evaluated at the circuit flow (a chord resistance dP(Q)/Q). Below this
+// flow (L/min) the chord is held, so a stopped circuit keeps a finite, positive resistance.
+const CANNULA_FLOW_FLOOR = 0.05;
+// Lower bound on a cannula resistance (mmHg/(L/s)) for numerical stability, not physiology: the
+// explicit step needs R*C well above the step size, and the ECLS compartments are stiff (elastance
+// ~50000 mmHg/L, so R must stay above ~25 at a 0.5 ms step). Large adult cannulas at near-zero flow
+// would otherwise fall below it and blow up. 100 mmHg/(L/s) is under 2 mmHg per L/min.
+const CANNULA_RES_MIN = 100.0;
+const MMHG_PER_PA = 1.0 / 133.322;
+
+// chord resistance (mmHg/(L/s)) of a cannula/lumen in blood at circuit flow q_lmin, from its
+// water-chart fit dP = dp_a*Q + dp_b*Q^2 (mmHg, Q in L/min)
+function cannula_resistance(fit, q_lmin) {
+  const q = Math.max(Math.abs(q_lmin), CANNULA_FLOW_FLOOR);
+  const per_lmin = fit.dp_a * BLOOD_VISCOSITY_RATIO + fit.dp_b * BLOOD_DENSITY_RATIO * q;
+  return Math.max(per_lmin * 60.0, CANNULA_RES_MIN); // mmHg per L/min -> mmHg/(L/s)
+}
+
+// laminar (Poiseuille) resistance of a blood-filled tube, in mmHg/(L/s)
+function poiseuille_resistance(diameter, length) {
+  if (!(diameter > 0.0) || !(length > 0.0)) return 0.0;
+  const r = diameter / 2.0;
+  const pa_s_per_m3 = (8.0 * BLOOD_VISCOSITY * length) / (Math.PI * r ** 4);
+  return pa_s_per_m3 * MMHG_PER_PA / 1000.0; // m^3 -> L
+}
+
 export class Ecls extends BaseModelClass {
   // static properties
   static model_type = "Ecls";
@@ -23349,9 +23541,9 @@ export class Ecls extends BaseModelClass {
     // L/min), a real rotodynamic characteristic (afterload/preload sensitive) rather than the old
     // flow-independent -rpm/25. Roller mode is a positive-displacement flow source: an integral
     // controller trims the drive pressure so circuit flow tracks Q_target = roller_ml_per_rev*rpm/1000.
-    this.pump_hq_a = 17.85; // head vs rpm^2 term (mmHg per krpm^2) — default = Abbott PediMag
-    this.pump_hq_b = 30.3; // head falloff vs rpm*flow (mmHg per krpm per L/min) — Euler-slip term
-    this.pump_hq_c = 0.0; // head falloff vs flow^2 (mmHg per (L/min)^2); 0 in the datasheet fit
+    this.pump_hq_a = 21.16; // head vs rpm^2 term (mmHg per krpm^2) — default = Abbott PediMag
+    this.pump_hq_b = 5.2; // head falloff vs rpm*flow (mmHg per krpm per L/min) — Euler-slip term
+    this.pump_hq_c = 15.4; // head falloff vs flow^2 (mmHg per (L/min)^2)
     this.pump_max_rpm = 5500; // informational max rpm of the selected pump
     this.roller_ml_per_rev = 1.5; // roller stroke volume (mL per revolution)
     this.roller_kp = 30.0; // roller flow-controller gain (mmHg per (L/min) error per update)
@@ -23367,108 +23559,56 @@ export class Ecls extends BaseModelClass {
     this.oxy_rated_flow = 1.5; // rated blood flow (L/min) — informational
 
 
-    // Return (arterial) cannula library. Keys use the "Biomedicus" spelling the scenario definitions
-    // reference (so a selection actually resolves). Neonatal/pediatric 8-12 Fr through adult 15-21 Fr;
-    // resistance (mmHg/(L/s)) falls with Fr size. The 10 Fr (1700) and 19 Fr (120) entries match the
-    // values the term-neonate and adult scenarios already ship.
+    // Cannula libraries. Each entry carries the manufacturer's pressure-drop vs flow chart, fitted as
+    // dP = dp_a*Q + dp_b*Q^2 (mmHg, Q in L/min). Those charts are measured in WATER at room temperature;
+    // the circuit converts them to blood with BLOOD_VISCOSITY_RATIO (on the viscous, linear term) and
+    // BLOOD_DENSITY_RATIO (on the inertial, quadratic term). Cannula pressure drop is mostly inertial
+    // (entrance/exit losses), so it rises steeply with flow — the drop at the working flow, not a fixed
+    // resistance, is what sets the pump speed. Sources and fits: docs/Ecls.md, "Circuit calibration".
+    // Neonatal/pediatric arterial: Medtronic DLP pediatric one-piece arterial 8-14 Fr (77008-77014)
+    // as the proxy for the Bio-Medicus neck cannula (its own chart is not published as data); adult
+    // arterial: Bio-Medicus NextGen femoral arterial 15-21 Fr.
     this.return_cannulas = {
-      "Biomedicus arterial 8 Fr": {
-        "inner_diameter": 0.002, // m
-        "length": 0.1, // m
-        "resistance": 5500
-      },
-      "Biomedicus arterial 10 Fr": {
-        "inner_diameter": 0.00267, // m
-        "length": 0.105, // m
-        "resistance": 1700
-      },
-      "Biomedicus arterial 12 Fr": {
-        "inner_diameter": 0.0032, // m
-        "length": 0.11, // m
-        "resistance": 650
-      },
-      "Biomedicus arterial 15 Fr": {
-        "inner_diameter": 0.004, // m
-        "length": 0.18, // m
-        "resistance": 400
-      },
-      "Biomedicus arterial 17 Fr": {
-        "inner_diameter": 0.0048, // m
-        "length": 0.2, // m
-        "resistance": 200
-      },
-      "Biomedicus arterial 19 Fr": {
-        "inner_diameter": 0.0055, // m
-        "length": 0.22, // m
-        "resistance": 120
-      },
-      "Biomedicus arterial 21 Fr": {
-        "inner_diameter": 0.006, // m
-        "length": 0.24, // m
-        "resistance": 80
-      },
-       "Medtronic Crescent 13 Fr": {
-        "inner_diameter": 0.0029, // m
-        "length": 0.089, // m
-        "resistance": 7000
-      },
-       "Medtronic Crescent 15 Fr": {
-        "inner_diameter": 0.0029, // m
-        "length": 0.097, // m
-        "resistance": 2700
-      },
-    }
+      "Biomedicus arterial 8 Fr": { inner_diameter: 0.002, length: 0.1, dp_a: 19.84, dp_b: 162.87 },
+      "Biomedicus arterial 10 Fr": { inner_diameter: 0.00267, length: 0.105, dp_a: 4.2, dp_b: 59.62 },
+      "Biomedicus arterial 12 Fr": { inner_diameter: 0.0032, length: 0.11, dp_a: 8.74, dp_b: 17.96 },
+      "Biomedicus arterial 15 Fr": { inner_diameter: 0.004, length: 0.18, dp_a: 0.0, dp_b: 11.35 },
+      "Biomedicus arterial 17 Fr": { inner_diameter: 0.0048, length: 0.2, dp_a: 0.0, dp_b: 6.08 },
+      "Biomedicus arterial 19 Fr": { inner_diameter: 0.0055, length: 0.22, dp_a: 0.0, dp_b: 3.45 },
+      "Biomedicus arterial 21 Fr": { inner_diameter: 0.006, length: 0.24, dp_a: 0.39, dp_b: 2.07 },
+    };
 
-    // Drainage (venous) cannula library. Same "Biomedicus" spelling; neonatal/pediatric 8-14 Fr through
-    // adult 21-25 Fr multistage venous cannulae (lower resistance than arterial for a given Fr). The
-    // 12 Fr (600) and 25 Fr (55) entries match the term-neonate and adult scenario values.
+    // Venous: Bio-Medicus NextGen pediatric venous 10-14 Fr (96830-110..114); 8 Fr has no published
+    // chart and is extrapolated from 10 Fr by (ID ratio)^4; adult: Bio-Medicus NextGen femoral
+    // bi-caval venous 21-25 Fr (96670-121..125).
     this.drainage_cannulas = {
-      "Biomedicus venous 8 Fr": {
-        "inner_diameter": 0.0021, // m
-        "length": 0.1, // m
-        "resistance": 4600
+      "Biomedicus venous 8 Fr": { inner_diameter: 0.0021, length: 0.1, dp_a: 29.4, dp_b: 129.5 },
+      "Biomedicus venous 10 Fr": { inner_diameter: 0.0027, length: 0.105, dp_a: 10.78, dp_b: 47.42 },
+      "Biomedicus venous 12 Fr": { inner_diameter: 0.0033, length: 0.11, dp_a: 6.61, dp_b: 17.08 },
+      "Biomedicus venous 14 Fr": { inner_diameter: 0.0039, length: 0.115, dp_a: 4.79, dp_b: 9.27 },
+      "Biomedicus venous 21 Fr": { inner_diameter: 0.006, length: 0.2, dp_a: 3.09, dp_b: 2.52 },
+      "Biomedicus venous 23 Fr": { inner_diameter: 0.0068, length: 0.22, dp_a: 2.91, dp_b: 1.71 },
+      "Biomedicus venous 25 Fr": { inner_diameter: 0.0075, length: 0.25, dp_a: 1.9, dp_b: 1.18 },
+    };
+
+    // Double-lumen (VV) cannula library: one device, two lumens, both in the right atrium. Each lumen
+    // has its own water-chart fit (Getinge Avalon Elite bi-caval dual-lumen catheter, 10013-CE /
+    // 10016-CE manufacturer charts). The narrow return (infusion) lumen is the bottleneck of neonatal
+    // VV ECMO: at 0.5 L/min it costs ~110 mmHg in blood, more than an arterial cannula plus the
+    // patient's arterial pressure on VA — which is why VV does not run at lower pump speeds.
+    this.dl_cannulas = {
+      "Avalon Elite 13 Fr": {
+        drainage: { dp_a: 15.18, dp_b: 81.78 },
+        return: { dp_a: 13.74, dp_b: 342.83 },
       },
-      "Biomedicus venous 10 Fr": {
-        "inner_diameter": 0.0027, // m
-        "length": 0.105, // m
-        "resistance": 1500
+      "Avalon Elite 16 Fr": {
+        drainage: { dp_a: 6.27, dp_b: 32.1 },
+        return: { dp_a: 0.0, dp_b: 168.95 },
       },
-      "Biomedicus venous 12 Fr": {
-        "inner_diameter": 0.0033, // m
-        "length": 0.11, // m
-        "resistance": 600
-      },
-      "Biomedicus venous 14 Fr": {
-        "inner_diameter": 0.0039, // m
-        "length": 0.115, // m
-        "resistance": 260
-      },
-      "Biomedicus venous 21 Fr": {
-        "inner_diameter": 0.006, // m
-        "length": 0.2, // m
-        "resistance": 150
-      },
-      "Biomedicus venous 23 Fr": {
-        "inner_diameter": 0.0068, // m
-        "length": 0.22, // m
-        "resistance": 90
-      },
-      "Biomedicus venous 25 Fr": {
-        "inner_diameter": 0.0075, // m
-        "length": 0.25, // m
-        "resistance": 55
-      },
-      "Medtronic Crescent 13 Fr": {
-        "inner_diameter": 0.0028, // m
-        "length": 0.089, // m
-        "resistance": 2500,
-      },
-      "Medtronic Crescent 15 Fr": {
-        "inner_diameter": 0.0028, // m
-        "length": 0.097, // m
-        "resistance": 1100,
-      },
-    }
+    };
+    this.cannulation = "VA"; // "VA" (separate drainage + return cannula) or "VV-DL" (one double-lumen cannula)
+    this.dl_cannula_type = "Avalon Elite 13 Fr"; // selects the double-lumen cannula in VV-DL mode
+    this._va_return_site = null; // the VA return site, remembered while VV-DL forces return = drainage site
 
     // pump device library — real ECLS pumps with head-flow (H-Q) coefficients (centrifugal) or
     // positive-displacement parameters (roller). Coefficients are calibrated so each pump reaches its
@@ -23483,10 +23623,13 @@ export class Ecls extends BaseModelClass {
     // than the flat low-flow curve a pure Q^2 term would give. See docs/BloodPump.md for the table/sources.
     this.pumps = {
       "Abbott PediMag": { // pediatric mag-lev centrifugal, ~1.5 L/min max, 14 mL prime
-        // hq_a from the 540 mmHg max outflow pressure at 5500 rpm (540/5.5^2); with hq_b 30.3 it
-        // reproduces the published 0.6 / 0.8 L/min at 2800 / 3200 rpm (10 Fr return cannula)
+        // No H-Q curve is published. Deadhead ~640 mmHg @5500 rpm: the published 540 mmHg "max outflow
+        // pressure" is read as a rated limit, as the CentriMag manual's 600 turned out to be (measured
+        // deadhead 710, ratio 1.18). Curve shape = the CentriMag fit scaled to the PediMag's head
+        // (x0.91) and flow range (1.5/10 L/min): flat at neonatal flows, as mag-lev pumps are. With
+        // the calibrated circuit this gives ~0.55 L/min at 2800 rpm on VA (term neonate, 12/10 Fr).
         type: "centrifugal", max_rpm: 5500, prime: 0.014,
-        hq_a: 17.85, hq_b: 30.3, hq_c: 0.0,
+        hq_a: 21.16, hq_b: 5.2, hq_c: 15.4,
       },
       "Abbott CentriMag": { // adult mag-lev centrifugal, 0-5500 rpm, 0-10 L/min, 31 mL prime
         // least-squares fit (rms 4.8 mmHg) to the manufacturer H-Q curves (CentriMag Operation
@@ -23514,19 +23657,23 @@ export class Ecls extends BaseModelClass {
     // membrane surface area (m^2), priming volume (L) and O2/CO2 transfer ceilings (mmol/s). o2_cap is
     // anchored to the Quadrox-i Neonatal datasheet (~90 mL O2/min ≈ 0.067 mmol/s at 1.5 L/min) and
     // scaled by rated flow for the larger devices; co2_cap likewise (~73 mL CO2/min ≈ 0.054 mmol/s).
-    // Selecting `oxygenator_type` copies these into the active fields above.
+    // dp_a is the blood-side pressure drop per flow (mmHg per L/min, in blood; hollow-fibre bundles are
+    // laminar, so linear): Quadrox-i Neonatal ~45 (~8 mmHg @0.2 and ~65 @1.5 L/min; clinically 53 ± 15,
+    // Perfusion 2013). The larger devices have no published figure at hand and are given the same
+    // ~65 mmHg at their rated flow (dp_a = 65 / rated_flow).
+    // Selecting `oxygenator_type` copies these into the active fields above (incl. oxy_res_for/back).
     this.oxygenators = {
       "Getinge Quadrox-i Neonatal": {
-        surface_area: 0.38, rated_flow: 1.5, o2_cap: 0.067, co2_cap: 0.054, prime: 0.038,
+        surface_area: 0.38, rated_flow: 1.5, o2_cap: 0.067, co2_cap: 0.054, prime: 0.038, dp_a: 45.0,
       },
       "Getinge Quadrox-i Pediatric": {
-        surface_area: 0.8, rated_flow: 2.8, o2_cap: 0.13, co2_cap: 0.10, prime: 0.081,
+        surface_area: 0.8, rated_flow: 2.8, o2_cap: 0.13, co2_cap: 0.10, prime: 0.081, dp_a: 23.2,
       },
       "Getinge Quadrox-i Small Adult": {
-        surface_area: 1.3, rated_flow: 5.0, o2_cap: 0.22, co2_cap: 0.18, prime: 0.215,
+        surface_area: 1.3, rated_flow: 5.0, o2_cap: 0.22, co2_cap: 0.18, prime: 0.215, dp_a: 13.0,
       },
       "Medtronic Nautilus (Adult)": {
-        surface_area: 1.8, rated_flow: 7.0, o2_cap: 0.31, co2_cap: 0.25, prime: 0.260,
+        surface_area: 1.8, rated_flow: 7.0, o2_cap: 0.31, co2_cap: 0.25, prime: 0.260, dp_a: 9.3,
       },
     };
     this.oxygenator_type = "Getinge Quadrox-i Neonatal"; // selects the oxygenator; copies caps below
@@ -23563,12 +23710,15 @@ export class Ecls extends BaseModelClass {
     this.sat_ven_o2 = 0.0; // venous oxygen saturation (%)
     this.sat_postoxy_o2 = 0.0; // post-oxygenator oxygen saturation (%)
     this.pco2_postoxy = 0.0; // post-oxygenator pCO2 (mmHg)
-    this.tubing_in_res = 1000; // resistance of the tubing in (mmHg/(L/s))
+    // circuit resistances, re-derived every update (any scenario value is overwritten):
+    this.tubing_in_res = 0.0; // Poiseuille resistance of the inflow tubing, from its geometry (mmHg/(L/s))
     this.tubing_in_vol = 0.1; // volume of the tubing in (L)
-    this.tubing_out_res = 1000; // resistance of the tubing out (mmHg/(L/s))
+    this.tubing_out_res = 0.0; // Poiseuille resistance of the outflow tubing, from its geometry (mmHg/(L/s))
     this.tubing_out_vol = 0.1; // volume of the tubing out (L)
-    this.drainage_res = this.drainage_cannulas[this.drainage_cannula_type]?.resistance || 1000; // resistance of the drainage cannula (mmHg/(L/s))
-    this.return_res = this.return_cannulas[this.return_cannula_type]?.resistance || 1000; // resistance of the return cannula (mmHg/(L/s))
+    this.drainage_res = 0.0; // drainage cannula/lumen resistance at the current flow, in blood (mmHg/(L/s))
+    this.return_res = 0.0; // return cannula/lumen resistance at the current flow, in blood (mmHg/(L/s))
+    this.drainage_dp = 0.0; // pressure drop over the drainage cannula/lumen at the current flow (mmHg)
+    this.return_dp = 0.0; // pressure drop over the return cannula/lumen at the current flow (mmHg)
 
     // -----------------------------------------------
     // local parameters
@@ -23627,6 +23777,10 @@ export class Ecls extends BaseModelClass {
     this.oxy_co2_cap = o.co2_cap ?? this.oxy_co2_cap;
     this.oxy_surface_area = o.surface_area ?? this.oxy_surface_area;
     this.oxy_rated_flow = o.rated_flow ?? this.oxy_rated_flow;
+    if (o.dp_a !== undefined) {
+      this.oxy_res_for = o.dp_a * 60.0; // mmHg per L/min -> mmHg/(L/s)
+      this.oxy_res_back = o.dp_a * 60.0;
+    }
     this._prev_oxygenator_type = this.oxygenator_type;
   }
 
@@ -23677,7 +23831,24 @@ export class Ecls extends BaseModelClass {
     this._ecls_gasex = models["ECLS_GASEX"];
   }
 
+  // VV-DL: one double-lumen cannula, so both lumens sit in the drainage site. Remember the VA return
+  // site while forcing it, and restore it on the way back to VA. Runs whether or not ECLS is running
+  // so the sites (and the diagram that follows them) are right before the pump starts.
+  _apply_cannulation() {
+    if (this.cannulation === "VV-DL") {
+      if (this._va_return_site === null && this.return_site !== this.drainage_site) {
+        this._va_return_site = this.return_site;
+      }
+      this.return_site = this.drainage_site;
+    } else if (this._va_return_site !== null) {
+      this.return_site = this._va_return_site;
+      this._va_return_site = null;
+    }
+  }
+
   calc_model() {
+    this._apply_cannulation();
+
     if (!this.ecls_running) {
       this.flow = 0.0;
       this.flow_avg = 0.0;
@@ -23762,23 +23933,47 @@ export class Ecls extends BaseModelClass {
           return;
         }
 
-        // set the drainage and return sites
+        // set the drainage and return sites (VV-DL has already forced return = drainage site)
         this._ecls_drainage.comp_from = this.drainage_site;
         this._ecls_return.comp_to = this.return_site;
 
-        const selectedDrainageCannula = this.drainage_cannulas[this.drainage_cannula_type];
-        if (selectedDrainageCannula) {
-          this.drainage_res = selectedDrainageCannula.resistance;
-          this.drainage_cannula_diameter = selectedDrainageCannula.inner_diameter;
-          this.drainage_cannula_length = selectedDrainageCannula.length;
+        // cannula pressure-drop fits: both lumens of the double-lumen cannula in VV-DL, else the two
+        // separately chosen cannulas
+        let drainage_fit = null;
+        let return_fit = null;
+        if (this.cannulation === "VV-DL") {
+          const dl = this.dl_cannulas[this.dl_cannula_type];
+          if (dl) {
+            drainage_fit = dl.drainage;
+            return_fit = dl.return;
+          }
+        } else {
+          const selectedDrainageCannula = this.drainage_cannulas[this.drainage_cannula_type];
+          if (selectedDrainageCannula) {
+            drainage_fit = selectedDrainageCannula;
+            this.drainage_cannula_diameter = selectedDrainageCannula.inner_diameter;
+            this.drainage_cannula_length = selectedDrainageCannula.length;
+          }
+          const selectedReturnCannula = this.return_cannulas[this.return_cannula_type];
+          if (selectedReturnCannula) {
+            return_fit = selectedReturnCannula;
+            this.return_cannula_diameter = selectedReturnCannula.inner_diameter;
+            this.return_cannula_length = selectedReturnCannula.length;
+          }
         }
 
-        const selectedReturnCannula = this.return_cannulas[this.return_cannula_type];
-        if (selectedReturnCannula) {
-          this.return_res = selectedReturnCannula.resistance;
-          this.return_cannula_diameter = selectedReturnCannula.inner_diameter;
-          this.return_cannula_length = selectedReturnCannula.length;
-        }
+        // cannula resistances at the current circuit flow (chord of the nonlinear dP-Q curve, updated
+        // every tick from the pump's flow EMA, which damps the feedback). Unknown selection: keep the
+        // previous value.
+        const q_circuit = this._pump_flow_ema;
+        if (drainage_fit) this.drainage_res = cannula_resistance(drainage_fit, q_circuit);
+        if (return_fit) this.return_res = cannula_resistance(return_fit, q_circuit);
+        this.drainage_dp = this.drainage_res * this.drainage_res_factor * q_circuit / 60.0;
+        this.return_dp = this.return_res * this.return_res_factor * q_circuit / 60.0;
+
+        // tubing resistances from the tubing geometry (laminar flow of blood)
+        this.tubing_in_res = poiseuille_resistance(this.tubing_in_diameter, this.tubing_in_length);
+        this.tubing_out_res = poiseuille_resistance(this.tubing_out_diameter, this.tubing_out_length);
 
         // re-apply the pump library entry if the selection changed (scenario/UI switch)
         if (this.pump_type !== this._prev_pump_type) {
@@ -23821,12 +24016,12 @@ export class Ecls extends BaseModelClass {
         // set the resistances of the associated models
         this._ecls_drainage.r_for = this.drainage_res * this.drainage_res_factor; // drainage cannula resistance
         this._ecls_drainage.r_back = this.drainage_res * this.drainage_res_factor; // drainage cannula resistance
-        // NB: ECLS_TUBING_IN is a BloodCapacitance (pure compliance, owns no resistor), so writing
-        // r_for/r_back onto it did nothing. The inlet segment's resistance is the pump's own inlet
-        // resistor (ECLS_PUMP owns the TUBING_IN->PUMP connector, driven by pump_res_for below); the
-        // drainage cannula resistance lives in ECLS_DRAINAGE above. tubing_in_res is not a live term.
-        this._ecls_pump.r_for = this.pump_res_for * this.pump_res_factor; // pump / inlet-segment resistance
-        this._ecls_pump.r_back = this.pump_res_back * this.pump_res_factor; // set the pump resistance to a low value to simulate the pump resistance
+        // NB: ECLS_TUBING_IN is a BloodCapacitance (pure compliance, owns no resistor). The inflow
+        // tubing's resistance therefore rides on the pump's own inlet resistor (ECLS_PUMP owns the
+        // TUBING_IN->PUMP connector), in series with the pump's internal resistance.
+        const tubing_in_r = this.tubing_in_res * this.tubing_res_factor;
+        this._ecls_pump.r_for = this.pump_res_for * this.pump_res_factor + tubing_in_r; // pump + inflow tubing
+        this._ecls_pump.r_back = this.pump_res_back * this.pump_res_factor + tubing_in_r;
         this._ecls_oxy.r_for = this.oxy_res_for * this.oxy_res_factor; // set the oxygenator resistance to a medium value to simulate the oxygenator resistance
         this._ecls_oxy.r_back = this.oxy_res_back * this.oxy_res_factor; // set the oxygenator resistance to a medium value to simulate the oxygenator resistance
         this._ecls_tubing_out.r_for = this.tubing_out_res * this.tubing_res_factor; // set the tubing resistance to a low value to simulate the tubing resistance
@@ -25136,11 +25331,15 @@ export class Sle6000 extends Ventilator {
   // monitored values
 
   _start_inspiration() {
-    // the end-expiratory pressure of the breath just completed, before the new breath raises it
-    const peep_meas = this.pres / MBAR_TO_CMH2O;
     super._start_inspiration();
-    this._close_breath(peep_meas);
     this._c20 = { p80: null, v80: null };
+  }
+
+  _breath_closed(spont) {
+    // a breath's measurements are complete (Ventilator): at a breath start, or at the onset of a
+    // spontaneous breath between ventilator breaths. `pres` is still the end-expiratory pressure
+    // of the breath just completed (it is updated later in the step)
+    this._close_breath(this.pres / MBAR_TO_CMH2O, spont);
   }
 
   _sle_monitoring() {
@@ -25175,22 +25374,30 @@ export class Sle6000 extends Ventilator {
     while (this._vte_hist.length && now - this._vte_hist[0][0] > 60.0) this._vte_hist.shift();
   }
 
-  _close_breath(peep_meas) {
+  _close_breath(peep_meas, spont = false) {
     // per-breath filters (p175): tau 3 breaths for volumes and mechanics, 5 for MAP; leak averaged
-    // over 5 breaths then tau 10
+    // over 5 breaths then tau 10. Vte and the leak take every breath, large and small (p175); an
+    // unsupported spontaneous breath has no applied pressure, so the pressures, mechanics and
+    // timing come from the ventilator breaths only
     const first = !this._mon_init;
     const f = (x, v, n) => (first ? v : x + (v - x) / n);
     const vte = this.exp_tidal_volume * 1000.0;
     const vti = this.insp_tidal_volume * 1000.0;
+    if (spont) {
+      this.mon_vte = f(this.mon_vte, vte, 3);
+      this.mon_vti = f(this.mon_vti, vti, 3);
+      this._push_leak(f);
+      this._vte_hist.push([this._model_engine.model_time_total ?? 0.0, Math.max(0.0, vte)]);
+      this.mon_vmin = this._vte_hist.reduce((a, b) => a + b[1], 0) / 1000.0;
+      this._mon_init = true;
+      return;
+    }
     this.mon_pip = this.p_peak / MBAR_TO_CMH2O;
     this.mon_peep = peep_meas;
     this.mon_map = f(this.mon_map, this.map_meas / MBAR_TO_CMH2O, 5);
     this.mon_vte = f(this.mon_vte, vte, 3);
     this.mon_vti = f(this.mon_vti, vti, 3);
-    this._leak_hist.push(this.leak_perc);
-    if (this._leak_hist.length > 5) this._leak_hist.shift();
-    const leak5 = this._leak_hist.reduce((a, b) => a + b, 0) / this._leak_hist.length;
-    this.mon_leak = f(this.mon_leak, leak5, 10);
+    this._push_leak(f);
     if (this.compliance_dynamic > 0.0) this.mon_c = f(this.mon_c, this.compliance_dynamic * MBAR_TO_CMH2O, 3);
     if (this.r_dyn > 0.0) this.mon_r = f(this.mon_r, this.r_dyn / MBAR_TO_CMH2O, 3);
     this.mon_ti = this.ti_meas;
@@ -25215,6 +25422,18 @@ export class Sle6000 extends Ventilator {
     this._vte_hist.push([now, Math.max(0.0, vte)]);
     this.mon_vmin = this._vte_hist.reduce((a, b) => a + b[1], 0) / 1000.0;
     this._mon_init = true;
+  }
+
+  _push_leak(f) {
+    // the expired against the inspired volume over the last 5 breaths (p175), from the volumes so a
+    // breath out of step with the ventilator (a large Vti, the patient exhaling most of it in the
+    // next, spontaneous breath) cancels out instead of reading as a leak
+    this._leak_hist.push([this.insp_tidal_volume, this.exp_tidal_volume]);
+    if (this._leak_hist.length > 5) this._leak_hist.shift();
+    let vi = 0.0, ve = 0.0;
+    for (const [i, e] of this._leak_hist) { vi += i; ve += e; }
+    const leak5 = vi > 0.0 ? Math.max(0.0, (100.0 * (vi - ve)) / vi) : 0.0;
+    this.mon_leak = f(this.mon_leak, leak5, 10);
   }
 
   _hfo_cycle_end(f) {
@@ -25456,6 +25675,16 @@ export class Ventilator extends BaseModelClass {
     this._map_sum = 0.0;
     this._map_time = 0.0;
     this._trig_times = []; // model times of patient-triggered breath starts (last 60 s)
+    // unsupported spontaneous breaths between ventilator breaths (CMV, SIMV without support): the
+    // flow sensor sees each as a small breath of its own (SLE6000 IFU §27.6.5: Vte is the "expired
+    // volume of large and small breaths", RR the "total number of breaths detected")
+    this._spont_open = false; // the breath being measured is such a spontaneous breath
+    this._spont_cut_off = false; // the last closed spontaneous breath was cut off by a ventilator breath
+    this._spont_armed = false; // detector re-armed by expiratory flow since its last detection
+    this._spont_effort = false; // a patient effort was seen during the open spontaneous breath
+    this._vent_vte = 0.0; // L, exhaled volume of the last ventilator breath (minute volume)
+    this._spont_log = []; // [model time, exhaled L] of closed spontaneous breaths (last 60 s)
+    this._mon_time = 0.0; // s of monitoring since the last reset (the 60 s window while it fills)
     this._leak_net_vol = 0.0; // L, net volume through the tube sensor over the current breath
     this._leak_sqrtp = 0.0; // √cmH2O·s, integral of √(airway pressure) over the current breath
     this._leak_g = 0.0; // L/s per √cmH2O, learned leak conductance (orifice law, Q = g·√P)
@@ -25613,6 +25842,8 @@ export class Ventilator extends BaseModelClass {
       this.hfov_control();
     }
 
+    if (this.vent_mode !== "CPAP" && !this._hfo_mode()) this._detect_spont_breath();
+
     this.pres = (this._vent_gascircuit.pres - this.pres_atm) * 1.35951;
     this.flow = this._vent_ettube.flow * 60.0;
     this.vol += this._vent_ettube.flow * 1000 * this._t;
@@ -25626,7 +25857,7 @@ export class Ventilator extends BaseModelClass {
       const triggerable =
         this.vent_mode === "PS" || this.vent_mode === "SIMV" || this.synchronized;
       const rate = triggerable ? this._rate_avg : this.vent_rate;
-      this.minute_volume = this.exp_tidal_volume * rate;
+      this.minute_volume = this._vent_vte * rate + this._spont_per_min().vol;
     }
     // compliance and resistance are measured per breath at end-expiration in
     // calc_measured_mechanics(); they are NOT recomputed here (and must not be clobbered to null
@@ -25655,8 +25886,11 @@ export class Ventilator extends BaseModelClass {
     if (this._map_time >= 3.0) this._close_map_block();
     // in CPAP the patient sets the rate; backup breaths only come during apnoea
     const spont = this._breathing_model?.breathing_enabled ? this._breathing_model.resp_rate : 0.0;
-    this.rr_meas = this.vent_mode === "CPAP" && spont > 0.0 ? spont : this._rate_avg;
+    this._mon_time += this._t;
+    this.rr_meas =
+      this.vent_mode === "CPAP" && spont > 0.0 ? spont : this._rate_avg + this._spont_per_min().n;
     const now = this._model_engine.model_time_total ?? 0.0;
+    while (this._spont_log.length && now - this._spont_log[0][0] > 60.0) this._spont_log.shift();
     while (this._trig_times.length && now - this._trig_times[0] > 60.0) this._trig_times.shift();
     this.trig_per_min = this._trig_times.length;
   }
@@ -26036,18 +26270,19 @@ export class Ventilator extends BaseModelClass {
     this._inspiration = true;
     this._expiration = false;
 
-    this.exp_tidal_volume = -this._exp_tidal_volume_counter;
-    this.etco2 = this._model_engine.models["DS"]?.pco2 ?? this.etco2;
-    const weight = this._model_engine.weight;
-    this.tv_kg = weight > 0 ? (this.exp_tidal_volume * 1000.0) / weight : 0.0;
-
-    this.calc_measured_mechanics();
-    this._calc_leak_perc();
+    // the breath just completed: a ventilator breath, or a spontaneous breath since one. A
+    // spontaneous breath that is still inhaling becomes this breath (it triggered it, or the SIMV
+    // window opened on it): it is not a breath of its own, the ventilator breath before it was
+    // closed at its onset, and what the patient inhaled so far is part of this breath's Vti. Flow
+    // in without a patient effort (an uncompensated leak refilling the circuit) is not
+    if (this._spont_open) {
+      if (this._exp_tidal_volume_counter < 0.0) this._close_spont_breath(true);
+      else if (!this._spont_effort) this._insp_tidal_volume_counter = 0.0;
+      this._spont_open = false;
+    } else {
+      this._close_vent_breath();
+    }
     this._learn_leak();
-    // volume-targeted modes: trim the working pressure on the breath just completed (in SIMV only
-    // on mandatory breaths: a supported spontaneous breath has its own, capped, pressure)
-    if (this._volume_targeted() && !this._ps_breath) this.pressure_regulated_volume_control();
-    this._ps_breath = false;
 
     // timing of the breath just completed, and the start of this one
     this.te_meas = this._te_counter;
@@ -26060,6 +26295,7 @@ export class Ventilator extends BaseModelClass {
     this._exp_tidal_volume_counter = 0.0;
     this._pip_meas = 0.0;
     this._had_pause = false;
+    this._spont_armed = false;
 
     if (this._breath_interval_counter > 0.0) {
       this._measured_rate = 60.0 / this._breath_interval_counter;
@@ -26073,6 +26309,78 @@ export class Ventilator extends BaseModelClass {
     }
     this._breath_interval_counter = 0.0;
     this._manual_breath = false;
+  }
+
+  _close_vent_breath() {
+    // measurements of a ventilator breath, at its end: the next breath start, or the onset of a
+    // spontaneous breath in its expiration
+    this.exp_tidal_volume = -this._exp_tidal_volume_counter;
+    this._vent_vte = this.exp_tidal_volume;
+    this.etco2 = this._model_engine.models["DS"]?.pco2 ?? this.etco2;
+    const weight = this._model_engine.weight;
+    this.tv_kg = weight > 0 ? (this.exp_tidal_volume * 1000.0) / weight : 0.0;
+    this.calc_measured_mechanics();
+    this._calc_leak_perc();
+    // volume-targeted modes: trim the working pressure on the breath just completed (in SIMV only
+    // on mandatory breaths: a supported spontaneous breath has its own, capped, pressure)
+    if (this._volume_targeted() && !this._ps_breath) this.pressure_regulated_volume_control();
+    this._ps_breath = false;
+    this._exp_tidal_volume_counter = 0.0;
+    this._breath_closed(false);
+  }
+
+  _close_spont_breath(cut_off = false) {
+    // an unsupported spontaneous breath: its own volumes and leak, but no mechanics (no applied
+    // pressure) and no volume targeting. A breath cut off by a ventilator breath (CMV) has not
+    // finished exhaling, so its Vti - Vte is not a leak and the leak is left as it was
+    this.exp_tidal_volume = -this._exp_tidal_volume_counter;
+    this.insp_tidal_volume = this._insp_tidal_volume_counter;
+    this.etco2 = this._model_engine.models["DS"]?.pco2 ?? this.etco2;
+    const weight = this._model_engine.weight;
+    this.tv_kg = weight > 0 ? (this.exp_tidal_volume * 1000.0) / weight : 0.0;
+    this._spont_cut_off = cut_off;
+    if (!cut_off) this._calc_leak_perc();
+    this._spont_log.push([this._model_engine.model_time_total ?? 0.0, Math.max(this.exp_tidal_volume, 0.0)]);
+    this._exp_tidal_volume_counter = 0.0;
+    this._insp_tidal_volume_counter = 0.0;
+    this._breath_closed(true);
+  }
+
+  _breath_closed(spont) {
+    // hook: a breath's measurements are complete (Sle6000 updates its monitored values here)
+  }
+
+  _detect_spont_breath() {
+    // the flow sensor sees a patient inspiration in the ventilator's expiration that did not
+    // start a ventilator breath (CMV, or SIMV without pressure support): the breath in progress
+    // ends and a spontaneous breath begins. Same threshold as the flow trigger, net of the learned
+    // leak; re-armed by expiratory flow, so one inspiration is one breath
+    if (!this._expiration) return;
+    const q = this._vent_ettube.flow;
+    if (q < 0.0) this._spont_armed = true;
+    if (this._spont_open && q > 0.0) this._insp_tidal_volume_counter += q * this._t;
+    if (this._spont_open && this._breathing_model?.insp_running) this._spont_effort = true;
+    if (
+      this._spont_armed &&
+      this._te_counter >= this._min_exp_time &&
+      q * 60.0 - this._leak_flow_now() * 60.0 > this.trigger_flow
+    ) {
+      this._spont_armed = false;
+      if (this._spont_open) this._close_spont_breath();
+      else this._close_vent_breath();
+      this._spont_open = true;
+      this._spont_effort = !!this._breathing_model?.insp_running;
+      this._insp_tidal_volume_counter = q * this._t;
+    }
+  }
+
+  _spont_per_min() {
+    // spontaneous breaths and their exhaled volume per minute, over the last 60 s (or the time
+    // monitored so far, while that window fills)
+    const win = Math.min(60.0, Math.max(this._mon_time, 1.0));
+    let vol = 0.0;
+    for (const [, v] of this._spont_log) vol += v;
+    return { n: (this._spont_log.length * 60.0) / win, vol: (vol * 60.0) / win };
   }
 
   _apply_humidifier() {
@@ -26718,6 +27026,12 @@ export class Ventilator extends BaseModelClass {
     this._map_sum = 0.0;
     this._map_time = 0.0;
     this._trig_times = [];
+    this._spont_open = false;
+    this._spont_armed = false;
+    this._spont_effort = false;
+    this._vent_vte = 0.0;
+    this._spont_log = [];
+    this._mon_time = 0.0;
     this._leak_net_vol = 0.0;
     this._leak_sqrtp = 0.0;
     this._leak_g = 0.0;
@@ -31340,6 +31654,24 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "choices": ["Getinge Quadrox-i Neonatal", "Getinge Quadrox-i Pediatric", "Getinge Quadrox-i Small Adult", "Medtronic Nautilus (Adult)"]
     },
     {
+      "caption": "cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula)",
+      "target": "cannulation",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "custom_options": true,
+      "choices": ["VA", "VV-DL"]
+    },
+    {
+      "caption": "double-lumen cannula (VV-DL)",
+      "target": "dl_cannula_type",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "custom_options": true,
+      "choices": ["Avalon Elite 13 Fr", "Avalon Elite 16 Fr"]
+    },
+    {
       "caption": "pump mode (0 = centrifugal, 1 = roller; set by the pump)",
       "target": "pump_mode",
       "type": "number",
@@ -31596,8 +31928,8 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "type": "number",
       "build_prop": true,
       "edit_mode": "advanced",
-      "readonly": false,
-      "caption": "tubing in resistance (mmHg/(L/s))",
+      "readonly": true,
+      "caption": "tubing in resistance (computed from geometry, mmHg/(L/s))",
       "factor": 1,
       "delta": 1,
       "rounding": 0,
@@ -31609,8 +31941,8 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "type": "number",
       "build_prop": true,
       "edit_mode": "advanced",
-      "readonly": false,
-      "caption": "tubing out resistance (mmHg/(L/s))",
+      "readonly": true,
+      "caption": "tubing out resistance (computed from geometry, mmHg/(L/s))",
       "factor": 1,
       "delta": 1,
       "rounding": 0,
@@ -31684,6 +32016,24 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "advanced",
       "readonly": true,
       "caption": "return cannula resistance (computed, mmHg/(L/s))",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "drainage_dp",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "drainage cannula pressure drop (mmHg)",
+      "factor": 1,
+      "rounding": 0
+    },
+    {
+      "target": "return_dp",
+      "type": "number",
+      "edit_mode": "advanced",
+      "readonly": true,
+      "caption": "return cannula pressure drop (mmHg)",
       "factor": 1,
       "rounding": 0
     },
@@ -38725,7 +39075,7 @@ Rules of thumb:
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
 Snapshot: **45 model_types**, **452 settable params**, **52 functions**
-(+ 67 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+(+ 69 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -38778,8 +39128,10 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ecls.tubing_res_factor` — circuit tubing resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.pump_res_factor` — pump resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.oxy_res_factor` — oxygenator resistance multiplier (1.0 = baseline)
-- `setProp` `Ecls.drainage_cannula_type` — drainage cannula key from the scenario's cannula library (string)
-- `setProp` `Ecls.return_cannula_type` — return cannula key from the scenario's cannula library (string)
+- `setProp` `Ecls.cannulation` — cannulation (list: VA, VV-DL). VA = separate drainage + return cannula and sites; VV-DL = one double-lumen cannula, return follows the drainage site (right atrium)
+- `setProp` `Ecls.dl_cannula_type` — double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr)
+- `setProp` `Ecls.drainage_cannula_type` — VA drainage cannula (list: Biomedicus venous 8/10/12/14/21/23/25 Fr, e.g. "Biomedicus venous 12 Fr")
+- `setProp` `Ecls.return_cannula_type` — VA return cannula (list: Biomedicus arterial 8/10/12/15/17/19/21 Fr, e.g. "Biomedicus arterial 10 Fr")
 - `start`  — start the realtime simulation loop
 - `stop`  — stop the realtime simulation loop
 - `revert`  — undo all live changes — reload the patient as it was loaded
@@ -38989,6 +39341,8 @@ _setProp_:
 - `ecls_clamped` — ECLS clamped (boolean)
 - `pump_type` — pump (list, one of Abbott PediMag/Abbott CentriMag/Getinge Rotaflow RF-32/Medtronic Bio-Pump BP-50/Generic roller pump)
 - `oxygenator_type` — oxygenator (list, one of Getinge Quadrox-i Neonatal/Getinge Quadrox-i Pediatric/Getinge Quadrox-i Small Adult/Medtronic Nautilus (Adult))
+- `cannulation` — cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula) (list, VA = separate cannulas, VV-DL = one double-lumen cannula, one of VA/VV-DL)
+- `dl_cannula_type` — double-lumen cannula (VV-DL) (list, VV-DL, one of Avalon Elite 13 Fr/Avalon Elite 16 Fr)
 - `pump_rpm` — pump speed (rpm) (number, rpm, range 0–5500)
 - `gas_flow` — sweep gas flow (L/min) (number, L/min, range 0–10)
 - `gas_fio2` — sweep gas fio2 (fraction) (number, fraction, range 0.21–1)
@@ -39005,8 +39359,6 @@ _setProp_:
 - `tubing_out_length` — tubing out length (m) (number, m, range 0–5) _(extra)_
 - `oxy_vol` — oxygenator volume (L) (number, L, range 0–1) _(extra)_
 - `pump_vol` — pump volume (L) (number, L, range 0–1) _(extra)_
-- `tubing_in_res` — tubing in resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
-- `tubing_out_res` — tubing out resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
 - `pump_res_for` — pump forward resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
 - `pump_res_back` — pump backward resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
 - `oxy_res_for` — oxygenator forward resistance (mmHg/(L/s)) (number, mmHg/(L/s, range 100–100000) _(advanced)_
@@ -39731,7 +40083,6 @@ Available scenarios are listed in `public/model_definitions/index.json`.
   "tapvc_obstructed",
   "term_fetus",
   "term_neonate",
-  "term_neonate_sle6000",
   "tof",
   "tof_pa",
   "tof_pink",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
 import Select from "primevue/select";
+import SelectButton from "primevue/selectbutton";
 import InputNumber from "primevue/inputnumber";
 import ToggleSwitch from "primevue/toggleswitch";
 import Panel from "primevue/panel";
@@ -11,8 +12,10 @@ import { useExplain } from "@/composables/useExplain";
 // functions; calc_model() picks up changes each tick (it re-derives gas
 // composition when gas_fio2/gas_fico2 change, and toggles its sub-circuit's
 // is_enabled from ecls_running / ecls_clamped). Cannula pickers write the
-// type string; calc_model() looks up resistance + geometry from the model's
-// built-in cannula libraries.
+// type string; calc_model() looks up the pressure-drop curve + geometry from
+// the model's built-in cannula libraries. Cannulation is VA (two cannulas,
+// two sites) or VV-DL (one double-lumen cannula: the engine puts the return
+// lumen in the drainage site and restores the VA return site on switching back).
 //
 // Live measured read-outs come off the ~1 Hz slow stream (watchSlow),
 // re-registered on every (re)build since build() resets the DataCollector
@@ -85,6 +88,14 @@ const drainageOptions = ref<string[]>([]);
 const returnOptions = ref<string[]>([]);
 const drainageSite = ref<string | null>(null);
 const returnSite = ref<string | null>(null);
+const cannulation = ref<string>("VA");
+const isVV = computed(() => cannulation.value === "VV-DL");
+const CANNULATION_OPTIONS = [
+  { label: "VA", value: "VA" },
+  { label: "VV (double lumen)", value: "VV-DL" },
+];
+const dlCannula = ref<string | null>(null);
+const dlOptions = ref<string[]>([]);
 
 // Blood-compartment instances the drainage/return cannulas can connect to.
 // The engine applies these live each tick (ECLS_DRAINAGE.comp_from / ECLS_RETURN.comp_to).
@@ -113,6 +124,8 @@ const SLOW_PATHS = [
   "Ecls.sat_ven_o2",
   "Ecls.sat_postoxy_o2",
   "Ecls.pco2_postoxy",
+  "Ecls.drainage_dp",
+  "Ecls.return_dp",
 ];
 
 const latest = computed<Record<string, number>>(() => {
@@ -137,6 +150,8 @@ const measured = computed(() => {
     { label: "SvO₂", value: fmt(l["Ecls.sat_ven_o2"], 0), unit: "%" },
     { label: "post-oxy SO₂", value: fmt(l["Ecls.sat_postoxy_o2"], 0), unit: "%" },
     { label: "post-oxy pCO₂", value: fmt(l["Ecls.pco2_postoxy"], 0), unit: "mmHg" },
+    { label: "ΔP drainage", value: fmt(l["Ecls.drainage_dp"], 0), unit: "mmHg" },
+    { label: "ΔP return", value: fmt(l["Ecls.return_dp"], 0), unit: "mmHg" },
   ];
 });
 
@@ -156,6 +171,9 @@ function syncLocal() {
   returnSite.value = e.return_site ?? null;
   drainageOptions.value = e.drainage_cannulas ? Object.keys(e.drainage_cannulas) : [];
   returnOptions.value = e.return_cannulas ? Object.keys(e.return_cannulas) : [];
+  cannulation.value = e.cannulation ?? "VA";
+  dlCannula.value = e.dl_cannula_type ?? null;
+  dlOptions.value = e.dl_cannulas ? Object.keys(e.dl_cannulas) : [];
   for (const f of [...SETTINGS, ...RES_FACTORS]) {
     const raw = e[f.p];
     if (typeof raw !== "number") continue;
@@ -213,6 +231,15 @@ function onDrainageCannula(v: string) {
 function onReturnCannula(v: string) {
   returnCannula.value = v;
   setProp("Ecls.return_cannula_type", v, 0);
+}
+function onCannulation(v: string) {
+  if (!v) return;
+  cannulation.value = v;
+  setProp("Ecls.cannulation", v, 0);
+}
+function onDlCannula(v: string) {
+  dlCannula.value = v;
+  setProp("Ecls.dl_cannula_type", v, 0);
 }
 function onDrainageSite(v: string) {
   drainageSite.value = v;
@@ -313,7 +340,30 @@ function onReturnSite(v: string) {
 
       <!-- cannulas + sites -->
       <div class="grid grid-cols-1 gap-2 border-t border-surface-700 pt-2" data-tour="ecls.cannulas">
-        <div class="flex flex-col gap-0.5">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs opacity-70">Cannulation</span>
+          <SelectButton
+            :model-value="cannulation"
+            :options="CANNULATION_OPTIONS"
+            option-label="label"
+            option-value="value"
+            :allow-empty="false"
+            size="small"
+            @update:model-value="onCannulation"
+          />
+        </div>
+        <div v-if="isVV" class="flex flex-col gap-0.5">
+          <span class="text-xs opacity-70">Double-lumen cannula</span>
+          <Select
+            :model-value="dlCannula"
+            :options="dlOptions"
+            size="small"
+            class="w-full"
+            placeholder="Select cannula"
+            @update:model-value="onDlCannula"
+          />
+        </div>
+        <div v-else class="flex flex-col gap-0.5">
           <span class="text-xs opacity-70">Drainage cannula</span>
           <Select
             :model-value="drainageCannula"
@@ -325,7 +375,7 @@ function onReturnSite(v: string) {
           />
         </div>
         <div class="flex flex-col gap-0.5">
-          <span class="text-xs opacity-70">Drainage site</span>
+          <span class="text-xs opacity-70">{{ isVV ? "Cannula site" : "Drainage site" }}</span>
           <Select
             :model-value="drainageSite"
             :options="siteOptions"
@@ -335,7 +385,7 @@ function onReturnSite(v: string) {
             @update:model-value="onDrainageSite"
           />
         </div>
-        <div class="flex flex-col gap-0.5">
+        <div v-if="!isVV" class="flex flex-col gap-0.5">
           <span class="text-xs opacity-70">Return cannula</span>
           <Select
             :model-value="returnCannula"
@@ -346,7 +396,7 @@ function onReturnSite(v: string) {
             @update:model-value="onReturnCannula"
           />
         </div>
-        <div class="flex flex-col gap-0.5">
+        <div v-if="!isVV" class="flex flex-col gap-0.5">
           <span class="text-xs opacity-70">Return site</span>
           <Select
             :model-value="returnSite"
