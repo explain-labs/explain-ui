@@ -238,7 +238,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
     op: "setProp",
     model: "Ecls",
     target: "dl_cannula_type",
-    note: "double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr)",
+    note: "double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr, Crescent RA 13 Fr, Crescent RA 15 Fr, Crescent RA 19 Fr)",
   },
   {
     op: "setProp",

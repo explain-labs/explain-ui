@@ -3911,13 +3911,18 @@ Broman et al measured in blood (*Perfusion* 2020, doi:10.1177/0267659120926009).
 | Biomedicus venous 21 / 23 / 25 Fr | Bio-Medicus NextGen femoral bi-caval venous 96670-121 / 123 / 125 | 3.09 / 2.91 / 1.90 | 2.52 / 1.71 / 1.18 | — (adult) |
 | Avalon Elite 13 Fr, drainage / return lumen | Getinge Avalon Elite 10013-CE | 15.18 / 13.74 | 81.78 / 342.83 | 44 / 112 mmHg |
 | Avalon Elite 16 Fr, drainage / return lumen | Getinge Avalon Elite 10016-CE | 6.27 / 0 | 32.10 / 168.95 | 18 / 45 mmHg |
+| Crescent RA 13 Fr, drainage / return lumen | Medtronic Crescent RA 70413 (brochure chart) | 19.75 / 38.72 | 57.75 / 228.87 | 45 / 119 mmHg |
+| Crescent RA 15 Fr, drainage / return lumen | Medtronic Crescent RA 70415 | 12.46 / 15.85 | 25.87 / 109.61 | 26 / 53 mmHg |
+| Crescent RA 19 Fr, drainage / return lumen | Medtronic Crescent RA 70419 | 4.61 / 5.95 | 9.80 / 40.41 | 9 / 20 mmHg |
 
 The digitised chart points came from the open `perfusion-tools` cannula pressure-drop dataset
 (github.com/IMhongkeun/perfusion-tools, `data/cannula-pressure-drop.json`). That dataset digitises the
 Medtronic cannulae catalog, the Bio-Medicus NextGen brochure and the Getinge Avalon Elite charts. An
 independent blood data point supports the steep return lumen: an OriGen 13 Fr VV catheter costs
-275 mmHg at 500 mL/min in lambs. The Medtronic Crescent RA entries (13/15 Fr) were dropped, because
-their charts are not available as data.
+275 mmHg at 500 mL/min in lambs. The Crescent RA curves were digitised by pixel from the chart in the
+Medtronic Crescent RA brochure (UC202207936b EN, 11/2024; water at 21 °C, items 70413/70415/70419).
+Fits are within 0.4–2.0 mmHg RMS. The digitised points match the chart's gridlines (13 Fr infusion:
+76 mmHg at 0.5 L/min, 266 at 1.0).
 
 **How the nonlinearity is applied.** The engine's `Resistor.r_k` term is explicit (lagged by one step).
 With these stiff curves it would oscillate. Instead `calc_model` writes the **chord resistance**
@@ -4191,6 +4196,13 @@ sub-models. On top of that, the DataCollector drops watched props of disabled mo
 - **`flow` is reported in L/min** (`× 60`) even though the source comment labels it L/s.
 
 ## Changelog
+
+### Crescent RA double-lumen cannulas (2026-10-12)
+
+- `dl_cannulas` gains the Medtronic Crescent RA jugular dual-lumen catheter, 13 / 15 / 19 Fr, fitted
+  to the brochure's pressure-flow chart (see the Circuit calibration table).
+- `term_neonate` VV at 2800 rpm: Crescent RA 13 Fr 0.43 L/min (`p_ven` −11) against Avalon Elite
+  13 Fr 0.44 (−12); Crescent RA 15 Fr 0.63 (−9); Crescent RA 19 Fr 0.94 (+3).
 
 ### Pump height (2026-10-12)
 
@@ -23629,8 +23641,9 @@ export class Ecls extends BaseModelClass {
     };
 
     // Double-lumen (VV) cannula library: one device, two lumens, both in the right atrium. Each lumen
-    // has its own water-chart fit (Getinge Avalon Elite bi-caval dual-lumen catheter, 10013-CE /
-    // 10016-CE manufacturer charts). The narrow return (infusion) lumen is the bottleneck of neonatal
+    // has its own water-chart fit: Getinge Avalon Elite bi-caval dual-lumen catheter (10013-CE /
+    // 10016-CE manufacturer charts) and Medtronic Crescent RA jugular dual-lumen catheter (70413 /
+    // 70415 / 70419; digitised from the brochure chart, UC202207936b, water at 21 °C). The narrow return (infusion) lumen is the bottleneck of neonatal
     // VV ECMO: at 0.5 L/min it costs ~110 mmHg in blood, more than an arterial cannula plus the
     // patient's arterial pressure on VA — which is why VV does not run at lower pump speeds.
     this.dl_cannulas = {
@@ -23641,6 +23654,18 @@ export class Ecls extends BaseModelClass {
       "Avalon Elite 16 Fr": {
         drainage: { dp_a: 6.27, dp_b: 32.1 },
         return: { dp_a: 0.0, dp_b: 168.95 },
+      },
+      "Crescent RA 13 Fr": {
+        drainage: { dp_a: 19.75, dp_b: 57.75 },
+        return: { dp_a: 38.72, dp_b: 228.87 },
+      },
+      "Crescent RA 15 Fr": {
+        drainage: { dp_a: 12.46, dp_b: 25.87 },
+        return: { dp_a: 15.85, dp_b: 109.61 },
+      },
+      "Crescent RA 19 Fr": {
+        drainage: { dp_a: 4.61, dp_b: 9.8 },
+        return: { dp_a: 5.95, dp_b: 40.41 },
       },
     };
     this.cannulation = "VA"; // "VA" (separate drainage + return cannula) or "VV-DL" (one double-lumen cannula)
@@ -31722,7 +31747,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": true,
       "edit_mode": "basic",
       "custom_options": true,
-      "choices": ["Avalon Elite 13 Fr", "Avalon Elite 16 Fr"]
+      "choices": ["Avalon Elite 13 Fr", "Avalon Elite 16 Fr", "Crescent RA 13 Fr", "Crescent RA 15 Fr", "Crescent RA 19 Fr"]
     },
     {
       "caption": "pump mode (0 = centrifugal, 1 = roller; set by the pump)",
@@ -39183,7 +39208,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `setProp` `Ecls.pump_res_factor` — pump resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.oxy_res_factor` — oxygenator resistance multiplier (1.0 = baseline)
 - `setProp` `Ecls.cannulation` — cannulation (list: VA, VV-DL). VA = separate drainage + return cannula and sites; VV-DL = one double-lumen cannula, return follows the drainage site (right atrium)
-- `setProp` `Ecls.dl_cannula_type` — double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr)
+- `setProp` `Ecls.dl_cannula_type` — double-lumen cannula for VV-DL (list: Avalon Elite 13 Fr, Avalon Elite 16 Fr, Crescent RA 13 Fr, Crescent RA 15 Fr, Crescent RA 19 Fr)
 - `setProp` `Ecls.drainage_cannula_type` — VA drainage cannula (list: Biomedicus venous 8/10/12/14/21/23/25 Fr, e.g. "Biomedicus venous 12 Fr")
 - `setProp` `Ecls.return_cannula_type` — VA return cannula (list: Biomedicus arterial 8/10/12/15/17/19/21 Fr, e.g. "Biomedicus arterial 10 Fr")
 - `start`  — start the realtime simulation loop
@@ -39396,7 +39421,7 @@ _setProp_:
 - `pump_type` — pump (list, one of Abbott PediMag/Abbott CentriMag/Getinge Rotaflow RF-32/Medtronic Bio-Pump BP-50/Generic roller pump)
 - `oxygenator_type` — oxygenator (list, one of Getinge Quadrox-i Neonatal/Getinge Quadrox-i Pediatric/Getinge Quadrox-i Small Adult/Medtronic Nautilus (Adult))
 - `cannulation` — cannulation (VA = separate cannulas, VV-DL = one double-lumen cannula) (list, VA = separate cannulas, VV-DL = one double-lumen cannula, one of VA/VV-DL)
-- `dl_cannula_type` — double-lumen cannula (VV-DL) (list, VV-DL, one of Avalon Elite 13 Fr/Avalon Elite 16 Fr)
+- `dl_cannula_type` — double-lumen cannula (VV-DL) (list, VV-DL, one of Avalon Elite 13 Fr/Avalon Elite 16 Fr/Crescent RA 13 Fr/Crescent RA 15 Fr/Crescent RA 19 Fr)
 - `pump_rpm` — pump speed (rpm) (number, rpm, range 0–5500)
 - `gas_flow` — sweep gas flow (L/min) (number, L/min, range 0–10)
 - `gas_fio2` — sweep gas fio2 (fraction) (number, fraction, range 0.21–1)
