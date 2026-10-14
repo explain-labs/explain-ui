@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Explain UI: interactive web application and AI-assisted patient builder for the Explain physiological simulation engine"
+abstract: >-
+  Vue 3 web application that runs the Explain neonatal and fetal physiological
+  simulation engine in real time in the browser (diagram, monitors, charts,
+  device panels), and hosts the AI-assisted patient-parameterization layer: a
+  structured patient-builder form and a bounded language-model interpretation
+  layer whose commands are validated against the same schema and bounds as
+  manual entry before the deterministic calibrator in the engine fits them.
+type: software
+version: "0.1.0"
+date-released: "2026-10-14"
+authors:
+  - given-names: Tim
+    family-names: Antonius
+    email: timantonius@pm.me
+    orcid: "https://orcid.org/0000-0003-0289-1508"
+repository-code: "https://github.com/explain-labs/explain-ui"
+url: "https://modeling.explain-labs.com"
+license: MIT
+keywords:
+  - physiology
+  - simulation
+  - neonatology
+  - digital twin
+  - parameter estimation
+# doi: TODO — mint a Zenodo concept DOI at the first tagged release
