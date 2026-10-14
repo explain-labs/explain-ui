@@ -189,8 +189,13 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
                           //   unmeasured anions left over, so a lactic or hyperchloraemic acidosis
                           //   is represented as such
     "spo2": 90, "po2": 55, "pco2": 52, "ph": 7.28, "be": -5, "co": 0.3, // iterated
-    "ef": 60              // iterated: echo LV ejection fraction in % (not a fraction); same lever
+    "ef": 60,             // iterated: echo LV ejection fraction in % (not a fraction); same lever
                           //   as co, which wins when both are given
+    "rvo": 0.31,          // iterated: right-ventricular output, L/min, via the foramen ovale diameter
+                          //   (with the duct closed RVO differs from LVO only by the atrial shunt;
+                          //   a given fo_mm is the starting point)
+    "svc": 0.055          // iterated: superior vena cava flow, L/min, via the upper-body arteriolar
+                          //   resistance
   },
   "pathophysiology": { "rds": "mild|moderate|severe", "pvr_scale": 1.7 },
   "tolerance": { "map": 3, "pco2": 4 },  // optional per-target band overrides
@@ -218,7 +223,8 @@ reference, pulse pressure (sys − dia)←large-artery stiffness, RR←split bet
 and rate (minute volume unchanged), PO2/SpO2←alveolar O₂ diffusion, then (once diffusion is at its floor) the intrapulmonary shunt, **pCO2←spontaneous ventilatory drive** (so it
 assumes the patient breathes spontaneously — for a ventilated patient set ventilator
 rate/Vt instead), BE/pH←Stewart unmeasured anions, CO←contractility, LV ejection fraction←left-ventricular
-contractility (only without a CO). Targets it can't
+contractility (only without a CO), RVO←foramen ovale diameter (closed duct), SVC flow←upper-body
+arteriolar resistance. Targets it can't
 reach in `max_iters` are reported `INCOMPLETE`; don't claim a value the report didn't hit.
 A target reached with its lever at the edge of its range (for example oxygen uptake at its
 floor for a baby on high FiO2) is flagged to the user by the app; do not present such a fit
