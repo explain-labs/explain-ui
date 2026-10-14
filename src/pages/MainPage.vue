@@ -162,7 +162,8 @@ const loadedName = computed(() => {
 const DEFAULT_SCENARIO = "term_neonate";
 
 // guided lesson pages (/lesson/:id), linked from the header for non-lesson users
-const lessons = listLessons();
+const lessons = listLessons().filter((l) => l.kind !== "paper");
+const papers = listLessons().filter((l) => l.kind === "paper");
 const lessonsRef = ref<any>(null);
 
 // selecting a scenario loads it immediately (no Load button needed)
@@ -339,7 +340,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             @click="loadLesson"
           />
         </template>
-        <template v-else-if="lessons.length">
+        <template v-else-if="lessons.length || papers.length">
           <Button
             data-tour="header.lessons"
             icon="pi pi-book"
@@ -360,6 +361,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 text
                 @click="router.push({ name: 'lesson', params: { id: l.id } })"
               />
+              <template v-if="papers.length">
+                <span class="text-xs uppercase tracking-wide opacity-50 px-2 pt-1">Paper companions</span>
+                <Button
+                  v-for="l in papers"
+                  :key="l.id"
+                  :label="tl(l.title, 'en')"
+                  icon="pi pi-file"
+                  size="small"
+                  severity="secondary"
+                  text
+                  @click="router.push({ name: 'paper', params: { id: l.id } })"
+                />
+              </template>
             </div>
           </Popover>
         </template>

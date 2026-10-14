@@ -1,0 +1,3 @@
+The bidirectional state: a 2.2 mm duct with the pulmonary arteriolar resistance and the pulmonary-artery elastance raised, so that pulmonary pressure exceeds aortic pressure in systole and the duct shunts **right-to-left for part of the cycle** and left-to-right in diastole.
+
+The paper notes the *paradoxical reduction in left-ventricular output* with a bidirectional shunt that Bischoff et al. [21] reported: less blood reaches the lungs, so less returns to the left heart. The row *Fraction of cycle L→R* shows how much of each beat flows left-to-right; the chart under the monitor shows the ductal velocity, negative when right-to-left.

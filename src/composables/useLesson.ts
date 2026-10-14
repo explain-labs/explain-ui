@@ -15,6 +15,7 @@ import {
 } from "@/lessons/interventions";
 import type { CentreTab, Lesson, LessonStep, Op } from "@/lessons/types";
 import { renderMarkdown } from "@/utils/markdown";
+import { evaluate, samplePaths } from "@explain/papers/evaluate.js";
 
 // Runtime for one lesson page: loads the lesson's starting state, tracks the
 // current step (mirrored in ?step=), applies ops, and derives the state of
@@ -29,6 +30,15 @@ import { renderMarkdown } from "@/utils/markdown";
 
 type ToggleState = "on" | "off";
 
+export type ExperimentStatus = "idle" | "loading" | "settling" | "sampling" | "done" | "error";
+export interface ExperimentRun {
+  status: ExperimentStatus;
+  progress: number; // 0–100 of the sampling window
+  values: Record<string, number | undefined>; // measure key → value (after "done")
+  weight?: number; // kg the per-kg measures used
+  error?: string;
+}
+
 interface Pending {
   state?: ToggleState; // toggles: the state being moved to
   from?: number; // raw value when the tween was requested (for progress)
@@ -38,7 +48,7 @@ interface Pending {
 
 export function useLesson(lesson: Lesson) {
   const explain = useExplain();
-  const { model, modelReady, isRunning, slowValues, modelState, error } = explain;
+  const { model, modelReady, isRunning, slowValues, modelState, error, status } = explain;
   const auth = useAuthStore();
   const statesStore = useStatesStore();
   const route = useRoute();
@@ -303,8 +313,14 @@ export function useLesson(lesson: Lesson) {
     }
   }
 
-  function applyOp(op: Op) {
+  async function applyOp(op: Op) {
     switch (op.kind) {
+      case "loadScenario":
+        await loadScenario(op.scenario);
+        break;
+      case "experiment":
+        await runExperiment(op.id);
+        break;
       case "set":
         explain.setProp(op.path, op.value, op.it ?? 1, op.at ?? 0);
         break;
@@ -334,13 +350,122 @@ export function useLesson(lesson: Lesson) {
   }
 
   const ENGINE_OPS = new Set<Op["kind"]>(["set", "call", "scale", "control"]);
-  function applyOps(ops: Op[]) {
+  // Ops apply in order; the asynchronous ones (loadScenario, experiment) hold
+  // the rest of the list until they finish. Callers need not await.
+  async function applyOps(ops: Op[]) {
     if (!ops.length) return;
     // queued changes only take effect while the model steps
     const touchesEngine = ops.some((o) => ENGINE_OPS.has(o.kind));
     if (touchesEngine && lesson.runOnAction !== false && modelReady.value && !isRunning.value)
       explain.start();
-    for (const op of ops) applyOp(op);
+    for (const op of ops) await applyOp(op);
+  }
+
+  // ----- experiments (paper companions) --------------------------------------
+  // An experiment reloads its scenario (a clean baseline), applies its ops,
+  // settles offline (`calculate`), then samples the slow stream for `window_s`
+  // seconds while the model runs live, and evaluates the measures with the
+  // engine's own evaluator — the numbers are the ones scripts/probe_<id>.mjs prints.
+  let scenarioName = lesson.scenario;
+  let runToken = 0;
+  const runs = ref<Record<string, ExperimentRun>>({});
+
+  function waitFor<T>(source: { value: T }, pred: (v: T) => boolean): Promise<void> {
+    return new Promise((resolve) => {
+      if (pred(source.value)) return resolve();
+      const stop = watch(source as any, (v: T) => {
+        if (pred(v)) {
+          stop();
+          resolve();
+        }
+      });
+    });
+  }
+
+  async function loadScenario(name: string, force = false) {
+    if (!force && name === scenarioName && modelReady.value) return;
+    scenarioName = name;
+    statesStore.setCurrent(null);
+    explain.load(name);
+    await waitFor(modelReady, (r) => r === true);
+  }
+
+  // The worker handles messages in order and reports "calculated in … ms" when an
+  // offline calculation ends. Wait for that status (registered after the request,
+  // so an earlier calculation's message cannot satisfy it), then for the state
+  // snapshot requested behind it: that snapshot is the settled model, whatever
+  // other snapshots arrived meanwhile (stopping the loop requests one too).
+  async function settleModel(seconds: number) {
+    explain.calculate(seconds);
+    const calculated = waitFor(status, (m) => /^calculated in/.test(String(m ?? "")));
+    explain.refreshState();
+    await calculated;
+    const before = modelState.value;
+    explain.refreshState();
+    await waitFor(modelState, (s) => s !== before);
+  }
+
+  function patchRun(id: string, patch: Partial<ExperimentRun>) {
+    const cur = runs.value[id] ?? { status: "idle", progress: 0, values: {} };
+    runs.value = { ...runs.value, [id]: { ...cur, ...patch } };
+  }
+
+  async function runExperiment(id: string) {
+    const ex = lesson.experiments?.experiments.find((e) => e.id === id);
+    if (!ex) {
+      console.warn(`lesson "${lesson.id}": unknown experiment "${id}"`);
+      return;
+    }
+    const token = ++runToken;
+    const live = () => token === runToken;
+    try {
+      patchRun(id, { status: "loading", progress: 0, values: {}, error: undefined });
+      await loadScenario(ex.scenario, true);
+      if (!live()) return;
+      explain.stop(); // the rebuild auto-started the loop; settle offline instead
+      patchRun(id, { status: "settling" });
+      for (const op of ex.ops) {
+        if (op.kind === "set" || op.kind === "call" || op.kind === "scale") await applyOp(op);
+      }
+      await settleModel(ex.settle_s);
+      if (!live()) return;
+      const weight = Number((modelState.value as any)?.weight) || 1;
+
+      // sample the slow stream (1 Hz rows keyed by path) for window_s seconds
+      const paths = samplePaths(ex);
+      explain.watchSlow(paths);
+      const sums: Record<string, number> = Object.fromEntries(paths.map((p) => [p, 0]));
+      let n = 0;
+      const need = Math.max(1, Math.round(ex.window_s));
+      patchRun(id, { status: "sampling", progress: 0, weight });
+      explain.start();
+      await new Promise<void>((resolve) => {
+        const stop = watch(slowValues, (rows: any) => {
+          if (!live()) {
+            stop();
+            resolve();
+            return;
+          }
+          if (!Array.isArray(rows)) return;
+          for (const row of rows) {
+            if (!paths.every((p) => typeof row?.[p] === "number")) continue;
+            for (const p of paths) sums[p] += row[p];
+            n++;
+            if (n >= need) break;
+          }
+          patchRun(id, { progress: Math.min(100, Math.round((100 * n) / need)) });
+          if (n >= need) {
+            stop();
+            resolve();
+          }
+        });
+      });
+      if (!live()) return;
+      const averages = Object.fromEntries(paths.map((p) => [p, sums[p] / n]));
+      patchRun(id, { status: "done", progress: 100, values: evaluate(ex, averages, weight), weight });
+    } catch (e) {
+      if (live()) patchRun(id, { status: "error", error: String(e) });
+    }
   }
 
   // ----- loading ----------------------------------------------------------------
@@ -362,6 +487,8 @@ export function useLesson(lesson: Lesson) {
 
   function restart() {
     enterOnReady = true;
+    runToken++; // abandon a running experiment
+    scenarioName = lesson.scenario;
     if (stepIndex.value !== 0) {
       stepIndex.value = 0;
       router.replace({ query: { ...route.query, step: steps[0].id } });
@@ -431,6 +558,9 @@ export function useLesson(lesson: Lesson) {
     applyOps,
     restart,
     toggleRun,
+    runs,
+    runExperiment,
+    loadScenario,
   };
 }
 

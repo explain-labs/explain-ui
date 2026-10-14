@@ -42,6 +42,17 @@ export function useLessonLang() {
   return lang;
 }
 
+// A page may prefer a language (paper companions open in English) without
+// overriding a choice the reader already made in this browser.
+export function preferLang(l: Lang) {
+  try {
+    if (localStorage.getItem(STORAGE_KEY)) return;
+  } catch {
+    /* ignore */
+  }
+  lang.value = l;
+}
+
 // UI chrome strings for the lesson page
 export const UI = {
   previous: { nl: "Vorige", en: "Previous" },
@@ -58,6 +69,24 @@ export const UI = {
   diagram: { nl: "Diagram", en: "Diagram" },
   ventilator: { nl: "Beademing", en: "Ventilator" },
   vitals: { nl: "Monitor", en: "Monitor" },
+  paper: { nl: "Artikel", en: "Paper" },
+  paperCompanion: { nl: "Begeleidende pagina bij het artikel", en: "Paper companion" },
+  run: { nl: "Experiment uitvoeren", en: "Run experiment" },
+  rerun: { nl: "Opnieuw uitvoeren", en: "Run again" },
+  loadingScenario: { nl: "Patiënt laden…", en: "Loading patient…" },
+  settling: { nl: "Instellen…", en: "Settling…" },
+  sampling: { nl: "Meten…", en: "Measuring…" },
+  notRun: { nl: "Nog niet uitgevoerd", en: "Not run yet" },
+  measure: { nl: "Grootheid", en: "Measure" },
+  literature: { nl: "Literatuur", en: "Literature" },
+  thisRun: { nl: "Deze run", en: "This run" },
+  references: { nl: "Referenties", en: "References" },
+  within: { nl: "binnen de tolerantie", en: "within tolerance" },
+  howBuilt: { nl: "Hoe deze patiënt is gebouwd", en: "How this patient was built" },
+  converged: { nl: "geconvergeerd", en: "converged" },
+  incomplete: { nl: "niet geconvergeerd", en: "incomplete" },
+  baselineLabel: { nl: "Uitgangsscenario", en: "Baseline" },
+  outside: { nl: "buiten de tolerantie", en: "outside tolerance" },
   loading: { nl: "Model laden…", en: "Loading model…" },
   pending: { nl: "bezig…", en: "in progress…" },
   closing: { nl: "sluit…", en: "closing…" },
