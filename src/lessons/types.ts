@@ -116,6 +116,17 @@ export interface ExperimentMeasure {
   tol?: number; // absolute tolerance on |engine − paper|
   literature?: { value: string; ref: number | string }[];
 }
+// how a pipeline-built experiment state was produced (summary of the archived
+// spec + build report under papers/<id>/specs/)
+export interface ExperimentBuild {
+  baseline: string;
+  targets: Record<string, number | string>; // the spec's targets as the bot wrote them
+  converged: boolean;
+  iters: number;
+  results: { key: string; target: number; value: number; within: boolean; lever_at_bound?: boolean }[];
+  not_targeted?: string; // the bot's own note on reported values it could not use
+  model?: string; // the language model that wrote the spec
+}
 export interface Experiment {
   id: string;
   title: string;
@@ -123,6 +134,8 @@ export interface Experiment {
   paper_table?: string;
   scenario: string;
   description?: string;
+  spec?: string; // archived spec file (relative to papers/<id>/) when pipeline-built
+  build?: ExperimentBuild;
   ops: Op[];
   settle_s: number;
   window_s: number;

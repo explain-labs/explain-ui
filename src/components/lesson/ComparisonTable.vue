@@ -81,6 +81,24 @@ function litTitle(m: ExperimentMeasure): string {
       />
     </div>
     <p v-if="experiment.description" class="text-xs opacity-80 m-0">{{ experiment.description }}</p>
+    <details v-if="experiment.build" class="text-xs">
+      <summary class="cursor-pointer select-none opacity-80">
+        <i class="pi pi-wrench mr-1"></i>{{ t(UI.howBuilt, lang) }}
+        <span class="opacity-60">· {{ experiment.build.converged ? t(UI.converged, lang) : t(UI.incomplete, lang) }}, {{ experiment.build.iters }} it.</span>
+      </summary>
+      <div class="mt-1 flex flex-col gap-1 pl-2 border-l border-surface-600">
+        <div><span class="opacity-60">{{ t(UI.baselineLabel, lang) }}:</span> {{ experiment.build.baseline }}<span v-if="experiment.build.model" class="opacity-60"> · {{ experiment.build.model }}</span></div>
+        <div class="flex flex-wrap gap-x-3 gap-y-0.5">
+          <span v-for="(v, k) in experiment.build.targets" :key="k" class="tabular-nums"><span class="opacity-60">{{ k }}</span> {{ v }}</span>
+        </div>
+        <div v-if="experiment.build.results.length" class="flex flex-wrap gap-x-3 gap-y-0.5">
+          <span v-for="r in experiment.build.results" :key="r.key" class="tabular-nums" :class="r.within ? 'text-emerald-400' : 'text-amber-400'">
+            {{ r.key }} {{ r.value }}<span class="opacity-60"> → {{ r.target }}</span><span v-if="r.lever_at_bound" class="opacity-60"> (lever at bound)</span>
+          </span>
+        </div>
+        <p v-if="experiment.build.not_targeted" class="m-0 opacity-70">{{ experiment.build.not_targeted }}</p>
+      </div>
+    </details>
     <div v-if="busy" class="flex items-center gap-2 text-xs">
       <ProgressBar :value="status === 'sampling' ? run?.progress ?? 0 : 0" :show-value="false" class="flex-1 h-2" />
       <span class="opacity-70 whitespace-nowrap">{{ statusLabel }}</span>

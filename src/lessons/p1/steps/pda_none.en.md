@@ -1,3 +1,5 @@
-The reference state of Table 3: the duct is closed and a small (1.5 mm) foramen ovale remains. Without a ductal shunt the two ventricles pump the same output and the ratio LVO/RVO is 1.
+The reference state of Table 3: the duct is closed and a small foramen ovale remains. Without a ductal shunt the two ventricles pump the same output and the ratio LVO/RVO is 1.
 
-The paper's conclusions from this comparison, taken from Bischoff et al. [21], are that superior vena cava flow is comparable with and without a left-to-right shunt, that left-ventricular output is higher with a left-to-right shunt, and that LVO/RVO rises with it. Run this state first; the next two steps change only the duct and the pulmonary vascular bed.
+**How this patient was made.** The bot was given the paper's description of the Bischoff case and the "no PDA" column, and chose to start from the engine's Bischoff cohort infant (25 weeks, 720 g, breathing on CPAP), close the duct, set a 2 mm foramen and target the paper's left-ventricular output; it declined right-ventricular output and superior vena cava flow because the calibrator has no lever for them. Those two are therefore results of the run, not targets.
+
+The paper's conclusions from this comparison, taken from Bischoff et al. [21], are that superior vena cava flow is comparable with and without a left-to-right shunt, that left-ventricular output is higher with a left-to-right shunt, and that LVO/RVO rises with it. Run this state first; the next two steps are still produced by hand-set levers on the same infant.
