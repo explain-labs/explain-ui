@@ -2677,7 +2677,7 @@ In the worker, `ModelEngine.tune_model(payload)` performs a live, in-place calib
 - **`DEFAULT_TOL`** (exported) — per-target convergence tolerances on the measured value:
   `map: 3`, `pp: 2`, `cvp: 1.5`, `pap_m: 3`, `pap_s: 4`, `hr: 6`, `co: 0.03`, `spo2: 2`, `po2: 6`, `pco2: 4`, `ph: 0.03`, `be: 1.5`, `blood_volume: 0.02`. Callers may override per target via `tolOverrides`.
 - **`LIVE_TARGETS`** (exported) — the canonical list of live-tunable target names, for validation / UI / docs: `["map", "sys", "dia", "co", "hr", "pap_m", "pap_s", "po2", "spo2", "pco2", "be", "ph", "blood_volume"]`. `sys` and `dia` work only as a pair: `buildLiveControllers` turns them into a pulse-pressure target (`pp = sys − dia`) and, unless `map` is given, `map = dia + pp/3`, as the builder does. One alone is ignored.
-- **`ARTERIAL_EL_MAX`** (`2.0`) and **`DIF_O2_FLOOR`** (`0.1`) (exported) — shared with the builder: the total arterial elastance multiplier the integrator tolerates, and the oxygen lever's diffusion floor.
+- **`ARTERIAL_EL_MAX`** (`6.0`) and **`DIF_O2_FLOOR`** (`0.1`) (exported) — shared with the builder: the total arterial elastance multiplier (size scaling × pulse-pressure lever) the levers may reach, and the oxygen lever's diffusion floor. The limit used to be 2.0, set by explicit integration of the near-merged aortic compartments; **`enableImplicitAorta(model)`** (exported) switches `AA_AAR` and `AAR_AD` to backward-Euler flow (`Resistor.implicit`, see [Resistor](./Resistor.md)), after which term and 0.72 kg patients are stable to at least ×8.
 - **`liveWarm(targets)`** (exported) — seconds between live-tune iterations: 35 when `spo2`/`po2` is a target (oxygen settles slowly; with 15 s an SpO2 tune was measured mid-fall and ended 2–3 points under target), else 15.
 - **`LIVE_READ`** (module-private) — a map from measure key to a reader that pulls the value off the running `model` (e.g. `map` ← `Monitor.minmax.abp_pre_pres_mean`, `sys`/`dia`/`pp` ← `Monitor.minmax.abp_pre_pres_max`/`_min`/their difference, `pap_s` ← `pap_pres_max`, `lvo` ← `Monitor.flows.lvo`, `po2`/`pco2`/`ph`/`be` ← the `AA` compartment, `total_blood_volume` ← `Circulation`). Used by `measureWindow`.
 - **`READ_KEY`** (module-private) — maps a canonical target name to the measure-dict key it reads when they differ: `co → lvo`, `spo2 → spo2_pre`, `blood_volume → total_blood_volume`.
@@ -2705,7 +2705,7 @@ The live levers built by `buildLiveControllers` deliberately use the persistent 
 | `co` | `LV.el_max_factor_ps` and `RV.el_max_factor_ps` | ventricular contractility; reads `lvo` |
 | `hr` | `Heart.heart_rate_ref` | HR reference setpoint |
 | `po2` / `spo2` | `GASEX_LL/RL.dif_o2_factor_ps`, below `DIF_O2_FLOOR` `Shunts.ips_res` | the builder's continuous oxygen lever: alveolar O2 diffusion down to ×0.1, then the intrapulmonary shunt opens in proportion, to a tenth of its value at the start of the tune; one controller, reads `po2` or `spo2_pre` |
-| `sys` + `dia` (→ `pp`, `map`) | `AA`, `AAR`, `AD` `el_base_factor_ps` | large-artery stiffness, as in the builder. It multiplies a built patient's size stiffening (`el_base_factor_scaling_ps`), so its upper bound is `min(1.8, 0.95 · ARTERIAL_EL_MAX / scaling)`: the live tuner keeps a 5 % margin because a 28 wk build at HR 170 ran at ×1.96 but blew up at ×1.99 and did not recover, and a live tune cannot discard a failed run. MAP is tuned by its own lever, which then leaves the large arteries' resistance alone: stability goes roughly with elastance / resistance, and lowering their resistance while stiffening them blew up a term neonate (×0.68 resistance, ×1.63 stiffness) although each alone was stable |
+| `sys` + `dia` (→ `pp`, `map`) | `AA`, `AAR`, `AD` `el_base_factor_ps` | large-artery stiffness, as in the builder. It multiplies a built patient's size stiffening (`el_base_factor_scaling_ps`), so its upper bound is `0.95 · ARTERIAL_EL_MAX / scaling`; the live tuner first calls `enableImplicitAorta` on the running model (a loaded scenario may predate it), because a live tune cannot discard a failed run. MAP is tuned by its own lever, which then leaves the large arteries' resistance alone: stability goes roughly with elastance / resistance, and lowering their resistance while stiffening them blew up a term neonate (×0.68 resistance, ×1.63 stiffness) although each alone was stable |
 | `pap_m` / `pap_s` | pulmonary bed (`scaler_config.blood_pulmonary.resistance`) on `r_factor_ps`, `IPSL`/`IPSR` on `r_factor_scaling_ps` | pulmonary resistance, moving the intrapulmonary shunt with the bed as the builder does, so the shunt's share of pulmonary flow stays put. The lever multiplies each resistor's effective resistance relative to the start of the tune, applied as a delta (BloodVessel multiplies its layers, Resistor adds them); IPSL/IPSR use the scaling layer because Surfactant owns their `r_factor_ps`. `pap_m` wins when both are given |
 | `pco2` | `Breathing.minute_volume_ref` (× multiplier) | spontaneous ventilatory drive; `sign: -1` (↓ drive raises pCO2) |
 | `be` / `ph` | `Blood.set_solute("uma", …)` | Stewart unmeasured anions; `sign: -1` (↑ uma lowers BE/pH) |
@@ -2721,11 +2721,11 @@ oxygen and CO2 levers are the placental maternal pool instead (see [fetal_circul
 
 Two builder-only targets:
 
-- **`sys` + `dia`** (a pair; one alone is ignored with a note): the builder derives the pulse pressure `pp = sys − dia` and, if `map` is absent, `map = dia + pp/3` (both listed under `build_report.derived_targets`). MAP keeps its resistance lever; `pp` gets **large-artery stiffness** — `el_base_factor_ps` on `AA`, `AAR`, `AD`, bounds 0.3–1.8. Stiffening raises systolic and lowers diastolic around a nearly unchanged mean, so the two levers barely interact. The upper bound is numerical, not physiological: the integrator goes unstable at about ×2 total arterial elastance (term; a calibrated 1.08 kg / 28 wk preterm: stable at ×1.99, unstable at ×2.17).
+- **`sys` + `dia`** (a pair; one alone is ignored with a note): the builder derives the pulse pressure `pp = sys − dia` and, if `map` is absent, `map = dia + pp/3` (both listed under `build_report.derived_targets`). MAP keeps its resistance lever; `pp` gets **large-artery stiffness** — `el_base_factor_ps` on `AA`, `AAR`, `AD`, bounds 0.3 to `ARTERIAL_EL_MAX / size factor`. Stiffening raises systolic and lowers diastolic around a nearly unchanged mean, so the two levers barely interact. The MAP tolerance is at most 5 % of the target (±3 mmHg would be 10 % of a 720 g infant's MAP). Every neonatal build integrates the intra-aortic resistors implicitly (`enableImplicitAorta`); before that the integrator failed at about ×2 total arterial elastance, which capped small infants' pulse pressure.
 
-**Arterial stiffness follows size (builder only).** `weight_scale` shrinks arterial volumes but leaves their elastance, so a small baby's arteries would be as compliant as a term baby's: a 1.08 kg / 28 wk build had a pulse pressure of 11 mmHg against a reference of about 15–27. Measured aortic pulse-wave velocity falls far less with size than vessel volume does (term ~4.2–4.6 m/s, preterm at 32 wk corrected ~3.2 m/s), and preterm arteries are intrinsically stiffer than term ones ([Tauzin et al., Pediatr Res 2006](https://www.nature.com/articles/pr2006354)). By Bramwell-Hill (PWV² = V·E/ρ) a roughly constant PWV with V ∝ W needs E to rise as W falls. The builder sets `el_base_factor_scaling_ps` on the systemic arteries (`AA`, `AAR`, `AD`, `RLB`, `RUB`, `*_ART`) to **(W/W0)^-0.5**, where W0 is the baseline's weight. On the 1.08 kg case that is ×1.81: implied PWV 0.74 of term, matching the measured preterm/term ratio of 0.70–0.76. Without a pressure-pair target the pulse pressure then lands at about 16–18 mmHg, up from 11. It depends on heart rate: about 16 at the ~170/min an untargeted build settles at, about 18 with HR 158 targeted.
+**Arterial stiffness follows size (builder only).** `weight_scale` shrinks arterial volumes but leaves their elastance, so a small baby's arteries would be as compliant as a term baby's: a 1.08 kg / 28 wk build had a pulse pressure of 11 mmHg against a reference of about 15–27. Measured aortic pulse-wave velocity falls far less with size than vessel volume does (term ~4.2–4.6 m/s, preterm at 32 wk corrected ~3.2 m/s), and preterm arteries are intrinsically stiffer than term ones ([Tauzin et al., Pediatr Res 2006](https://www.nature.com/articles/pr2006354)). By Bramwell-Hill (PWV² = V·E/ρ) a roughly constant PWV with V ∝ W needs E to rise as W falls. The builder sets `el_base_factor_scaling_ps` on the systemic arteries (`AA`, `AAR`, `AD`, `RLB`, `RUB`, `*_ART`) to **(W/W0)^-0.5**, where W0 is the term reference weight 3.545 kg (not the baseline's, so an already-small baseline made before this rule, such as `bischoff_cohort` or `preterm_*wk`, is sized too; the factor is set absolutely, so a baseline that already carries it is unchanged). On the 1.08 kg case that is ×1.81: implied PWV 0.74 of term, matching the measured preterm/term ratio of 0.70–0.76. Without a pressure-pair target the pulse pressure then lands at about 16–18 mmHg, up from 11. It depends on heart rate: about 16 at the ~170/min an untargeted build settles at, about 18 with HR 158 targeted.
 
-The exponent is also the ceiling of what the model can integrate. Exponents 0.75 and 1 (×2.44, ×3.28 at 1.08 kg) go unstable, so the factor is capped at ×1.9, which binds below about 0.98 kg (a 0.64 kg / 24 wk baby would need ×2.35; the build notes say so). The pulse-pressure lever multiplies on top (`BloodVessel` composes elastance factors multiplicatively), so its upper bound is `min(1.8, 2.0 / size factor)`. A 28 wk patient therefore starts at a pulse pressure of about 16–18, and a sys/dia target lifts it to about 20 at most: a 48/24 target ends with the lever at its bound (×1.10) at 20.2. The upper half of the preterm reference range needs a smaller `modeling_stepsize`. Term builds (no weight change), fetal mode and the live `ModelScaler.scale_to_weight` are unchanged. As a backstop, a build whose final pressures are non-finite, negative diastolic, systolic above 250 or output above 10 L/min is refused (exit 1) instead of emitted.
+The factor is capped at ×2.5 (0.57 kg), the edge of the pulse-wave-velocity data it extrapolates; the old ×1.9 cap was the explicit integrator's limit and is gone with the implicit aortic resistors. The pulse-pressure lever multiplies on top (`BloodVessel` composes elastance factors multiplicatively), so its upper bound is `ARTERIAL_EL_MAX / size factor`. On the 0.72 kg Bischoff infant a 45/25 target now converges (it stopped at about 35/24 with the lever at the old bound). Term builds (no weight change), fetal mode and the live `ModelScaler.scale_to_weight` are unchanged. As a backstop, a build whose final pressures are non-finite, negative diastolic, systolic above 250 or output above 10 L/min is refused (exit 1) instead of emitted.
 - **`rvo`** (L/min) — right-ventricular output via `Shunts.diameter_fo`. With the duct closed the two
   outputs differ only by the atrial shunt (RVO = LVO + Q_fo), so the foramen is the one lever that sets
   RVO given LVO; a given `fo_mm` is the starting point, a closed foramen starts at 0.25 mm. Tolerance
@@ -8787,6 +8787,29 @@ p_eff = p + (factor − 1)·p + (factor_ps − 1)·p + (factor_scaling_ps − 1)
 - Set `no_back_flow` for valve-like behaviour (or use `HeartValve`).
 - `r_factor_ps` is the standard lever for vasoconstriction/dilation (PVR/SVR adjustments by ANS and
   scenario tuning); `r_factor_scaling_ps` is written by `ModelScaler` for weight-based scaling.
+
+## Implicit (backward-Euler) flow — `implicit`
+
+`implicit` (default `false`) switches the flow of one resistor from the explicit `Δp / R` to the
+backward-Euler solution for the two compartments it joins, `Δp / (R + dt·(E_from + E_to))`, by
+adding `dt·(E_from + E_to)` to `r_for_eff` / `r_back_eff` each step (`E` = the compartment's current
+`el_eff`, or a time-varying elastance's instantaneous value). It is a numerical scheme, not a
+change of the resistor law: both forms are first-order accurate and agree when `R >> dt·ΣE`.
+
+Why it exists: explicit integration of two capacitances joined by a small resistance is stable
+only while `dt·(E_from + E_to)/R < 2`, and for three equal capacitances in a row (the aorta AA →
+AAR → AD, joined by `AA_AAR`, `AAR_AD`, R ≈ 70 mmHg·s/L) only below 4/3. Stiffening the large
+arteries, which a small infant's pulse pressure needs, crosses that limit at about ×2–3. Measured
+on the 0.72 kg Bischoff infant (AA pressure range, mmHg):
+
+| stiffness | explicit | implicit `AA_AAR`, `AAR_AD` | explicit, half time step |
+|---|---|---|---|
+| ×1.8 | 23.6–35.7 | 23.6–35.8 | 23.7–35.7 |
+| ×3 | unstable | 21.4–39.8 | 21.5–39.6 |
+| ×5 | unstable | 18.4–44.7 | 18.2–44.4 |
+
+The patient builder and the live tuner set it on `AA_AAR` and `AAR_AD`; bundled scenarios do not
+(yet), so their numbers are unchanged.
 
 ````
 
@@ -14876,6 +14899,14 @@ export class Resistor extends BaseModelClass {
     this.comp_to = ""; // holds the name of the downstream component
     this.no_flow = false; // flags whether flow is allowed across this resistor
     this.no_back_flow = false; // flags whether backflow is allowed across this resistor
+    // Numerical scheme, not physiology: when true the flow is computed backward-Euler for the pair
+    // of compartments this resistor joins, flow = Δp / (R + dt·(E_from + E_to)), instead of the
+    // explicit Δp / R. Explicit integration of two capacitances joined by a small resistance is
+    // stable only while dt·(E_from + E_to)/R < 2 (< 4/3 for three equal ones in a row, as the
+    // aorta AA–AAR–AD is); the implicit form is stable for any elastance and equals the explicit
+    // one to first order when R >> dt·ΣE. Default false: only resistors that join near-merged
+    // compartments need it (see docs/Resistor.md).
+    this.implicit = false;
     this.p1_ext = 0.0; // external pressure on the inlet (mmHg)
     this.p2_ext = 0.0; // external pressure on the outlet (mmHg)
     this.fixed_composition = false;
@@ -14939,6 +14970,22 @@ export class Resistor extends BaseModelClass {
       // reset the non persistent factors
       this.r_factor = 1.0;
       this.r_k_factor = 1.0;
+
+      // backward-Euler pair correction (see `implicit` above)
+      if (this.implicit) {
+        const k = this._t * (this._elastance(this._comp_from) + this._elastance(this._comp_to));
+        this.r_for_eff += k;
+        this.r_back_eff += k;
+      }
+  }
+
+  // current elastance of a compartment for the implicit correction: a capacitance's el_eff, or a
+  // time-varying elastance's instantaneous value between its minimum and maximum
+  _elastance(c) {
+    if (!c) return 0.0;
+    if (typeof c.el_max_eff === "number" && typeof c.act_factor === "number")
+      return c.el_min_eff + (c.el_max_eff - c.el_min_eff) * c.act_factor;
+    return typeof c.el_eff === "number" ? c.el_eff : 0.0;
   }
 
   calc_flow() {

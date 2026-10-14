@@ -377,9 +377,9 @@ minute with an oxygen target; the sim resumes at the new operating point). Targe
 `co` (L/min), `hr`, `pap_m` / `pap_s` (mean / systolic PA pressure), `po2`, `spo2`, `pco2`,
 `be`, `ph`, `blood_volume` (L). These move the same levers the patient builder uses: an SpO2
 target on a patient already on high oxygen desaturates through intrapulmonary shunt, a PAP
-target moves the pulmonary vessels together with that shunt, and a small baby's pulse pressure
-has a ceiling (about 17 mmHg at 28 weeks; the result says INCOMPLETE when a target is out of
-reach).
+target moves the pulmonary vessels together with that shunt. The result says INCOMPLETE when a
+target is out of reach. (Small babies' pulse pressure is no longer capped: the large arteries can
+be stiffened as far as the target needs.)
 
 ```explain-command
 {"op":"tune","changes":[{"target":"co","value":0.25}],"reason":"set cardiac output to 0.25 L/min"}
