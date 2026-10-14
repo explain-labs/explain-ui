@@ -105,8 +105,37 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 | `{ kind: "calculate", seconds }` | Fast-forward model time synchronously |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |
 | `{ kind: "restart" }` | Rebuild the starting state and return to step 1 |
+| `{ kind: "loadScenario", scenario }` | Load another bundled scenario; the rest of the op list waits for the rebuild |
+| `{ kind: "experiment", id }` | Run a paper companion's experiment (see below) |
 
-## Shared intro and diagram legend
+## Paper companions (`kind: "paper"`, `/paper/<id>`)
+
+A paper companion is a lesson that explains a published paper and lets the reader **run its
+validation experiments**. It is served at **`/paper/<id>`** and is **public** (no login): the engine
+runs in the browser from static scenario files and the page uses no account-scoped API. The working
+example is `src/lessons/p1/` for the cardiovascular paper.
+
+What a companion adds to a lesson:
+
+| Field | Meaning |
+|---|---|
+| `kind: "paper"` | Registers the lesson as a companion. `/lesson/<id>` redirects to `/paper/<id>`; MainPage lists it under "Paper companions" |
+| `experiments` | The paper's experiments file, imported from the engine: `import experiments from "@explain/papers/p1/experiments.json"`. The same file `node scripts/probe_p1.mjs` runs headlessly, so the page shows the probe's numbers |
+| `references` | `{ id, text, url? }[]`, shown collapsible under the step text and cited as `[n]` in the markdown (the P1 lesson builds it from `experiments.references`) |
+| `layout.reading` | A wider text column |
+| step `experiment` | An experiment id: the step shows a `ComparisonTable` (literature · paper · this run) with a **Run** button |
+| step `chart` | `{ paths, title?, yMin?, yMax?, fill?, windowS? }`: a fixed-series `LessonChart` under the monitor (e.g. the ductal velocity with a Doppler-like fill) |
+
+Two new ops: `{ kind: "loadScenario", scenario }` switches scenario mid-lesson (the op list waits for
+the rebuild), and `{ kind: "experiment", id }` runs an experiment. A run (`useLesson.runExperiment`)
+**reloads the experiment's scenario** for a clean baseline, applies its `set`/`scale`/`call` ops,
+settles offline with `calculate` (the page waits for a state request queued behind it, which the
+worker answers only when the calculation is done), then registers the sampled paths on the slow
+watchlist, starts the loop and averages `window_s` one-second rows while the reader watches the model
+run. The measures are evaluated with the engine's `papers/evaluate.js` (`evaluate`, `samplePaths`,
+`fmt`, `withinTolerance`; typed in `src/types/explain-papers.d.ts`). Results live in `runs` keyed by
+experiment id and survive step navigation; `restart` abandons a running experiment.
+
 
 `src/lessons/_shared/intro.ts` exports `introSteps()`: three "how to read Explain" steps. Their markdown is in `_shared/steps/`. A lesson prepends them with `steps: [...introSteps(), …]`.
 

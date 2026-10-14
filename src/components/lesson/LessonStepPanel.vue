@@ -2,6 +2,8 @@
 import { inject } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
+import { computed } from "vue";
+import ComparisonTable from "@/components/lesson/ComparisonTable.vue";
 import { LessonKey } from "@/composables/useLesson";
 import { t, UI } from "@/lessons/i18n";
 import type { LessonAction } from "@/lessons/types";
@@ -10,6 +12,17 @@ import type { LessonAction } from "@/lessons/types";
 // optional image, action buttons and prev/next. Lives outside the page's
 // v-if="modelReady" so the text doesn't flicker when the model rebuilds.
 const rt = inject(LessonKey)!;
+
+// paper companions: the step's experiment (comparison table + Run) and the
+// reference list, cited as [n] in the text
+const experiment = computed(() => {
+  const id = rt.step.value.experiment;
+  return id ? rt.lesson.experiments?.experiments.find((e) => e.id === id) : undefined;
+});
+const references = computed(() => rt.lesson.experiments?.references ?? {});
+const anyRunning = computed(() =>
+  Object.values(rt.runs.value).some((r) => ["loading", "settling", "sampling"].includes(r.status)),
+);
 
 // Progress (0–100) to show inside an action button: the first control it
 // drives that is currently moving in the button's own direction ("off" ops
@@ -50,6 +63,16 @@ function actionProgress(a: LessonAction): number | undefined {
         </figcaption>
       </figure>
 
+      <ComparisonTable
+        v-if="experiment"
+        :experiment="experiment"
+        :run="rt.runs.value[experiment.id]"
+        :references="references"
+        :lang="rt.lang.value"
+        :running="anyRunning"
+        @run="rt.runExperiment(experiment.id)"
+      />
+
       <div v-if="rt.step.value.actions?.length" class="flex flex-wrap gap-2">
         <!-- while the control this button drives is moving, the button itself
              fills up as a progress bar and shows the percentage -->
@@ -77,6 +100,17 @@ function actionProgress(a: LessonAction): number | undefined {
       </div>
     </div>
 
+    <details v-if="rt.lesson.references?.length" class="text-xs opacity-80">
+      <summary class="cursor-pointer select-none">{{ t(UI.references, rt.lang.value) }}</summary>
+      <ol class="refs mt-1">
+        <li v-for="r in rt.lesson.references" :key="r.id" :value="r.id">
+          <span class="opacity-60 mr-1">[{{ r.id }}]</span>
+          <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.text }}</a>
+          <span v-else>{{ r.text }}</span>
+        </li>
+      </ol>
+    </details>
+
     <div class="flex items-center justify-between gap-2 border-t border-surface-700 pt-3">
       <Button
         :label="t(UI.previous, rt.lang.value)"
@@ -100,6 +134,19 @@ function actionProgress(a: LessonAction): number | undefined {
 </template>
 
 <style scoped>
+.refs {
+  max-height: 10rem;
+  overflow-y: auto;
+  padding-left: 0;
+  list-style: none;
+}
+.refs li {
+  margin: 0.15rem 0;
+}
+.refs a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 /* progress fill inside an action button: a darker band growing left→right,
    eased over the ~1 Hz value updates */
 .action-fill {

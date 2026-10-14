@@ -3,7 +3,7 @@ import MainPage from "@/pages/MainPage.vue";
 import LoginPage from "@/pages/LoginPage.vue";
 import RegisterPage from "@/pages/RegisterPage.vue";
 import { useAuthStore } from "@/stores/auth";
-import { hasLesson } from "@/lessons/index";
+import { getLesson, hasLesson } from "@/lessons/index";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -16,6 +16,14 @@ const router = createRouter({
       name: "lesson",
       component: () => import("@/pages/LessonPage.vue"),
       meta: { requiresAuth: true },
+    },
+    // Paper companions (src/lessons/<id>/ with kind "paper") are public: the
+    // engine runs in the browser from static scenario files and the page uses
+    // no account-scoped API, so readers of a paper need no login.
+    {
+      path: "/paper/:id",
+      name: "paper",
+      component: () => import("@/pages/LessonPage.vue"),
     },
   ],
 });
@@ -47,6 +55,11 @@ router.beforeEach(async (to) => {
     const id = String(to.params.id);
     if (own && id !== own) return hasLesson(own) ? { name: "lesson", params: { id: own } } : { name: "main" };
     if (!hasLesson(id)) return { name: "main" };
+    if (getLesson(id)?.kind === "paper") return { name: "paper", params: { id } };
+  }
+  if (to.name === "paper") {
+    const id = String(to.params.id);
+    if (getLesson(id)?.kind !== "paper") return auth.isAuthenticated ? { name: "main" } : { name: "login" };
   }
   return true;
 });

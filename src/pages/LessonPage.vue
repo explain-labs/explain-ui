@@ -12,6 +12,7 @@ import Diagram from "@/components/host/Diagram.vue";
 import Monitor from "@/components/host/Monitor.vue";
 import NumericReadoutPanel from "@/components/numerics/NumericReadoutPanel.vue";
 import LessonStepPanel from "@/components/lesson/LessonStepPanel.vue";
+import LessonChart from "@/components/lesson/LessonChart.vue";
 import LessonControls from "@/components/lesson/LessonControls.vue";
 import DiagramLegend from "@/components/lesson/DiagramLegend.vue";
 import Sle6000Screen from "@/components/host/sle6000/Sle6000Screen.vue";
@@ -20,7 +21,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { MonitorGroup } from "@/stores/monitors";
 import { LessonKey, useLesson } from "@/composables/useLesson";
 import { getLesson } from "@/lessons/index";
-import { LANGS, t, UI } from "@/lessons/i18n";
+import { LANGS, preferLang, t, UI } from "@/lessons/i18n";
 
 // Guided lesson page (/lesson/:id) for nicupicu.nl. Step text with the
 // interventions below it on the left, the diagram full-height in the centre,
@@ -37,6 +38,12 @@ provide(LessonKey, rt);
 const { lang, modelReady, isRunning, error, step } = rt;
 
 const leftTab = ref<"lesson" | "interventions" | "patient">("lesson");
+const isPaper = lesson.kind === "paper";
+if (isPaper) preferLang("en");
+// paper companions read like a paper: a wider text column
+const gridCols = lesson.layout?.reading
+  ? "lg:grid-cols-[minmax(380px,1.35fr)_minmax(0,1.45fr)_minmax(340px,1.1fr)]"
+  : "lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.7fr)_minmax(340px,1.1fr)]";
 const showInterventions = lesson.controls.length > 0;
 const tasks = lesson.layout?.tasks;
 const { centreTabs, centreTab } = rt;
@@ -85,7 +92,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     >
       <img src="/logo/explain-labs-logo.svg" alt="Explain Labs" class="h-10 w-auto shrink-0" />
       <div class="min-w-0 flex flex-col leading-tight">
-        <span class="font-semibold text-surface-100 truncate">{{ t(lesson.title, lang) }}</span>
+        <span class="font-semibold text-surface-100 truncate">
+          <span v-if="isPaper" class="text-xs uppercase tracking-wide opacity-60 mr-2">{{ t(UI.paperCompanion, lang) }}</span>
+          {{ t(lesson.title, lang) }}
+        </span>
         <span v-if="lesson.subtitle" class="text-xs opacity-60 truncate">{{ t(lesson.subtitle, lang) }}</span>
       </div>
 
@@ -157,15 +167,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     </header>
 
     <!-- body: step text · live model · numerics + interventions -->
-    <main
-      class="flex-1 min-h-0 grid gap-4 p-4 grid-cols-1 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.7fr)_minmax(340px,1.1fr)]"
-    >
+    <main class="flex-1 min-h-0 grid gap-4 p-4 grid-cols-1" :class="gridCols">
       <!-- left: lesson text and interventions as two tabs -->
       <aside class="min-h-0 lg:overflow-hidden">
         <Tabs v-model:value="leftTab" class="lesson-tabs h-full flex flex-col">
           <TabList>
             <Tab value="lesson">
-              <i class="pi pi-book mr-2"></i>{{ t(UI.lesson, lang) }}
+              <i :class="isPaper ? 'pi pi-file mr-2' : 'pi pi-book mr-2'"></i>{{ t(isPaper ? UI.paper : UI.lesson, lang) }}
             </Tab>
             <Tab v-if="tasks" value="patient">
               <i class="pi pi-user mr-2"></i>{{ t(UI.patient, lang) }}
@@ -244,6 +252,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             :show-window-select="false"
             :highlight="rt.monitorHighlight.value"
           />
+          <LessonChart v-if="step.chart" :chart="step.chart" />
           <NumericReadoutPanel
             v-for="g in groups"
             :key="g.key"
