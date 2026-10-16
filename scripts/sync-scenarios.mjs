@@ -5,8 +5,10 @@
 // submodule), the canonical scenarios live at explain-engine/model_definitions/.
 // The Vue app still serves them statically from public/model_definitions/, so
 // this script copies them across. It is:
-//   - additive: it copies/overwrites canonical files but NEVER deletes extras,
-//     so developer/user snapshots written into public/ persist.
+//   - additive: it copies/overwrites canonical files but never deletes extras,
+//     so developer/user snapshots written into public/ persist. The one
+//     exception: copies of scenarios the engine moved to model_definitions/archive/
+//     are removed.
 //   - idempotent: safe to run on every `predev` / `prebuild`.
 //
 // index.json is rebuilt as the sorted union of every scenario basename present
@@ -36,6 +38,19 @@ for (const f of fs.readdirSync(srcDir)) {
   copied++;
 }
 
+// scenarios the engine has moved to model_definitions/archive/ are no longer served: drop their
+// earlier copies (the copy step is additive, so they would otherwise linger in public/). Only names
+// present in the archive are removed; developer/user snapshots are untouched.
+const archiveDir = path.join(srcDir, "archive");
+let archived = 0;
+if (fs.existsSync(archiveDir)) {
+  for (const f of fs.readdirSync(archiveDir)) {
+    if (!f.endsWith(".json") || fs.existsSync(path.join(srcDir, f))) continue;
+    const served = path.join(dstDir, f);
+    if (fs.existsSync(served)) { fs.rmSync(served); archived++; }
+  }
+}
+
 const names = fs
   .readdirSync(dstDir)
   .filter((f) => f.endsWith(".json") && f !== "index.json")
@@ -43,4 +58,4 @@ const names = fs
   .sort();
 fs.writeFileSync(path.join(dstDir, "index.json"), JSON.stringify(names, null, 2) + "\n");
 
-console.log(`[sync-scenarios] copied ${copied} canonical scenario(s); index lists ${names.length}.`);
+console.log(`[sync-scenarios] copied ${copied} canonical scenario(s); removed ${archived} archived; index lists ${names.length}.`);
