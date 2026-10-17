@@ -251,18 +251,20 @@ function nudge(task: CommonTask, dir: NudgeDirection) {
       pendingAt[`${task.id}:${inst}`] = Date.now();
     }
   }
-  refreshState();
-  // setProp/call land on the TaskScheduler (a setProp tweens over 1 s): fetch the
-  // state again once they have, so the snapshot catches up with `pending`
-  if (task.lever.kind !== "scale") setTimeout(refreshState, 1200);
+  // a scale posts a fresh state snapshot itself (ModelEngine.scale_model). setProp/call
+  // land on the TaskScheduler (a setProp tweens over 1 s): fetch the state now and
+  // again once they have, so the snapshot catches up with `pending`
+  if (task.lever.kind !== "scale") {
+    refreshState();
+    setTimeout(refreshState, 1200);
+  }
 }
 
 function resetScale(task: CommonTask) {
   if (task.lever.kind !== "scale") return;
   const groups = Array.isArray(task.lever.group) ? task.lever.group : [task.lever.group];
-  for (const g of groups) scale(g, 1.0);
+  for (const g of groups) scale(g, 1.0); // each scale posts a fresh state snapshot
   factors[task.id] = 1.0;
-  refreshState();
 }
 </script>
 
