@@ -7,7 +7,8 @@ import Panel from "primevue/panel";
 import { useExplain } from "@/composables/useExplain";
 
 // Allometric / group scaling via the engine's ModelScaler (Model.scaleModel).
-const { scale, refreshState } = useExplain();
+// scale() posts a fresh state snapshot itself (ModelEngine.scale_model), so no refreshState here
+const { scale } = useExplain();
 
 const GROUPS = [
   "weight_scale",
@@ -27,11 +28,9 @@ const factor = ref<number>(1.0);
 
 function apply() {
   scale(group.value, factor.value);
-  refreshState();
 }
 function reset() {
   scale("reset");
-  refreshState();
 }
 </script>
 

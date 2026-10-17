@@ -19,6 +19,11 @@ import type {
 // Assets.load, Graphics build-then-stroke, Container.tint for recolour).
 
 const DEG = Math.PI / 180;
+// idle throttling of the Pixi ticker (see DiagramRenderer.lastActiveMs): after IDLE_AFTER_MS without
+// realtime frames or pointer activity the stage redraws at IDLE_FPS, so edits made from the panels
+// still show within a fraction of a second
+const IDLE_FPS = 4;
+const IDLE_AFTER_MS = 1500;
 
 interface CompNode {
   x: number;
@@ -160,6 +165,10 @@ export class DiagramRenderer implements RendererAdapter {
   private highlightNames: string[] = [];
   private highlightTexts = new Map<string, Text>();
   private highlightTick: (() => void) | null = null;
+  // idle throttling: Pixi redraws the whole stage on every ticker frame. While nothing moves (no
+  // realtime frames, no pointer activity, no highlight) the ticker drops to IDLE_FPS, so a paused
+  // or idle diagram stops costing a full 60 fps redraw; any activity restores full rate
+  private lastActiveMs = 0;
   private dragging: string | null = null;
   private dragOffsetX = 0;
   private dragOffsetY = 0;
@@ -196,6 +205,17 @@ export class DiagramRenderer implements RendererAdapter {
     });
     this.el.appendChild(this.app.canvas);
     this.app.stage.sortableChildren = true;
+
+    // idle throttling (see lastActiveMs)
+    this.wake();
+    this.app.ticker.add(() => {
+      const t = this.app?.ticker;
+      if (!t || t.maxFPS === IDLE_FPS || this.highlightTick) return;
+      if (performance.now() - this.lastActiveMs > IDLE_AFTER_MS) t.maxFPS = IDLE_FPS;
+    });
+    for (const ev of ["pointerdown", "pointermove", "wheel", "keydown"]) {
+      this.el.addEventListener(ev, () => this.wake(), { passive: true });
+    }
 
     // stage-level pointer handling for editor drag
     this.app.stage.eventMode = "static";
@@ -857,8 +877,16 @@ export class DiagramRenderer implements RendererAdapter {
     for (const c of comps) this.animIndex[c.name] = c.index;
   }
 
+  /** Back to full frame rate (pointer activity, realtime frames, layout or edit changes). */
+  wake() {
+    this.lastActiveMs = performance.now();
+    const t = this.app?.ticker;
+    if (t && t.maxFPS !== 0) t.maxFPS = 0; // 0 = no cap (display rate)
+  }
+
   onFrame(_chart: ChartFrame | null, anim: AnimFrame | null) {
     if (!this.ready || !anim) return;
+    this.wake();
     const frame = anim.frame;
     // After a (re)build the reader hands over the fresh, still zero-filled anim
     // buffer once. Real frames are packed after model steps (time > 0); an
@@ -996,6 +1024,7 @@ export class DiagramRenderer implements RendererAdapter {
   // recompute positions/paths when the canvas resizes
   private onResize() {
     if (!this.app || !this.ready) return;
+    this.wake();
     this.recomputeGeometry();
     this.drawBackdrop();
     this.drawGrid();

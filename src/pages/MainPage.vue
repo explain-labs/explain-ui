@@ -54,7 +54,7 @@ async function logout() {
   await auth.logout();
   router.push({ name: "login" });
 }
-const { model, status, modelReady, isRunning, error, load, loadFromObject, start, stop, calculate, slowValues, modelState } =
+const { model, status, modelReady, isRunning, realtimeFactor, error, load, loadFromObject, start, stop, calculate, slowValues, modelState } =
   useExplain();
 const statesStore = useStatesStore();
 const monitorsStore = useMonitorsStore();
@@ -714,6 +714,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           :disabled="!modelReady"
           @click="toggleRun"
         />
+        <!-- the simulation can't keep up with the wall clock on this machine -->
+        <span
+          v-if="isRunning && realtimeFactor < 0.95"
+          v-tooltip.top="'The simulation runs slower than real time on this device'"
+          class="text-xs text-amber-400 tabular-nums"
+        >{{ Math.round(realtimeFactor * 100) }}% speed</span>
         <InputGroup style="width: auto" data-tour="run.fastforward">
           <Button
             v-tooltip.top="'Fast forward'"

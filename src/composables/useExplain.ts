@@ -11,6 +11,7 @@ let _model: any = null;
 const status = ref("");
 const modelReady = ref(false);
 const isRunning = ref(false); // realtime loop active (rt_start..rt_stop)
+const realtimeFactor = ref(1); // simulated / wall time of the realtime loop (~1 s average); < 1 = behind
 const error = ref<string | null>(null);
 const modelState = shallowRef<any>(null);
 const slowValues = shallowRef<any>(null); // latest `rts` slow-stream payload
@@ -40,6 +41,10 @@ function ensure() {
   });
   _model.on("rt_start", () => {
     isRunning.value = true;
+    realtimeFactor.value = 1;
+  });
+  _model.on("rt_perf", (f: number) => {
+    if (Number.isFinite(f)) realtimeFactor.value = f;
   });
   _model.on("rt_stop", () => {
     isRunning.value = false;
@@ -61,6 +66,7 @@ export function useExplain() {
     status,
     modelReady,
     isRunning,
+    realtimeFactor,
     error,
     modelState,
     slowValues,
