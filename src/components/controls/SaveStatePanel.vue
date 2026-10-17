@@ -9,6 +9,7 @@ import { useExplain } from "@/composables/useExplain";
 import { useModelStore } from "@/stores/model";
 import { useStatesStore } from "@/stores/states";
 import { useAuthStore } from "@/stores/auth";
+import { scenarioFile } from "@/services/scenarioFile";
 
 // Snapshot the engine state. Two destinations share the same capture flow:
 //  • "file"  — a named scenario file in public/model_definitions/ (dev /api/save-snapshot)
@@ -79,19 +80,10 @@ watch(savedState, async (s) => {
   const target = pendingTarget.value;
   pendingName.value = null;
 
-  // Wrap the raw engine state as a complete, reloadable scenario file: state
-  // under model_definition, plus the diagram/animation/configuration from the
-  // currently-loaded file (those don't live in the engine state).
+  // Wrap the raw engine state as a complete, reloadable scenario file, keeping every
+  // other top-level key of the currently-loaded file (see services/scenarioFile.ts).
   const base = (model as any).loadedFileData || {};
-  const file = {
-    name,
-    user: base.user,
-    description: base.description,
-    diagram_definition: base.diagram_definition,
-    animation_definition: base.animation_definition,
-    configuration: base.configuration,
-    model_definition: s,
-  };
+  const file = scenarioFile(base, name, s);
 
   if (target === "cloud") {
     const ok = await statesStore.saveCurrent({

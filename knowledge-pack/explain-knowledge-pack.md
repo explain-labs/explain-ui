@@ -9951,13 +9951,20 @@ the other modes.
 
 Switching the ventilator off by any route (`switch_ventilator(false)`) is the device's Standby.
 
-**Generic calls.** The generic `switch_ventilator(true)`, `set_pc`, `set_psv`, `set_simv` and
-`set_cpap` still work underneath. Resuscitation and the scripts use them.
+**Generic calls.** The generic `switch_ventilator(true)`, `set_pc`, `set_psv`, `set_simv`,
+`set_cpap`, `set_vc`, `set_prvc` and `set_fio2` still work underneath. Resuscitation and the scripts use them.
 - After each such call, `_sync_from_generic` mirrors the mode and the settings into `sle_mode` and
   `sle_*`, clamped to the device ranges. So the screen shows what the ventilator is doing, for
   example during CPR.
 - `PC` maps to CMV, or to PTV when synchronised. `PS` maps to PSV.
 - `set_hfov` maps to HFOV and `set_hfov_cmv` to HFOV+CMV.
+- `set_vc` and `set_prvc` (the SLE6000 has neither) show as CMV, or PTV when synchronised, with
+  VTV set to the tidal volume: the device's form of volume-targeted mandatory ventilation. This is
+  display only; the generic ventilator keeps running VC/PRVC until the next `sle_apply`.
+- A generic `set_fio2` (Resuscitation, scripts, the bot) moves the O2 control (`sle_o2`) with it
+  and, like turning the O2 control, ends a running O2 Boost. The device's own O2 delivery (the O2
+  control, O2 Boost, OxyGenie) goes through `_deliver_fio2`, which sets the fresh gas only, so a
+  boost delivers above the set O2 without changing it.
 - The next `sle_apply` drives the generic ventilator from the device settings again.
 
 ## Modes → generic ventilator
