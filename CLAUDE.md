@@ -15,7 +15,7 @@ The Vue layer bootstraps the engine through `src/composables/useExplain.ts` — 
 Two threads, one wire protocol:
 
 - **`explain-engine/Model.js`** — main-thread wrapper (extends `ModelEmitter`). Spawns the worker, exposes the public API (`build`/`load`/`start`/`stop`/`calculate`/`setPropValue`/`callModelFunction`/`watchModelProps`/`scaleModel`/…), and re-emits worker responses as events you subscribe to with `explain.on(event, handler)`.
-- **`explain-engine/ModelEngine.js`** — the Web Worker. Owns the live `model` object (`{ models: {…}, modeling_stepsize, model_time_total, ncc_* counters, … }`), the build/step loop, and the GET/POST/PUT/DELETE message router (`self.onmessage`).
+- **`explain-engine/ModelEngine.js`** — the Web Worker. Owns the live `model` object (`{ models: {…}, modeling_stepsize, model_time_total, … }`), the build/step loop, and the GET/POST/PUT/DELETE message router (`self.onmessage`).
 
 **Message envelope** (both directions): `{ type: "GET"|"PUT"|"POST"|"DELETE", message: string, payload: any }`. `Model.send()` posts to the worker; the worker `_send()`/`postMessage()` back. `Model.receive()` maps inbound types (`state`, `data`, `rtf`/`rts` realtime fast/slow, `model_ready`, `status`, `error`, …) to emitter events. Payloads crossing the boundary are JSON-stringified for `build`/`property_value`/`call` and re-parsed by `_normalize_payload` in the worker.
 
@@ -45,7 +45,7 @@ Core physics params (`el_base`, `u_vol`, `el_k` on capacitances; `r_for`, `r_bac
 - `<p>_factor_ps` — **persistent**; survives steps (user/scenario adjustments).
 - `<p>_factor_scaling_ps` — **persistent scaling**; written by `ModelScaler` for allometric/weight scaling.
 
-Formula (see `Capacitance.calc_elastances`, `Resistor.calc_resistance`): `p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling_ps-1)*p`. When adding a tunable parameter, follow this convention so it composes with interventions and scaling. `ModelScaler` (`explain-engine/helpers/ModelScaler.js`) only ever touches the `*_scaling_ps` layer; `scaleModel(group, factor)` in the API routes to its many `scale_*` methods via the big `switch` in `ModelEngine.scale_model`. `reset` restores `model.weight = model._baseline_weight`.
+Formula (see `Capacitance.calc_elastances`, `Resistor.calc_resistance`): `p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling_ps-1)*p`. Exceptions: `BloodVessel` (most of the circulation) and `HeartChamber` compose their layers **multiplicatively** (BloodVessel also multiplies in the ANS and viscosity/viscosity_ref) — see the engine's `docs/ARCHITECTURE.md`. When adding a tunable parameter, follow this convention so it composes with interventions and scaling. `ModelScaler` (`explain-engine/helpers/ModelScaler.js`) writes the `*_scaling_ps` layer for elastance/resistance/unstressed-volume scaling, but its volume and weight scaling change raw `vol`/`u_vol`, and the Calibrator also writes `r_factor_scaling_ps` (IPSL/IPSR); `scaleModel(group, factor)` in the API routes to its many `scale_*` methods via the big `switch` in `ModelEngine.scale_model`. `reset` restores `model.weight = model._baseline_weight`.
 
 ## Flow / pressure mechanics
 
@@ -53,12 +53,12 @@ Formula (see `Capacitance.calc_elastances`, `Resistor.calc_resistance`): `p_eff 
 
 ## Cardiac/breathing cycle counters
 
-`Heart` (and ventilator/breathing) drive timing off counters that live on the **engine `model` object**, not the component: `model.ncc_ventricular`, `model.ncc_atrial`, `ncc_breathing_insp/exp`, `ncc_ventilator_insp/exp` (initialized in `build()`). `DataCollector` always watches `Heart.ncc_ventricular`/`Heart.ncc_atrial` for ECG regardless of the user watchlist.
+The cycle counters are fields of the components that drive them: `Heart.ncc_atrial`/`Heart.ncc_ventricular`, and `ncc_insp`/`ncc_exp` on `Breathing` and `Ventilator` (a value of `1` marks the first step of a phase). The engine `model` object holds none. `DataCollector` always watches `Heart.ncc_ventricular`/`Heart.ncc_atrial` for ECG regardless of the user watchlist.
 
 ## DataCollector & TaskScheduler
 
-- **`DataCollector`** keeps two watchlists — fast (`watch_list`, `sample_interval` 0.005 s) and slow (`watch_list_slow`, 1.0 s). Watched props are dot-paths `"Model.prop"` or `"Model.prop.subprop"` resolved against `model.models`. `get_model_data()` drains and clears the buffer. `clean_up()` drops watch entries whose model became disabled.
-- **`TaskScheduler`** runs deferred mutations every `_task_interval` (0.015 s). `setPropValue(prop, value, it, at)` → numeric targets **tween** over `it` seconds after an `at`-second delay (type 0), booleans/strings swap instantly (type 1); `callModelFunction` schedules a method call (type 2). It writes directly to model props, typically a `*_factor_ps` or a base param.
+- **`DataCollector`** keeps two watchlists — fast (`watch_list`, `sample_interval` 0.005 s) and slow (`watch_list_slow`, 1.0 s). Watched props are dot-paths `"Model.prop"` or `"Model.prop.subprop"` resolved against `model.models`. `get_model_data()` drains and clears the buffer. `clean_up()` drops only watch entries whose model no longer exists; a disabled model keeps its watch (the typed path writes 0 for it).
+- **`TaskScheduler`** runs deferred mutations every `_task_interval` (0.015 s). `setPropValue(prop, value, it, at)` → numeric targets **tween** over `it` seconds after an `at`-second delay (type 0, starting from the property's value when the tween starts), booleans/strings swap instantly (type 1); `callModelFunction` schedules a method call (type 2). An unknown model/property/method is rejected with an `error` message instead of being queued. It writes directly to model props, typically a `*_factor_ps` or a base param.
 
 ## Model definition JSON
 

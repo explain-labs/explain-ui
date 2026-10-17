@@ -425,6 +425,43 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "enabled"
     },
     {
+      "caption": "blood viscosity (cP)",
+      "target": "viscosity",
+      "type": "number",
+      "delta": 0.01,
+      "factor": 1,
+      "rounding": 2,
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "plasma viscosity (cP)",
+      "target": "viscosity_plasma",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0.5,
+      "ul": 3,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
+    },
+    {
+      "caption": "viscosity haematocrit exponent",
+      "target": "viscosity_hct_k",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 6,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
+    },
+    {
       "caption": "set temperature (C)",
       "edit_mode": "basic",
       "target": "set_temperature",
@@ -449,7 +486,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodTimeVaryingElastance",
             "BloodVessel",
             "HeartChamber",
-            "MicroVascularUnit",
             "BloodPump"
           ]
         }
@@ -534,7 +570,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodTimeVaryingElastance",
             "BloodVessel",
             "HeartChamber",
-            "MicroVascularUnit",
             "BloodPump"
           ]
         }
@@ -565,7 +600,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodTimeVaryingElastance",
             "BloodVessel",
             "HeartChamber",
-            "MicroVascularUnit",
             "BloodPump"
           ]
         }
@@ -615,7 +649,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodTimeVaryingElastance",
             "BloodVessel",
             "HeartChamber",
-            "MicroVascularUnit",
             "BloodPump"
           ]
         }
@@ -806,7 +839,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber"
       ]
     },
@@ -822,7 +854,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber"
       ]
     },
@@ -1156,6 +1187,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "delta": 0.01,
       "rounding": 2,
       "build_prop": true
+    },
+    {
+      "caption": "ANS effect on the unstressed volume (0-1)",
+      "target": "u_vol_ans_sens",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
     },
     {
       "edit_mode": "factors",
@@ -2179,6 +2223,35 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "enabled"
     },
     {
+      "caption": "maintenance intake (mL/kg/h)",
+      "target": "maintenance_rate",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 20,
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
+      "caption": "maintenance fluid",
+      "target": "maintenance_fluid",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
+    },
+    {
+      "caption": "maintenance site",
+      "target": "maintenance_site",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
+    },
+    {
       "target": "add_volume",
       "caption": "Adminster fluid",
       "type": "function",
@@ -2393,6 +2466,18 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 0
     },
     {
+      "caption": "diffusion along the compartment (L/s)",
+      "target": "diffusion_rate",
+      "type": "number",
+      "delta": 0.000001,
+      "factor": 1,
+      "rounding": 7,
+      "ll": 0,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
+    },
+    {
       "caption": "target temperature (dgs C)",
       "target": "target_temp",
       "type": "number",
@@ -2596,7 +2681,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber"
       ]
     },
@@ -3094,6 +3178,18 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "basic"
     },
     {
+      "caption": "mixing exchange without net flow (L/s)",
+      "target": "mix_flow",
+      "type": "number",
+      "delta": 0.001,
+      "factor": 1,
+      "rounding": 4,
+      "ll": 0,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
+    },
+    {
       "caption": "forward resistance",
       "target": "r_for",
       "type": "number",
@@ -3134,7 +3230,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber",
         "GasCapacitance"
       ]
@@ -3150,7 +3245,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber",
         "GasCapacitance"
       ]
@@ -3164,14 +3258,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "non linear resistance coefficient factor",
       "target": "r_k_factor_ps",
       "type": "factor"
-    },
-    {
-      "target": "is_externally_managed",
-      "type": "boolean",
-      "build_prop": false,
-      "edit_mode": "basic",
-      "readonly": true,
-      "caption": "externally managed"
     }
   ],
   "Kidneys": [
@@ -4652,6 +4738,17 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": true
     },
     {
+      "caption": "brown-fat O2 cost factor (Thermoregulation)",
+      "target": "vo2_bat_factor",
+      "type": "number",
+      "delta": 0.01,
+      "factor": 1,
+      "rounding": 3,
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
       "caption": "set local fractional vo2",
       "target": "set_metabolic_active_model",
       "build_prop": true,
@@ -5137,6 +5234,18 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "baseline cerebral blood volume (mL)",
+      "target": "cbv0",
+      "type": "number",
+      "delta": 0.01,
+      "factor": 1,
+      "rounding": 3,
+      "ll": 0,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
+    },
+    {
       "caption": "ICP coupling enabled",
       "target": "icp_enabled",
       "type": "boolean",
@@ -5274,12 +5383,30 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 8
     },
     {
-      "caption": "stroke-work mvo2 (mmol O2/g/(mmHg·mL))",
-      "target": "sw_vo2_per_g",
+      "caption": "myocardial mechanical efficiency (0-1)",
+      "target": "mech_efficiency",
       "type": "number",
-      "delta": 1e-8,
+      "delta": 0.01,
       "factor": 1,
-      "rounding": 10
+      "rounding": 2,
+      "ll": 0.05,
+      "ul": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
+    },
+    {
+      "caption": "caloric equivalent of O2 (J/mL)",
+      "target": "caloric_equiv_o2",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 15,
+      "ul": 25,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
     },
     {
       "caption": "heart weight intercept (g)",
@@ -5575,6 +5702,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "basic",
       "readonly": false,
       "caption": "enabled"
+    },
+    {
+      "caption": "asystole timeout (s)",
+      "target": "asystole_time",
+      "type": "number",
+      "delta": 0.5,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 1,
+      "ul": 30,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
     }
   ],
   "Pda": [
@@ -5853,6 +5993,18 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "basic"
     },
     {
+      "caption": "mixing exchange without net flow (L/s)",
+      "target": "mix_flow",
+      "type": "number",
+      "delta": 0.001,
+      "factor": 1,
+      "rounding": 4,
+      "ll": 0,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
+    },
+    {
       "caption": "forward resistance",
       "target": "r_for",
       "type": "number",
@@ -5893,7 +6045,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber",
         "GasCapacitance"
       ]
@@ -5909,7 +6060,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
         "BloodTimeVaryingElastance",
         "BloodPump",
         "BloodVessel",
-        "MicroVascularUnit",
         "HeartChamber",
         "GasCapacitance"
       ]
@@ -5923,14 +6073,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "non linear resistance coefficient factor",
       "target": "r_k_factor_ps",
       "type": "factor"
-    },
-    {
-      "target": "is_externally_managed",
-      "type": "boolean",
-      "build_prop": false,
-      "edit_mode": "basic",
-      "readonly": true,
-      "caption": "externally managed"
     }
   ],
   "Respiration": [
@@ -6036,6 +6178,18 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 2,
       "ll": -100,
       "ul": 100
+    },
+    {
+      "caption": "dead-space diffusion (L/s)",
+      "target": "dead_space_diffusion",
+      "type": "number",
+      "delta": 0.000001,
+      "factor": 1,
+      "rounding": 7,
+      "ll": 0,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false
     },
     {
       "caption": "atelectasis left lung (% collapsed)",
@@ -6503,20 +6657,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "ul": 20
     },
     {
-      "caption": "intrapulmonary shunt resistance",
-      "target": "ips_res",
-      "type": "number",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": false,
-      "delta": 1,
-      "factor": 1,
-      "rounding": 0,
-      "slider": true,
-      "ll": 10,
-      "ul": 50000
-    },
-    {
       "caption": "atrial septum width (mm)",
       "target": "atrial_septal_width",
       "type": "number",
@@ -6554,6 +6694,32 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 1,
       "ll": 0,
       "ul": 100
+    },
+    {
+      "caption": "FO orifice discharge coefficient",
+      "target": "discharge_coeff_fo",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0.3,
+      "ul": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
+    },
+    {
+      "caption": "VSD orifice discharge coefficient",
+      "target": "discharge_coeff_vsd",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0.3,
+      "ul": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
     },
     {
       "caption": "intrapulmonary shunt resistance (mmHg*s/L)",
