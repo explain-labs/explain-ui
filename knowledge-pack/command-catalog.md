@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **453 settable params**, **52 functions**
+Snapshot: **45 model_types**, **465 settable params**, **52 functions**
 (+ 70 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -135,16 +135,18 @@ _setProp_:
 ### Blood
 
 _setProp_:
+- `viscosity_plasma` — plasma viscosity (cP) (number, cP, range 0.5–3) _(advanced)_
+- `viscosity_hct_k` — viscosity haematocrit exponent (number, range 0–6) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:
-- `set_temperature(temp (number, range 25–45); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/MicroVascularUnit/BloodPump))` — set temperature (C)
+- `set_temperature(temp (number, range 25–45); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set temperature (C)
 - `set_viscosity(viscosity (number, range 0.1–12))` — set viscosity (cP)
 - `set_haldane_coeff(new_coeff (number, 0 = off, range 0–5))` — set Haldane coefficient
 - `set_P50(new_p50 (number, fetal HbF 18.8, neonatal 20.0, adult 26.7, range 15–30))` — set P50 (Hb-O2 affinity)
-- `set_to2(to2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/MicroVascularUnit/BloodPump))` — set total oxygen concentration (mmol/l)
-- `set_tco2(tco2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/MicroVascularUnit/BloodPump))` — set total carbon dioxide concentration (mmol/l)
-- `set_solute(solute_name (list, one of na/k/ca/cl/lact/mg/albumin/phosphates/uma/hemoglobin); solute_value (number, range 0–1000); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/MicroVascularUnit/BloodPump))` — set solute concentration
+- `set_to2(to2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set total oxygen concentration (mmol/l)
+- `set_tco2(tco2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set total carbon dioxide concentration (mmol/l)
+- `set_solute(solute_name (list, one of na/k/ca/cl/lact/mg/albumin/phosphates/uma/hemoglobin); solute_value (number, range 0–1000); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set solute concentration
 
 ### BloodCapacitance
 
@@ -168,8 +170,8 @@ _setProp_:
 - `dif_o2` — oxygen diffusion constant (number)
 - `dif_co2` — carbon dioxide diffusion constant (number)
 - `dif_solutes` — solute diffusion constant (number)
-- `comp_blood1` — blood component 1 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber)
-- `comp_blood2` — blood component 2 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber)
+- `comp_blood1` — blood component 1 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber)
+- `comp_blood2` — blood component 2 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber)
 - `dif_o2_factor_ps` — oxygen diffusion factor (factor)
 - `dif_co2_factor_ps` — carbon dioxide diffusion factor (factor)
 - `dif_solutes_factor_ps` — solute diffusion factor (factor)
@@ -217,6 +219,7 @@ _setProp_:
 - `el_k_factor_ps` — elastance non linear factor (factor) _(factors)_
 - `alpha` — resistance-elastance coupling (0-1) (number, 0-1) _(advanced)_
 - `ans_sens` — ans sensitivity (0-1) (number, 0-1) _(advanced)_
+- `u_vol_ans_sens` — ANS effect on the unstressed volume (0-1) (number, 0-1, range 0–1) _(advanced)_
 
 ### Brain
 
@@ -225,6 +228,7 @@ _setProp_:
 - `autoregulation_enabled` — autoregulation enabled (boolean)
 - `autoregulation_gain` — autoregulation gain (1=intact, 0=pressure-passive) (number, 1=intact, 0=pressure-passive, range 0–1)
 - `icp_enabled` — ICP coupling enabled (boolean)
+- `cbv0` — baseline cerebral blood volume (mL) (number, mL, range ≥0) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:
@@ -324,6 +328,7 @@ _setProp_:
 ### Fluids
 
 _setProp_:
+- `maintenance_rate` — maintenance intake (mL/kg/h) (number, mL/kg/h, range 0–20)
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:
@@ -344,6 +349,7 @@ _call_:
 
 _setProp_:
 - `is_enabled` — enabled (boolean)
+- `diffusion_rate` — diffusion along the compartment (L/s) (number, L/s, range ≥0) _(advanced)_
 - `fixed_composition` — fixed gas composition (boolean)
 - `u_vol` — unstressed volume (L) (number, L)
 - `el_base` — elastance baseline (mmHg/L) (number, mmHg/L)
@@ -376,7 +382,7 @@ _setProp_:
 - `dif_o2` — oxygen diffusion constant (number)
 - `dif_co2` — carbon dioxide diffusion constant (number)
 - `comp_gas` — gas component (list, one of GasCapacitance)
-- `comp_blood` — blood component (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber)
+- `comp_blood` — blood component (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber)
 - `dif_o2_factor_ps` — oxygen diffusion factor (factor)
 - `dif_co2_factor_ps` — carbon dioxide diffusion factor (factor)
 
@@ -462,8 +468,9 @@ _setProp_:
 - `r_for` — forward resistance (number)
 - `r_back` — backward resistance (number)
 - `r_k` — non linear resistance coefficient (number)
-- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber/GasCapacitance)
-- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber/GasCapacitance)
+- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
+- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
+- `mix_flow` — mixing exchange without net flow (L/s) (number, L/s, range ≥0) _(advanced)_
 - `r_factor_ps` — resistance factor (factor)
 - `r_k_factor_ps` — non linear resistance coefficient factor (factor)
 
@@ -562,12 +569,13 @@ _call_:
 
 _setProp_:
 - `is_enabled` — enabled (boolean)
+- `mech_efficiency` — myocardial mechanical efficiency (0-1) (number, 0-1, range 0.05–1) _(extra)_
+- `caloric_equiv_o2` — caloric equivalent of O2 (J/mL) (number, J/mL, range 15–25) _(advanced)_
 - `mob_active` — myocardial oxygen balance (boolean)
 - `to2_min` — minimal to2 (mmol/l) (number, mmol/l)
 - `to2_ref` — reference to2 (mmol/l) (number, mmol/l)
 - `resp_q` — respiratory quotient (number)
 - `bm_vo2_per_g` — basal mvo2 (mmol O2/g/s) (number, mmol O2/g/s)
-- `sw_vo2_per_g` — stroke-work mvo2 (mmol O2/g/(mmHg·mL)) (number, mmol O2/g/(mmHg·mL)
 - `hw_intercept` — heart weight intercept (g) (number, g)
 - `hw_slope` — heart weight slope (g per g body weight) (number, g per g body weight)
 - `hr_factor_min` — heartrate factor min (number)
@@ -584,6 +592,7 @@ _setProp_:
 
 _setProp_:
 - `is_enabled` — enabled (boolean)
+- `asystole_time` — asystole timeout (s) (number, s, range 1–30) _(extra)_
 
 ### Pda
 
@@ -622,8 +631,9 @@ _setProp_:
 - `r_for` — forward resistance (number)
 - `r_back` — backward resistance (number)
 - `r_k` — non linear resistance coefficient (number)
-- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber/GasCapacitance)
-- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/MicroVascularUnit/HeartChamber/GasCapacitance)
+- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
+- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
+- `mix_flow` — mixing exchange without net flow (L/s) (number, L/s, range ≥0) _(advanced)_
 - `r_factor_ps` — resistance factor (factor)
 - `r_k_factor_ps` — non linear resistance coefficient factor (factor)
 
@@ -640,6 +650,7 @@ _setProp_:
 - `res_upper_airways_factor` — upper airway resistance factor (factor, range -100–100) _(factors)_
 - `res_lower_airways_factor` — lower airway resistance factor (factor, range -100–100) _(factors)_
 - `gex_factor` — gasexchange factor (factor, range -100–100) _(factors)_
+- `dead_space_diffusion` — dead-space diffusion (L/s) (number, L/s, range ≥0) _(advanced)_
 - `atelectasis_hpv` — atelectasis hypoxic vasoconstriction (share diverted) (number, share diverted, range 0–1) _(advanced)_
 - `atelectasis_open_pressure` — atelectasis opening pressure (cmH2O) (number, cmH2O, range 5–45) _(advanced)_
 - `atelectasis_open_sd` — atelectasis opening pressure sd (cmH2O) (number, cmH2O, range 0.5–10) _(advanced)_
@@ -680,10 +691,11 @@ _call_:
 _setProp_:
 - `diameter_fo` — foramen ovale diameter (mm) (number, mm, range 0–20)
 - `diameter_vsd` — ventricular septal defect diameter (mm) (number, mm, range 0–20)
-- `ips_res` — intrapulmonary shunt resistance (number, range 10–50000)
 - `atrial_septal_width` — atrial septum width (mm) (number, mm, range 0–10) _(extra)_
 - `ventricular_septal_width` — ventricular septum width (mm) (number, mm, range 0–10) _(extra)_
 - `fo_lr_factor` — foramen ovale L-R resistance factor (number, range 0–100) _(extra)_
+- `discharge_coeff_fo` — FO orifice discharge coefficient (number, range 0.3–1) _(extra)_
+- `discharge_coeff_vsd` — VSD orifice discharge coefficient (number, range 0.3–1) _(extra)_
 - `ips_res` — intrapulmonary shunt resistance (mmHg*s/L) (number, mmHg*s/L, range 0–100000000) _(extra)_
 - `is_enabled` — enabled (boolean) _(all)_
 
