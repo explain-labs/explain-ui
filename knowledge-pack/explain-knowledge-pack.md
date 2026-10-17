@@ -12878,6 +12878,11 @@ export default class Model extends ModelEmitter {
           this.modelData = e.data.payload;
           this.emit("rtf");
           break;
+        case "rt_perf":
+          // realtime factor of the worker loop (simulated / wall time over ~1 s; < 1 = falling behind)
+          this.realtime_factor = e.data.payload;
+          this.emit("rt_perf", e.data.payload);
+          break;
         case "rts":
           this.modelDataSlow = e.data.payload;
           this.emit("rts");
@@ -13443,6 +13448,23 @@ const ENABLE_STEP_ERROR_GUARD = true;
 // every step (2000 per simulated second at 0.5 ms), so only the first one per model is reported.
 let step_errors = {};
 
+// the models stepped by _model_step, as arrays (model.models is a large, mutated dictionary, so a
+// for-in plus keyed lookup on every step is slow). Refreshed at the start of every calculate() call
+// and every realtime tick, so models added or removed between calls are picked up; insertion order
+// is the for-in order, so the step order is unchanged. Each refresh also bumps a non-enumerable
+// version on the model object (not serialized) that tells cached cross-model references (Resistor)
+// to re-resolve.
+let _model_list = [];
+let _model_names = [];
+const _refresh_model_list = function () {
+  _model_names = Object.keys(model.models);
+  _model_list = _model_names.map((n) => model.models[n]);
+  if (!Object.prototype.hasOwnProperty.call(model, "_models_version")) {
+    Object.defineProperty(model, "_models_version", { value: 0, writable: true, enumerable: false, configurable: true });
+  }
+  model._models_version += 1;
+};
+
 const _get_data_collector = function () {
   return model?.DataCollector || null;
 };
@@ -13477,6 +13499,14 @@ let rtInterval = 0.015;
 let rtSlowInterval = 1.0;
 let rtSlowCounter = 0.0;
 let rtClock = null;
+// wall-clock pacing of the realtime loop: setInterval ticks are not exact (late timers, a slow tick),
+// so each tick runs the steps the wall clock is owed instead of a fixed batch. The debt is capped at
+// RT_MAX_CATCHUP nominal batches, so a slow machine runs slower than real time instead of spiralling.
+const RT_MAX_CATCHUP = 4;
+let rtLastWall = 0.0; // performance.now() of the previous tick (ms)
+let rtDebt = 0.0; // simulated time owed to the wall clock (s)
+let rtPerfSim = 0.0; // simulated / wall time accumulated for the realtime factor (s)
+let rtPerfWall = 0.0;
 
 // realtime typed data-plane (chart ring + anim snapshot)
 let channel_writer = null;
@@ -13857,6 +13887,10 @@ const start = function () {
     _post_rt_channels();
     // call the modelStep every rt_interval seconds
     clearInterval(rtClock);
+    rtLastWall = performance.now();
+    rtDebt = rtInterval; // the first tick runs one nominal batch
+    rtPerfSim = 0.0;
+    rtPerfWall = 0.0;
     rtClock = setInterval(_model_step_rt, rtInterval * 1000.0);
     // send status update
     _send({
@@ -13908,6 +13942,7 @@ const calculate = function (time_to_calculate) {
       payload: [],
     });
     const start = performance.now();
+    _refresh_model_list();
     for (let i = 0; i < noOfSteps; i++) {
       _model_step();
     }
@@ -13952,6 +13987,7 @@ const tune_model = function (payload) {
   // advance the model by `seconds` without emitting per-step state
   const stepFn = (seconds) => {
     const n = Math.round(seconds / model.modeling_stepsize);
+    _refresh_model_list();
     for (let i = 0; i < n; i++) _model_step();
   };
 
@@ -14303,9 +14339,11 @@ const scale_model = function (payload) {
 };
 
 const _model_step = function () {
-  // iterate over all models
-  for (const model_name in model.models) {
-    const model_component = model.models[model_name];
+  // iterate over all models (cached arrays, see _refresh_model_list)
+  const list = _model_list;
+  for (let m = 0; m < list.length; m++) {
+    const model_component = list[m];
+    const model_name = _model_names[m];
     if (ENABLE_STEP_ERROR_GUARD) {
       try {
         model_component.step_model();
@@ -14346,11 +14384,21 @@ const save_state = function() {
 // define the local model functions
 const _model_step_rt = function () {
   try {
-    // so the rt_interval determines how often the model is calculated
-    const noOfSteps = rtInterval / model.modeling_stepsize;
+    // run the steps the wall clock is owed since the previous tick (nominally rtInterval / stepsize)
+    const now = performance.now();
+    const wall = (now - rtLastWall) / 1000.0;
+    rtLastWall = now;
+    rtDebt = Math.min(rtDebt + wall, RT_MAX_CATCHUP * rtInterval);
+    const dt = model.modeling_stepsize;
+    // the small epsilon keeps a tick that is owed exactly n steps from rounding down to n - 1
+    const noOfSteps = Math.floor(rtDebt / dt + 1e-9);
+    rtDebt -= noOfSteps * dt;
+    _refresh_model_list();
     for (let i = 0; i < noOfSteps; i++) {
       _model_step();
     }
+    rtPerfSim += noOfSteps * dt;
+    rtPerfWall += wall;
 
     // fast stream
     if (channel_writer && model.DataCollector && !model.DataCollector.legacy_mode) {
@@ -14365,10 +14413,13 @@ const _model_step_rt = function () {
       _get_model_data_rt();
     }
 
-    // get slow model data
+    // get slow model data, with the realtime factor (simulated / wall time) since the last report
     if (rtSlowCounter > rtSlowInterval) {
       rtSlowCounter = 0;
       _get_model_data_rt_slow();
+      if (rtPerfWall > 0.0) postMessage({ type: "rt_perf", message: "", payload: rtPerfSim / rtPerfWall });
+      rtPerfSim = 0.0;
+      rtPerfWall = 0.0;
     }
     rtSlowCounter += rtInterval;
   } catch (err) {
@@ -15105,15 +15156,28 @@ export class GasExchanger extends BaseModelClass {
     this._gas = null; // reference to the gas component
     this.dif_o2_step = 0.0; // state variable for the o2 diffusion (mmol)
     this.dif_co2_step = 0.0; // state variable for the co2 diffusion (mmol)
+    // the blood-gas solve (calc_blood_composition, an iterative acid-base / O2 solve) runs every
+    // bc_interval seconds instead of every step; the fluxes in between use the last po2/pco2
+    this.bc_interval = 0.002;
+    this._bc_counter = Infinity; // solve on the first step
   }
 
   calc_model() {
-    // find the blood and gas components
-    this._blood = this._model_engine.models[this.comp_blood];
-    this._gas = this._model_engine.models[this.comp_gas];
+    // find the blood and gas components (cached; re-resolved when a name changes)
+    if (this._blood_name !== this.comp_blood || this._gas_name !== this.comp_gas || !this._blood || !this._gas) {
+      this._blood = this._model_engine.models[this.comp_blood];
+      this._gas = this._model_engine.models[this.comp_gas];
+      this._blood_name = this.comp_blood;
+      this._gas_name = this.comp_gas;
+      this._bc_counter = Infinity;
+    }
 
-    // set the blood composition of the blood component
-    calc_blood_composition(this._blood);
+    // set the blood composition of the blood component (every bc_interval, see the constructor)
+    this._bc_counter += this._t;
+    if (this._bc_counter >= this.bc_interval - 1e-12) {
+      this._bc_counter = 0.0;
+      calc_blood_composition(this._blood);
+    }
 
     // get the partial pressures and gas concentrations from the components
     let po2_blood = this._blood.po2;
@@ -15300,13 +15364,24 @@ export class Resistor extends BaseModelClass {
     this.r_back_eff = 1000; // calculated backward resistance (mmHg/L*s)
     this.r_k_eff = 0; // calculated non-linear resistance coefficient (mmHg·s²/L²)
     this._prev_flow = 0.0; // flow from previous model step (L/s)
+    this._ref_version = -1; // _models_version the cached _comp_from/_comp_to were resolved at
+    this._ref_from = null; // comp_from / comp_to names they were resolved for
+    this._ref_to = null;
   }
 
   // this routine is called in every model step by the ModelEngine Class
   calc_model() {
-    // find the up- and downstream components and store the references
-    this._comp_from = this._model_engine.models[this.comp_from];
-    this._comp_to = this._model_engine.models[this.comp_to];
+    // find the up- and downstream components and store the references. Cached: re-resolved when a
+    // name changes (e.g. ECLS re-cannulation) or the engine's model set may have changed
+    // (_models_version is bumped at every calculate() call and realtime tick)
+    const version = this._model_engine._models_version;
+    if (this._ref_version !== version || this._ref_from !== this.comp_from || this._ref_to !== this.comp_to) {
+      this._comp_from = this._model_engine.models[this.comp_from];
+      this._comp_to = this._model_engine.models[this.comp_to];
+      this._ref_version = version;
+      this._ref_from = this.comp_from;
+      this._ref_to = this.comp_to;
+    }
 
     // calculate the resistances
     this.calc_resistance();
