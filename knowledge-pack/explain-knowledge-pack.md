@@ -1590,7 +1590,7 @@ Written back to the compartment `bc`:
 | `n` | 2.7 | Hill coefficient |
 | `alpha_o2` | 1.38e-5 | O₂ solubility coefficient (declared) |
 | `gas_constant` | 62.36367 | For the mmol/L → mL conversion factor |
-| `left_hp_wide` / `right_hp_wide` | 5.85e-6 / 3.16e-4 | Wide H⁺ brackets (mmol/L) |
+| `left_hp_wide` / `right_hp_wide` | 3.16e-6 / 1.0e-3 | Wide H⁺ brackets (mmol/L): pH 8.5–6.0. Outside them both solves fail and the gases keep their last value |
 | `left_o2_wide` / `right_o2_wide` | 0 / 800.0 | Wide pO₂ brackets (mmHg) |
 | `delta_ph_limits` | 0.1 | ± window for the narrow pH bracket |
 | `delta_o2_limits` | 10.0 | ± window for the narrow pO₂ bracket |
@@ -2360,8 +2360,24 @@ AA ──AA_BR_ART──► BR_ART ──► BR_CAP ──► BR_VEN ──BR_VE
 ```
 
 `CBF = AA_BR_ART.flow`. `BR_CAP` is the dominant neonatal O2 sink ([`Metabolism`](./Metabolism.md)
-`fvo2 ≈ 0.45`), so a fall in CBF shows up as `BR_CAP.to2` collapsing — the HIE / ischaemia signature
-(`brain_to2` read-out).
+`fvo2` 0.31 in term_neonate, formerly ≈ 0.45), so a fall in CBF shows up as `BR_CAP.to2` collapsing —
+the HIE / ischaemia signature (`brain_to2` read-out).
+
+**The bed's resistance is set on the vessels, not the connectors.** Each `BloodVessel` writes its own
+`r_for_eff` into its input connector every step:
+- `AA_BR_ART` takes `BR_ART`'s value
+- `BR_ART_BR_CAP` takes `BR_CAP`'s
+- `BR_CAP_BR_VEN` takes `BR_VEN`'s
+- `BR_VEN_VUB` is `VUB`'s connector, shared with `RUB_VUB`
+
+To change resting CBF, scale `BR_ART`/`BR_CAP`/`BR_VEN` together. Scaling only `BR_ART` raises the
+autoregulation effector's share of the bed, and with it the loop gain; the controller then
+oscillates. Re-anchor `cbf_setpoint`/`cpp_setpoint`/`cbv0` to the new rest as well.
+
+**term_neonate CBF (calibrated assumption, 2026-10):**
+- 0.10592 L/min (106 mL/min, ~30 mL/kg/min, 15 % of LVO), the neonatal PC-MRA term median (Kooi 2019)
+- previously 144 mL/min (20 % of LVO)
+- see `scripts/_fix_term_brain_mri.mjs` and [TermNeonateReference](./TermNeonateReference.md)
 
 ## Autoregulation = closed-loop control of CBF
 
@@ -2574,6 +2590,17 @@ target_tidal_volume = target_minute_volume / resp_rate
 (`vt_rr_ratio'` folds in `vt_rr_ratio_factor` and `vt_rr_ratio_scaling_factor`.) The inversion is
 guarded against a non-positive denominator or target so it cannot produce an `Infinity`/`NaN` rate;
 when breathing is disabled `vt_rr_controller` sets `resp_rate = 0` and returns.
+
+**term_neonate (calibrated assumption, 2026-10):**
+- `ie_ratio` 0.40 (it is Ti/Ttot, not I:E): Ti 0.65 s of a 1.63 s cycle in healthy term infants
+  (Schmalisch 2005, dead-space-free flow-through, day 7)
+- `vt_rr_ratio` 1.29795e-4, for RR 40 / Vt 5.3 mL/kg at a minute ventilation of 213 mL/kg/min
+  (Schmalisch: 39.2 ± 8.6 / 5.57 ± 1.06 / 215 ± 52; Hannover day 2: RR 44)
+- `minute_volume_ref` 0.207336 and the chemoreceptor set-points re-anchored, so the chemoreflex is
+  neutral at PaCO₂ 39.7
+- with the linear inspiratory muscle ramp, peak flows are 0.70 / 0.66 L/min/kg (reference
+  0.83 ± 0.20 / 0.64 ± 0.19); infants peak earlier in inspiration
+- see `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md)
 
 ## Breath phase state machine
 
@@ -5762,6 +5789,14 @@ isoelectric at 0 mV.
 `first_degree_pq_factor`, `vent_pacemaker_mode`, `vent_escape_rate`, `vt_rate`, `pvc_coupling`
 (+ the `trigger_pvc()` method).
 
+**term_neonate (calibrated assumption, 2026-10):**
+- `heart_rate_ref` 120.33, for a resting HR of 120: calm day-3 term infants measure 117–121 (Satoh
+  2016, He 2011, Agata 1994)
+- LV `el_max` ×1.15 and RV `el_max` ×1.3, so stroke volume and ejection fraction match neonatal CMR
+  (Jhaveri 2023: SV 1.6 mL/kg, EF 63 / 52.5 %) at unchanged output. Lowering HR alone is largely
+  compensated by Frank–Starling filling but leaves EF low.
+- see `scripts/_fix_term_hr_contractility.mjs` and [TermNeonateReference](./TermNeonateReference.md)
+
 ## Notes & caveats
 
 - **End-diastolic pressures.** The diastole-branch in `analyze` now writes `*_edp` (it previously
@@ -6062,15 +6097,26 @@ setpoints are both given responds to load from the first step.
 
 ## Acute layer (reversible, seconds–minutes)
 
-When end-systolic stress (afterload) or end-diastolic stress (over-dilation) exceeds its setpoint,
-contractility is depressed, smoothed by a first-order lag toward the target:
+When end-systolic stress (afterload) or end-diastolic stress (over-dilation) exceeds
+`stress_deadband` (1.5) × its setpoint, contractility is depressed, smoothed by a first-order lag
+toward the target:
 
 ```
-excess_es  = max(0, sigma_es − ref_es)
-excess_ed  = max(0, sigma_ed − ref_ed)
+excess_es  = max(0, sigma_es − stress_deadband·ref_es)
+excess_ed  = max(0, sigma_ed − stress_deadband·ref_ed)
 target     = clamp(1 − g_es·excess_es − g_ed·excess_ed, cont_floor, 1)
 load_factor += dt · (1/cont_tc) · (target − load_factor)
 ```
+
+The dead-band keeps normal loading out of it. Without it, any preload rise above rest
+depressed contractility. The depressed ventricle then dilated, which raised the stress further, so a
+normal Frank–Starling volume load (+8 % blood volume) ran away to `cont_floor`. 1.5× is reached in
+the term neonate (reflexes off) at a MAP of ~80 (LV afterload), LA ~9 mmHg (LV over-dilation) or a
+doubled PVR (RV). The gains are a quarter of their first values (`g_es_lv` 0.00125, `g_ed_lv` 0.005,
+`g_es_rv` 0.002, `g_ed_rv` 0.0075). With the original gains the loop gain above the dead-band
+exceeded 1 and a severe overload still collapsed to the floor; now the depression is graded and
+stable. For example, +50 mL blood volume gives an LV factor of 0.84 (LA 17.6), PVR ×4 an RV factor
+of 0.81 and arterioles ×3 an LV factor of 0.96.
 
 `load_factor` is written to the chamber's `el_max_load_factor`. It fully recovers to `1.0` within
 ~`cont_tc` when the load normalizes (afterload mismatch is reversible / inotrope-correctable).
@@ -6107,7 +6153,7 @@ left untouched (factors stay `1.0`).
 `scripts/probe_heartfunction.mjs` builds `term_neonate`, warms up, then applies an afterload challenge
 and a volume-overload challenge, printing wall stress, the acute factor, and the remodeling state.
 Observed behavior: at baseline factors stay ≈1.0; a transfusion drives `sigma_ed`/`sigma_es` well above
-setpoint, collapses ejection fraction, depresses `el_max_load_factor` to its floor, and—on a
+setpoint (beyond the dead-band), depresses ejection fraction and `el_max_load_factor` (graded), and—on a
 time-compressed run—dilates `u_vol_remodel_factor` and drops `el_max_remodel_factor` (the full
 both-timescale decompensation cascade). An afterload challenge raises `sigma_es` and depresses
 contractility directionally; note that the `term_neonate` circulation has a low-resistance runoff, so
@@ -6122,6 +6168,7 @@ a `HeartFunction` limitation).
 | `wall_frac_lv/rv`, `wall_volume_lv/rv`, `wall_density` | wall-volume geometry |
 | `g_es_lv/rv`, `g_ed_lv/rv` | acute contractility-depression gains (afterload / dilation) |
 | `cont_tc`, `cont_floor` | acute response time constant and lower bound |
+| `stress_deadband` | the acute response starts above this multiple of the resting setpoint (1.5) |
 | `remodel_tc`, `stress_avg_tc` | chronic remodeling and stress-averaging time constants |
 | `k_conc`, `k_ecc`, `mal_conc`, `mal_ecc`, `stiff_conc`, `dil_ecc`, `remodel_floor` | remodeling gains and bound |
 | `setpoint_warmup`, `sigma_*_ref_*` | setpoint auto-calibration window / overrides |
@@ -6649,6 +6696,17 @@ change whatsoever to the solver. The coupling is one-directional (the O₂ senso
 **Insertion order matters.** Lactate must run **after** [`Metabolism`](./Metabolism.md) (which sets
 each tissue's `to2` for the step) and **before** `Blood` (which solves composition). This is handled
 by the model's position in the scenario JSON `models` map — insert it just after `Metabolism`.
+
+**Changing the resting lactate without changing pH.** `uma` (unmeasured anions) enters the same
+charge balance with the same sign as `lact`. A different resting lactate can therefore be swapped in
+against `uma` (lact +x, uma −x in every blood compartment), which leaves pH, HCO₃ and BE untouched.
+
+**term_neonate (calibrated assumption, 2026-10):**
+- `lact_baseline` 1.5 mmol/L, which lies inside both day-3 references:
+  - GLOW 2021: plasma after 48 h, 1.4 (0.8–3.3)
+  - Cousineau 2005: capillary whole blood at 48 ± 12 h, 2.6 ± 0.7 (1.4–4.1)
+- applied as lact +0.5 / uma −0.5 (uma 6.09 → 5.59)
+- see `scripts/_fix_term_lactate.mjs` and [TermNeonateReference](./TermNeonateReference.md)
 
 ## Properties
 
@@ -7414,6 +7472,49 @@ Here the whole-body VO₂ of 8.1 ml/kg/min is spread over the brain capillary `B
 largest sink), lower/upper body (`RLB`/`RUB`), gut/liver/kidney capillaries (`INT_CAP`/`LS_CAP`/
 `KID_CAP`), and small fractions on the aortic compartments `AA`/`AD`. (The adult `adult_female.json`
 scenario uses `vo2: 3.5` with a slightly different split.)
+
+### The brain's share in `term_neonate` (calibrated assumption)
+
+The example above is the original split. The current `term_neonate` stores:
+- `vo2` 6.1396; `Mob` adds the myocardium's ~0.8 ml/kg/min on top, so lung uptake is 7.0
+  ml/kg/min (see below)
+- `BR_CAP` **0.31311**
+- `RLB`/`INT_CAP` 0.16754
+- `LS_CAP`/`KID_CAP`/`RUB` 0.11169
+- `AA` 0.00558, `AD` 0.01117
+
+The old brain share (0.42–0.45) was a Holliday-type estimate: adult CMRO₂ per gram × neonatal brain
+mass. Neonatal MRI finds lower values:
+- cerebral blood flow at a term median of 106 mL/min (Kooi 2019, PC-MRA, 172 term infants)
+- CMRO₂ well below adult values (Liu 2014)
+
+In 2026-10 the brain's flow and O₂ use were therefore brought down together, keeping its O₂
+extraction (~35 %, cerebral venous saturation ~62 %, as measured by Liu 2014):
+- CBF 144 → 106 mL/min
+- brain VO₂ 11.0 → 8.1 mL/min, 31 % of the Metabolism VO₂
+
+The other beds took over the remainder proportionally, so total VO₂ is unchanged. See
+`scripts/_fix_term_brain_mri.mjs` and [TermNeonateReference](./TermNeonateReference.md). A scenario
+derived from term_neonate inherits this split.
+
+### Whole-body VO₂ in `term_neonate` (calibrated assumption)
+
+`vo2` is **not** the whole-body O₂ uptake when [`Mob`](./Mob.md) is present: Mob consumes the
+myocardium's O₂ (basal plus stroke work, ~0.8 ml/kg/min at rest) on top of it.
+
+The scenario used to take up 8.1 ml/kg/min (7.288 + Mob). The first-week references are lower:
+- 6.26 ± 1.51 at thermoneutral rest
+- resting energy expenditure of 45–50 kcal/kg/d, i.e. ~6.5–7.2 ml O₂/kg/min
+
+So in 2026-10 `vo2` was set to 6.1396, for a lung uptake of **7.0 ml/kg/min**. That sits slightly
+above quiet rest, matching the scenario's calm, mixed sleep/awake state. Knock-on changes:
+- CO₂ production falls with VO₂, so `Breathing.minute_volume_ref` and the chemoreceptor set-points
+  were re-anchored to keep the chemoreflex neutral
+- at the measured output and Hb, Fick puts SvO₂ at ~81–85 % (scenario 81.5 %)
+- Thermoregulation re-seeds its heat-loss trim at load, so the lower metabolic heat does not cool
+  the patient
+
+See `scripts/_fix_term_vo2.mjs`.
 
 ## Usage in the model
 
@@ -8586,6 +8687,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 | Doc | What it covers |
 |---|---|
 | [fetal_circulation](./fetal_circulation.md) | Fetal scenarios (`term_fetus`, `fetus_30wk`): the fetal invariants, why a gestational age costs a calibration pass, measured operating points, known limitations. |
+| [TermNeonateReference](./TermNeonateReference.md) | Literature reference values for a healthy term neonate at ~72 h (hemodynamics, heart, flows, breathing, gases, metabolism, shunts), graded by evidence, with the matching JSON for validating `term_neonate`. |
 | [chd_duct_fo_dependent](./chd_duct_fo_dependent.md) | Duct- & foramen-ovale-dependent CHD taxonomy, lesion catalog, engine-lever mapping, build roadmap, bibliography. |
 
 ```
@@ -9730,6 +9832,24 @@ r_back = 2 · res_fo                     (RA → LA, easy)
 than right-to-left, reproducing the **flap-valve** behaviour: in fetal/transitional physiology the FO
 shunts right-to-left, and reverses only under raised left-atrial pressure.
 
+**Echo-measured diameters.** When `diameter_fo` comes from an echo, it is the colour-jet diameter of
+the opening that actually conducts. The flap's restriction is then already in the measured diameter,
+so the postnatal `term_neonate` (and patients built from it) use `fo_lr_factor` 1. With 25 an FO was
+almost a one-way valve: 5 mm gave Qp:Qs 0.99 and a Doppler peak of 0.2 m/s. Neonatal echo shows a
+predominantly left-to-right shunt in most term newborns (Hiraishi 1991, doi 10.1136/hrt.65.1.41) and a
+measurable Qp:Qs above ~3 mm (Evans & Iyer 1994, doi 10.1016/s0022-3476(94)70079-6). With 1, a 3 mm FO
+carries ~18 mL/kg/min (Qp:Qs 1.04, Doppler peak 0.66 m/s) and 5 mm ~32 mL/kg/min (Qp:Qs 1.14). Fetal
+and transitional scenarios keep a high factor.
+
+**term_neonate (calibrated assumption, 2026-10):**
+- `diameter_fo` 1.5 mm (was 0, closed): a small left-to-right PFO carrying ~6 mL/kg/min (Qp:Qs ~1.03)
+- the basis:
+  - a PFO is the rule in the first days (none closed by day 3 in He 2011)
+  - neonatal CMR measures RV output a few mL/kg/min above LV output with the duct closed (Jhaveri
+    2023, Groves 2011)
+- the open PFO lets the scenario shunt right-to-left at atrial level when right pressures rise
+- see `scripts/_fix_term_fo.mjs` and [TermNeonateReference](./TermNeonateReference.md)
+
 > **Modelling note.** Until the engine review, each of the two parallel resistors carried the full
 > `res_fo`, so the FO's effective resistance was `res_fo / 2`: twice the conductance its diameter
 > implies. Scenarios fitted before the fix were compensated by scaling `diameter_fo` by 2^(1/4) ≈ 1.19
@@ -9782,7 +9902,7 @@ Before, every VSD from 3 mm up behaved as unrestrictive; now the shunt depends o
 
 ## Example definition (JSON)
 
-From `term_neonate.json` (a healthy term neonate — both septal openings closed):
+From `term_neonate.json` (a healthy term neonate: small PFO, VSD closed):
 
 ```json
 {
@@ -9790,13 +9910,13 @@ From `term_neonate.json` (a healthy term neonate — both septal openings closed
   "description": "shunts (FO, ASD, VSD) model",
   "model_type": "Shunts",
   "is_enabled": true,
-  "diameter_fo": 0,
+  "diameter_fo": 1.5,
   "diameter_fo_max": 10,
   "diameter_vsd": 0,
   "diameter_vsd_max": 10,
   "atrial_septal_width": 3,
   "ventricular_septal_width": 5,
-  "fo_lr_factor": 25,
+  "fo_lr_factor": 1,
   "viscosity": 6,
   "ips_res": 25000
 }
@@ -10671,6 +10791,189 @@ The complementary read-only telemetry helper is [DataCollector](./DataCollector.
 - **The queue travels with the model state.** The posted state includes the TaskScheduler, which is why pending tasks keep model and method *names* rather than function references.
 
 ````
+
+### FILE: explain-engine/docs/TermNeonateReference.md
+
+```markdown
+# Term neonate at 72 h: literature reference values
+
+Reference values for validating the `term_neonate` scenario: a healthy term neonate of about 3.5 kg
+at about 72 h postnatal age, in a calm, mixed sleep/awake state. Compiled 2026-10-18 from three
+reference PDFs (kept out of the repository) and a PubMed search.
+
+The machine-readable version is [`scripts/reference/term_neonate_72h.json`](../scripts/reference/term_neonate_72h.json).
+It has one entry per variable with value, spread, method, age, sources (DOI/PMID), grade and the
+model read-out to compare against.
+
+**Grades**
+- **A**: healthy term infants measured at day 2–4
+- **B**: first week, a mixed cohort, or a figure read-off
+- **C**: textbook range or extrapolation; no healthy-term primary data found
+
+**Reading the tables:** ranges are the study's own normal limits: P2.3–P97.7, P5–P95, mean ± 2 SD
+or a range, as marked. "Fig" means the value was read off a published graph (±2 mmHg / ±5 mL/kg/min).
+
+## Measurement method matters
+
+The comparison is only fair when the model read-out matches what the clinicians measured. The main
+pitfalls found while compiling this set:
+
+- **Blood pressure:** the references are cuff (oscillometric). The model reads the ascending aorta.
+- **Heart rate:** it depends on behavioural state. Quiet sleep is ~112, a calm mixed state ~117–120,
+  awake about +6 bpm. This set uses the calm, mixed state.
+- **Cardiac output: compare stroke volume per kg first.** The two MRI studies differ in output
+  (177 vs ~200–218 mL/kg/min) mainly because their heart rates differed (100 vs 142); SV/kg agrees
+  (1.6 vs 1.7). Echo output is about twice as noisy as MRI (repeatability ±109 vs ±50 mL/kg/min).
+- **Tidal breathing:** a face mask with a pneumotachograph adds ~13 % to Vt and ~30 % to minute
+  ventilation, so dead-space-free (flow-through) data are used.
+- **Blood gases:** capillary values from 48 ± 12 h. Capillary pH and pCO₂ approximate arterial
+  values; capillary pO₂ does not, so PaO₂ stays grade C.
+- **Lactate:** plasma (GLOW) reads lower than capillary whole blood (Cousineau).
+- **Regional flows:** MRI (PC-MRA) and Doppler volume-flow estimates differ widely. The brain-flow
+  MRI cohorts were scanned for clinical reasons at term-equivalent age.
+
+## Hemodynamics
+
+| Variable | Reference | Range | Method, age, n | Grade | Source |
+|---|---|---|---|---|---|
+| Heart rate | **118** bpm | 91–145 (P5–P95) | monitor pulse, day 3, n=2628 | A | Satoh 2016; also Hannover 2018 (quiet sleep 112, 87–133), Norway 2021, He 2011 (126 → 120 from day 1 to 3) |
+| Systolic BP | **74** mmHg | 60–89 (P2.3–P97.7) | NIBP, GA 40 day 3 (Fig 4a), n=607 | A | van Zadelhoff 2023; Satoh 2016 70.5 ± 7.4 |
+| Diastolic BP | **46** mmHg | 31–61 | NIBP (Fig 4c) | A | van Zadelhoff 2023; Satoh 44.3 ± 6.7 |
+| Mean BP | **58** mmHg | 45–72 | NIBP (Fig 4b) | A | van Zadelhoff 2023 |
+| Pulse pressure | ≈ 28 mmHg | — | derived | B | as above |
+| CVP | — | 2–8 mmHg | invasive, sick infants only | C | textbook |
+| PAP systolic | **36.0 ± 6.5** mmHg | (24 h 43.8, 48 h 38.1) | echo, 72 h, n=76 | A/B | Kang 2016; its "upper 95 % limit 39.97" looks like a CI of the mean, not a normal limit |
+| PAP diastolic | **13.3 ± 6.2** mmHg | — | echo, 72 h | A/B | Kang 2016 |
+| PAP mean | **25.3 ± 8.3** mmHg | — | echo, 72 h | A/B | Kang 2016 |
+
+## Heart (cardiac MRI)
+
+Jhaveri 2023: 20 healthy term newborns, average 3545 g (the scenario's weight), scanned at
+31.8 ± 14 h, asleep after a feed (HR 100). Limits are mean ± 2 SD.
+
+| Variable | LV | RV | Grade |
+|---|---|---|---|
+| EDV (mL/kg) | **2.5 ± 0.3** (1.9–3.1) | **3.1 ± 0.3** (2.5–3.7) | A/B |
+| ESV (mL/kg) | **0.9 ± 0.2** (0.5–1.3) | **1.5 ± 0.2** (1.1–1.9) | A/B |
+| SV (mL/kg) | **1.6 ± 0.1** (1.4–1.9) | **1.6 ± 0.2** (1.2–2.0) | A/B |
+| EF (%) | **63.2 ± 3.4** (56.4–69.9) | **52.5 ± 3.3** (45.9–59.1) | A/B |
+
+Groves 2011 cine MRI at CGA 40 (Fig 5): LV EDV ~2.45 mL/kg, ESV ~0.78, EF ~68 %; SV 1.73 ± 0.28 at
+HR 142. RVEDV/LVEDV is 1.2 ± 0.2.
+
+## Flows
+
+| Variable | Reference (mL/kg/min) | Range | Method, age | Grade | Source |
+|---|---|---|---|---|---|
+| LV output | **~196** | 108–284 | PC-MRI, CGA 40 (Fig 3A) | B | Groves 2011; Jhaveri 177 ± 25 at HR 100 |
+| RV output | **~199** | 100–298 | PC-MRI (Fig 3B) | B | Groves 2011; Jhaveri 181 ± 30 |
+| SVC flow | **~83** | 28–138 | PC-MRI (Fig 3C) | B | Groves 2011 |
+| Descending aorta | **~99** | 57–141 | PC-MRI (Fig 3D) | B | Groves 2011 |
+| Brain | **28.5** (median; term 106 mL/min) | 9.8–94 | PC-MRA at TEA ~41 wk, n=344 | B | Kooi 2019; Liu 2014 14.9 ± 4.9 mL/100 g/min |
+| Intestine (SMA) | **43 ± 13** | — | Doppler volume flow, preterm + term | B | Van Bel 1990; Agata 1994 ~48 at 96 h |
+| Kidney | no credible absolute value | — | Doppler, left renal artery only: ~32 (24 h) / ~37 (96 h), unchanged over 1–96 h | C | Agata 1994 (Fig 2) |
+| Liver/spleen (coeliac) | no credible absolute value | — | Doppler, coeliac: ~75 (24 h) / ~72 (96 h) | C | Agata 1994 (Fig 2) |
+
+**Doppler volume flows are upper estimates.** Agata's single vessels (left MCA ~46, coeliac ~72,
+SMA ~48, one renal artery ~37 mL/kg/min at 96 h) add up to ~203 of an LVO of 258 mL/kg/min, which is
+not possible. The usable findings are the time course (organ flows stable from 24 to 96 h; renal flow
+unchanged from 1 h) and the SMA agreement with Van Bel. Kidney and coeliac have no credible
+absolute reference.
+
+The model's LS bed is liver + spleen, so it compares with coeliac / hepatic arterial flow. Portal
+inflow comes through the intestinal bed (INT), which the model drains into the lower-body veins.
+
+## Breathing
+
+| Variable | Reference | Range | Method, age, n | Grade | Source |
+|---|---|---|---|---|---|
+| Respiratory rate | **44** /min | 32–57 (P3–P97) | quiet sleep, median day 2, n=215 | A | Hannover 2018; Schmalisch 2005 39.2 ± 8.6 |
+| Tidal volume | **5.57 ± 1.06** mL/kg | — | flow-through, day 7, n=48 | A/B | Schmalisch 2005 |
+| Minute ventilation | **215 ± 52** mL/kg/min | — | flow-through | A/B | Schmalisch 2005 |
+| Ti/Ttot | **0.40** (Ti 0.65 s, Te 0.98 s) | — | flow-through | A/B | Schmalisch 2005 |
+| Peak tidal insp / exp flow | **0.83 ± 0.20 / 0.64 ± 0.19** L/min/kg | — | flow-through | A/B | Schmalisch 2005 |
+| Compliance (Crs) | **~3.6** mL/cmH₂O (~1.0–1.1 /kg) | 3.2–4.0 | passive occlusion | B | Katier 2006 (prediction 4.0), Stocks 1994, Migdal 1987, Nowotny 1998 |
+| Resistance (Rrs) | **52 ± 6** cmH₂O/L/s | (Katier ~75–80) | passive occlusion, n=9 | B | Nowotny 1998 |
+| FRC | **27.1** mL/kg | 23.8–32.0 | helium, median day 2, n=24 | A | Yüksel 1995; nitrogen 24.0, plethysmography 29.8–31.1 |
+| Anatomic dead space | **2.2** mL/kg | Vd/Vt ~0.3–0.4 | term, day 5 | A/B | Stokes 1986 |
+
+## Gases and saturations
+
+| Variable | Reference | Range | Method, age, n | Grade | Source |
+|---|---|---|---|---|---|
+| SpO₂ (pre-ductal) | **97.3 ± 1.4** % | — | pulse oximetry, median day 2, n=209 | A | Brockmann 2011; Poets 1996 97.6 (92–100) |
+| pH | **7.395 ± 0.037** | 7.312–7.473 | capillary, 48 ± 12 h, n=119 | A | Cousineau 2005 |
+| pCO₂ | **38.7 ± 5.1** mmHg | 28.5–48.7 | capillary | A | Cousineau 2005 |
+| HCO₃ | ≈ 23.4 mmol/L | — | derived from pH/pCO₂ | B | Cousineau 2005 |
+| Base excess | — | −4 to +2 | — | C | textbook |
+| PaO₂ | — | 60–90 mmHg | arterial | C | textbook (Koch & Wendel 1968 unavailable) |
+| EtCO₂ | ≈ PaCO₂ | gap 0 ± 7 mmHg | capnography | C | Lopez 2011 (healthy preterm controls) |
+| SvO₂ | **~83 %** (derived) | 80–86 | Fick from the references: output 177–200 mL/kg/min, VO₂ 6.3–7.0, Hb 17, SaO₂ 97 | B | derived; not measured in healthy neonates. The textbook 70–80 % stems from sick/older patients. NIRS day 2: cerebral 78, renal 89, splanchnic 75 % (Bailey 2013); cerebral venous 63.9 ± 8.2 % (Liu 2014) |
+
+## Metabolism, blood, kidneys
+
+| Variable | Reference | Range | Method, age, n | Grade | Source |
+|---|---|---|---|---|---|
+| VO₂ | **6.26 ± 1.51** mL/kg/min | — | calorimetry, first week, n=202 | B | phototherapy study 2001 |
+| Temperature | 37.0 °C | 36.5–37.5 | — | C | WHO/textbook |
+| Glucose | **~4.0** mmol/L | — | plasma; 3.3 ± 0.6 to 48 h, 4.6 ± 0.7 by day 4 | A | GLOW 2020; Cousineau 3.8 ± 0.8 |
+| Lactate | **1.4** mmol/L (plasma, median) | 0.8–3.3 | > 48 h, n=67 | A | GLOW 2021; Cousineau capillary 2.6 ± 0.7 (1.4–4.1) |
+| Hb | **~17.0** g/dL | 12.8–21.2 (P5–P95) | day 3, 35–42 wk (Fig 3B) | B | Jopling 2009 (Utah, 800–1520 m) |
+| Hct | **~49.5** % | 37–62.5 | Fig 3A | B | Jopling 2009 |
+| Blood volume | — | 80–90 mL/kg | — | C | textbook |
+| GFR | **~30** mL/min/1.73 m² | 19.6 (day 1) – 40.6 (day 5) | measured GFR, IPD meta-analysis, n=881 | A/B | Smeets 2022 |
+| Urine output | — | 1–3 mL/kg/h | — | C | textbook |
+
+## Shunts at 72 h
+
+| Shunt | Reference | Grade | Source |
+|---|---|---|---|
+| Ductus arteriosus | patent in **4 %** at 60–72 h (12 % at 48–60 h, 21–22 % at 24–48 h) | A | Ha 2018 (n=56, echo every 12 h) |
+| Foramen ovale | small, predominantly left-to-right PFO flow in most term newborns; no closure on day 1–3; CMR RV output exceeds LV by ~3–4 mL/kg/min with the duct closed | C | He 2011; Hiraishi 1991; Jhaveri 2023 / Groves 2011 (indirect) |
+
+## First look at the model (step 3, scenario at `07b4ebf`)
+
+Preliminary values taken while compiling; the formal comparison follows in step 5.
+
+- **Matches:**
+  - BP 72.6/45.8 (58.9)
+  - LVO/RVO 200
+  - SVC 81 and DAo 106
+  - RR 40, Vt 5.6–5.8 mL/kg, MV 235
+  - dead space 2.23 mL/kg
+  - SpO₂ 96.8, pH 7.37, PaCO₂ 39.5
+  - glucose 4.0
+  - Hb 16.1 g/dL
+  - GFR 34.7
+  - ductus closed
+- **Worth discussing:**
+  - HR 131 (reference ~118); at the same output this gives SV 1.5 mL/kg against 1.6
+  - Ti/Ttot 0.30 (reference 0.40)
+  - Crs 3.4 mL/cmH₂O (low end)
+  - lactate 1.0 (below both lactate references)
+  - brain flow 40.5 mL/kg/min = 20 % of LVO (MRI median ~28.5)
+  - intestinal flow 26 (reference 43 ± 13)
+  - foramen ovale fully closed
+
+## Recalibrations made from this reference
+
+Use `node scripts/probe_term_reference.mjs` for the full comparison (`--file` probes a scenario file
+outside `model_definitions/`).
+
+| Date | Change | Before → after | Basis |
+|---|---|---|---|
+| 2026-10-18 | Brain flow and O₂ use (`scripts/_fix_term_brain_mri.mjs`); freed flow → upper body (RUB) | CBF 144 → 106 mL/min (20 → 15 % of LVO); brain VO₂ 11.0 → 8.1 mL/min (42 → 31 %); extraction unchanged at 35 %; SVC stays 81 | Kooi 2019 term median; Liu 2014 extraction |
+| 2026-10-18 | Foramen ovale (`scripts/_fix_term_fo.mjs`): `diameter_fo` 0 → 1.5 mm (`fo_lr_factor` 1); chemoreflex and HeartFunction references re-anchored | FO 0 → 5.9 mL/kg/min L→R; RVO − LVO 0 → +6 mL/kg/min; gases, BP, HR unchanged | He 2011; Hiraishi 1991; CMR RV > LV output |
+| 2026-10-18 | Resting lactate (`scripts/_fix_term_lactate.mjs`): `lact_baseline` 1.0 → 1.5; lact +0.5 / uma −0.5 in every patient blood compartment | lactate 1.0 → 1.5 mmol/L; pH, HCO₃, BE unchanged (7.364 / 22.35 / −2.40) | GLOW 2021 (1.4 plasma > 48 h); Cousineau 2005 (2.6 capillary, 1.4–4.1) |
+| 2026-10-18 | Breathing pattern (`scripts/_fix_term_breathing_pattern.mjs`): `ie_ratio` 0.30 → 0.40; `vt_rr_ratio` → 1.29795e-4; `minute_volume_ref` and chemoreceptor set-points re-anchored | Ti/Ttot 0.30 → 0.40; RR 37.7 → 40.0; Vt 5.51 → 5.34; MV 208 → 213; peak flows 0.90/0.58 → 0.70/0.66 L/min/kg | Schmalisch 2005 (Ti, Vt, MV, peak flows); Hannover 2018 (RR) |
+| 2026-10-18 | Heart rate and contractility (`scripts/_fix_term_hr_contractility.mjs`): `heart_rate_ref` 131.15 → 120.33; LV `el_max` ×1.15, RV ×1.3; chemoreflex and HeartFunction stress references re-anchored | HR 131 → 120; LV ESV/SV/EF 1.01/1.51/59.9 → 0.92/1.66/64.4; RV 1.65/1.51/47.8 → 1.54/1.66/51.8; output unchanged; PAP 38.9 → 40.6 systolic | Satoh 2016, He 2011, Agata 1994 (HR); Jhaveri 2023 (CMR volumes) |
+| 2026-10-18 | Whole-body VO₂ (`scripts/_fix_term_vo2.mjs`): `Metabolism.vo2` 7.288 → 6.1396 (Mob's ~0.81 for the heart kept); `minute_volume_ref` and chemoreceptor set-points re-anchored | total VO₂ 8.1 → 7.0 mL/kg/min; MV 235 → 207; RR 40.4 → 37.5; Vt 5.8 → 5.5; SvO₂ 78.7 → 81.5; PaO₂ 73 → 76 | 6.26 ± 1.51 (first week, rest); REE 45–50 kcal/kg/d ≈ 6.5–7.2; calm mixed state |
+
+## Open items
+
+- **Koch & Wendel 1968** (arterial gases, first week): unavailable, so PaO₂ and BE stay grade C.
+
+```
 
 ### FILE: explain-engine/docs/Thermoregulation.md
 
@@ -15671,6 +15974,7 @@ Available scenarios are listed in `public/model_definitions/index.json`.
   "p1_baseline",
   "p1_pda_none",
   "term_neonate",
+  "term_neonate_sle6000",
   "tof_severe"
 ]
 
