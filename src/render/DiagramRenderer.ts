@@ -54,6 +54,7 @@ interface ConnNode {
   from: string;
   to: string;
   dots: Sprite[]; // train of flow indicators riding the path
+  label: Text | null; // optional caption on the path (layout.label.visible === true, position label.at)
   smFlow: number; // smoothed |flow| → dot size & opacity
   cr: number; // smoothed dot tint rgb
   cg: number;
@@ -408,7 +409,11 @@ export class DiagramRenderer implements RendererAdapter {
     for (const conn of this.conns) {
       const f = this.comps[conn.from];
       const t = this.comps[conn.to];
-      if (f && t) conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+      if (conn.label) conn.label.style.fontSize = (numberOr(conn.layout.label?.size, 10) || 10) * this.scaling;
+      if (f && t) {
+        conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+        this.positionConnLabel(conn);
+      }
     }
     this.drawSelection();
   }
@@ -703,6 +708,7 @@ export class DiagramRenderer implements RendererAdapter {
       from: comp.dbcFrom,
       to: comp.dbcTo,
       dots: [],
+      label: null,
       smFlow: 0,
       cr: DEOX_RGB[0],
       cg: DEOX_RGB[1],
@@ -711,8 +717,27 @@ export class DiagramRenderer implements RendererAdapter {
       geom,
       lastTo2: this.to2Lo,
     };
+    // opt-in caption (e.g. the shunts): connector labels are hidden unless the layout asks for them
+    if (comp.label && comp.layout.label?.visible === true) {
+      conn.label = this.buildLabelText(comp, comp.layout);
+      this.app!.stage.addChild(conn.label);
+      this.positionConnLabel(conn);
+    }
     this.syncDotCount(conn);
     this.conns.push(conn);
+  }
+
+  /** Place a connector's caption on its path (label.at, the fraction from dbcFrom; default the
+   *  midpoint) plus the configured pixel offset. */
+  private positionConnLabel(conn: ConnNode) {
+    const t = conn.label;
+    if (!t || !conn.geom) return;
+    const l = conn.layout.label || {};
+    const p = pointOnPath(conn.geom, Math.min(Math.max(numberOr(l.at, 0.5), 0), 1));
+    t.x = p.x + numberOr(l.pos_x, 0) * this.scaling;
+    t.y = p.y + numberOr(l.pos_y, 0) * this.scaling;
+    t.rotation = numberOr(l.rotation, 0);
+    t.visible = conn.graphics.visible;
   }
 
   /** Match a connector's dot train to its path length (one dot per ~spacing px),
@@ -791,8 +816,10 @@ export class DiagramRenderer implements RendererAdapter {
       g.arc(cx, cy, r, a1, a2, false);
       geom = { type: "arc", cx, cy, r, from: a1, to: a2 };
     }
-    // fixed neutral grey backbone; never recoloured per frame
-    g.stroke({ width, color: CONNECTOR_COLOR, alpha: 1 });
+    // fixed neutral grey backbone, never recoloured per frame; layout.path.accent (a hex colour)
+    // opts a connector into its own colour (e.g. the shunts). The stored path.color is a legacy
+    // grey in every shipped diagram and stays ignored
+    g.stroke({ width, color: layout.path.accent || CONNECTOR_COLOR, alpha: 1 });
     // hit area: a fat polyline along the path so the thin stroke is easy to
     // click in the editor (stroke-only Graphics aren't hit-tested by default).
     g.hitArea = new PolylineHitArea(samplePath(geom), Math.max(width, 12));
@@ -1041,7 +1068,10 @@ export class DiagramRenderer implements RendererAdapter {
     for (const conn of this.conns) {
       const f = this.comps[conn.from];
       const t = this.comps[conn.to];
-      if (f && t) conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+      if (f && t) {
+        conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+        this.positionConnLabel(conn);
+      }
       this.placeDots(conn);
     }
     this.drawSelection();
@@ -1114,6 +1144,7 @@ export class DiagramRenderer implements RendererAdapter {
       const vis = this.isConnShown(conn);
       conn.graphics.visible = vis;
       for (const d of conn.dots) d.visible = vis;
+      if (conn.label) conn.label.visible = vis;
       if (!vis) {
         // hidden connectors skip frames, so drop their flow state now — otherwise
         // a re-shown circuit flashes its last (stale) dot train before fading
@@ -1173,11 +1204,13 @@ export class DiagramRenderer implements RendererAdapter {
     conn.from = f;
     conn.to = t;
     conn.geom = this.drawPath(conn.graphics, conn.layout, this.comps[f], this.comps[t]);
+    this.positionConnLabel(conn);
     this.syncDotCount(conn);
     this.placeDots(conn);
     const vis = this.isConnShown(conn);
     conn.graphics.visible = vis;
     for (const d of conn.dots) d.visible = vis;
+    if (conn.label) conn.label.visible = vis;
     this.drawSelection();
   }
 
@@ -1198,7 +1231,10 @@ export class DiagramRenderer implements RendererAdapter {
       }
       const f = this.comps[conn.from];
       const t = this.comps[conn.to];
-      if (f && t) conn.geom = this.drawPath(conn.graphics, l, f, t);
+      if (f && t) {
+        conn.geom = this.drawPath(conn.graphics, l, f, t);
+        this.positionConnLabel(conn);
+      }
       this.drawSelection();
       return;
     }
@@ -1359,6 +1395,7 @@ export class DiagramRenderer implements RendererAdapter {
         if (c.name !== name) return true;
         this.app!.stage.removeChild(c.graphics);
         for (const d of c.dots) this.app!.stage.removeChild(d);
+        if (c.label) this.app!.stage.removeChild(c.label);
         return false;
       });
       delete this.diagram.components[name];
@@ -1378,6 +1415,7 @@ export class DiagramRenderer implements RendererAdapter {
       if (c.from === name || c.to === name) {
         this.app!.stage.removeChild(c.graphics);
         for (const d of c.dots) this.app!.stage.removeChild(d);
+        if (c.label) this.app!.stage.removeChild(c.label);
         return false;
       }
       return true;
@@ -1564,7 +1602,10 @@ export class DiagramRenderer implements RendererAdapter {
       if (conn.from !== name && conn.to !== name) continue;
       const f = this.comps[conn.from];
       const t = this.comps[conn.to];
-      if (f && t) conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+      if (f && t) {
+        conn.geom = this.drawPath(conn.graphics, conn.layout, f, t);
+        this.positionConnLabel(conn);
+      }
     }
   }
 
