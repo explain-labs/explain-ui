@@ -11,7 +11,7 @@ import MultiSelect from "primevue/multiselect";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { useExplain } from "@/composables/useExplain";
 import { useDiagramStore } from "@/stores/diagram";
-import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS, ECLS_DIAGRAM, pumpSpinRate } from "@/render/diagramConstants";
+import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS, ECLS_DIAGRAM, PLACENTA_DIAGRAM, pumpSpinRate } from "@/render/diagramConstants";
 // type-only import is erased at build; the renderer (and PixiJS) is loaded
 // lazily below so Pixi lands in its own async chunk, not the main bundle.
 import type { DiagramRenderer as DiagramRendererT } from "@/render/DiagramRenderer";
@@ -103,10 +103,13 @@ interface EclsView {
 let eclsView: EclsView | null = null;
 
 watch(modelReady, (ready) => {
-  if (ready) watchSlow([...ECLS_DIAGRAM.watch]);
+  if (ready) watchSlow([...ECLS_DIAGRAM.watch, ...PLACENTA_DIAGRAM.watch]);
 }, { immediate: true });
 watch(slowValues, (arr) => {
   const l = Array.isArray(arr) && arr.length ? arr[arr.length - 1] : null;
+  if (l && "Placenta.placenta_running" in l) {
+    setPlacentaShown(!!l["Placenta.placenta_running"] && !l["Placenta.umb_clamped"]);
+  }
   if (!l || !("Ecls.ecls_running" in l)) return;
   setEclsView({
     shown: !!l["Ecls.ecls_running"],
@@ -116,6 +119,8 @@ watch(slowValues, (arr) => {
   });
 });
 watch(modelState, (s) => {
+  const p = (s as any)?.models?.Placenta;
+  setPlacentaShown(!!p && !!p.placenta_running && !p.umb_clamped);
   const e = (s as any)?.models?.Ecls;
   setEclsView(
     e
@@ -140,6 +145,18 @@ function applyEclsView() {
   adapter.setConnectorEnds(d.returnConnector, null, adapter.componentForModel(eclsView.ret));
   adapter.setSpin(d.pumpNode, eclsView.spin);
   adapter.setGroupVisible(d.group, eclsView.shown);
+}
+
+// Placenta (fetal scenarios): the placenta and umbilical vessels show while the
+// placenta runs and the cord is patent, from the same two sources as ECLS.
+let placentaShown: boolean | null = null;
+function setPlacentaShown(shown: boolean) {
+  placentaShown = shown;
+  applyPlacentaView();
+}
+function applyPlacentaView() {
+  if (!adapter || placentaShown === null) return;
+  adapter.setGroupVisible(PLACENTA_DIAGRAM.group, placentaShown);
 }
 
 async function mountRenderer(diagram: any) {
@@ -187,6 +204,7 @@ async function mountRenderer(diagram: any) {
   if (props.highlight) applyHighlight();
   adapter.seedFromModels((modelState.value as any)?.models);
   applyEclsView();
+  applyPlacentaView();
   addRenderer(adapter);
   // publish to the chat/bot pipeline so it can drive diagram edits while mounted
   diagramStore.register(adapter);

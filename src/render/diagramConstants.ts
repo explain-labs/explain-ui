@@ -75,6 +75,15 @@ export const ECLS_DIAGRAM = {
   ],
 } as const;
 
+// Placenta (fetal scenarios): the placenta and the umbilical vessels, drawn in the
+// band below the ring while the placenta runs and the cord is patent
+// (Placenta.placenta_running && !Placenta.umb_clamped), so clamping the cord takes
+// them away. Diagrams without components in this group are unaffected.
+export const PLACENTA_DIAGRAM = {
+  group: "placenta",
+  watch: ["Placenta.placenta_running", "Placenta.umb_clamped"],
+} as const;
+
 // Pump sprite spin (revolutions per second on screen) from the pump speed. A
 // roller pump (mode 1, tens to ~200 RPM) spins at its true rate. A centrifugal
 // pump (mode 0, ~1500-4000 RPM = 25-65 rev/s) would only strobe, so its speed
