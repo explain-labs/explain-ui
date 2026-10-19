@@ -6696,6 +6696,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "ul": 100
     },
     {
+      "caption": "foramen ovale share opening onto the SVC part (0 = IVC only)",
+      "target": "fo_svc_fraction",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
+    },
+    {
       "caption": "FO orifice discharge coefficient",
       "target": "discharge_coeff_fo",
       "type": "number",

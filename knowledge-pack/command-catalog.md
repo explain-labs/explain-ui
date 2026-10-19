@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **465 settable params**, **52 functions**
+Snapshot: **45 model_types**, **466 settable params**, **52 functions**
 (+ 70 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -694,6 +694,7 @@ _setProp_:
 - `atrial_septal_width` — atrial septum width (mm) (number, mm, range 0–10) _(extra)_
 - `ventricular_septal_width` — ventricular septum width (mm) (number, mm, range 0–10) _(extra)_
 - `fo_lr_factor` — foramen ovale L-R resistance factor (number, range 0–100) _(extra)_
+- `fo_svc_fraction` — foramen ovale share opening onto the SVC part (0 = IVC only) (number, 0 = IVC only, range 0–1) _(extra)_
 - `discharge_coeff_fo` — FO orifice discharge coefficient (number, range 0.3–1) _(extra)_
 - `discharge_coeff_vsd` — VSD orifice discharge coefficient (number, range 0.3–1) _(extra)_
 - `ips_res` — intrapulmonary shunt resistance (mmHg*s/L) (number, mmHg*s/L, range 0–100000000) _(extra)_
