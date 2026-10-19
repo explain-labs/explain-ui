@@ -7246,7 +7246,8 @@ A scenario file is a single JSON document that describes one complete patient/ex
 > [Preterm25wkReference](./Preterm25wkReference.md) and [Preterm30wkReference](./Preterm30wkReference.md).
 > On 2026-10-19 the fetus `fetus_30wk` (30 wk, 1.5 kg, in utero, not in labour) was rebuilt the same way, from
 > `term_neonate` by `scripts/_make_fetus_validated.mjs --profile 30` (levers in `scripts/_fetal_profiles.mjs`),
-> and validated against [Fetus30wkReference](./Fetus30wkReference.md); it replaces the archived version.
+> and validated against [Fetus30wkReference](./Fetus30wkReference.md); it replaces the archived version. The term
+> fetus `term_fetus` (40 wk, 3.545 kg) followed the same day (`--profile 40`, [TermFetusReference](./TermFetusReference.md)).
 > The frozen set that live pages need
 > (`bischoff_cohort`, `p1_baseline`, `p1_pda_none`, `tof_severe`) is kept in place; everything else
 > is in [`model_definitions/archive/`](../model_definitions/archive/README.md) until it is rebuilt from
@@ -10450,6 +10451,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 | [Preterm25wkReference](./Preterm25wkReference.md) | Literature reference values for a preterm neonate born at 25 weeks (~700 g) at ~72 h on nasal CPAP 7 after one LISA dose, with a small PDA (hemodynamics, heart, flows, shunts, breathing, gases, metabolism, blood, kidneys), graded by evidence, with the balance rules and the matching JSON for validating `preterm_25wk`. |
 | [Preterm30wkReference](./Preterm30wkReference.md) | Literature reference values for a preterm neonate born at 30 weeks (~1.5 kg) at ~72 h on nasal CPAP 5 in room air without surfactant, with a small PDA (hemodynamics, heart, flows, shunts, breathing, gases, metabolism, blood, kidneys), graded by evidence, with the balance rules and the matching JSON for validating `preterm_30wk`. |
 | [Fetus30wkReference](./Fetus30wkReference.md) | Literature reference values for a human fetus in utero at 30 weeks (~1.5 kg), not in labour (hemodynamics, heart, flow distribution, cordocentesis gases, blood, metabolism, kidneys), graded by evidence with ovine values marked, with the balance rules and the matching JSON for validating `fetus_30wk`. |
+| [TermFetusReference](./TermFetusReference.md) | Literature reference values for a human fetus in utero at 40 weeks (3.545 kg, as term_neonate), not in labour, graded by evidence with ovine values marked, with the balance rules and the matching JSON for validating `term_fetus`. |
 | [chd_duct_fo_dependent](./chd_duct_fo_dependent.md) | Duct- & foramen-ovale-dependent CHD taxonomy, lesion catalog, engine-lever mapping, build roadmap, bibliography. |
 
 ```
@@ -12567,6 +12569,343 @@ The complementary read-only telemetry helper is [DataCollector](./DataCollector.
 
 ````
 
+### FILE: explain-engine/docs/TermFetusReference.md
+
+```markdown
+# Term fetus (40 wk, 3.545 kg) in utero: literature reference values
+
+Reference values for validating a fetal scenario (`term_fetus`): a healthy human fetus in utero at 40+0 weeks,
+3.545 kg, the same weight as [`term_neonate`](TermNeonateReference.md), so fetus and 72-hour neonate compare one
+to one. Compiled 2026-10-19 with the method and most of the sources of
+[`Fetus30wkReference.md`](Fetus30wkReference.md) (PubMed and the web; no fetal PDFs in the reference folder),
+plus term-specific sources. Every judgement call was made by the model's author (see the decisions log).
+
+The machine-readable version is [`scripts/reference/term_fetus.json`](../scripts/reference/term_fetus.json), in
+the same schema and with the same 61 variables as the 30-week set.
+
+## The reference state
+
+- 40+0 weeks, 3.545 kg, appropriate for gestational age, singleton
+- Mother at rest, breathing air, **not in labour** (undisturbed in-utero values, not cord gases at birth)
+- The placenta is the gas exchanger; the lungs are fluid-filled; no fetal breathing movements in the model
+- Ductus arteriosus and foramen ovale wide open (right-to-left); heart rate = CTG baseline
+- Environment: amniotic fluid, ~37.3 °C
+
+**Grades**
+- **A**: human fetal data at term
+- **B**: human fetal data from late gestation (36–38 wk), a pooled synthesis, or a short extrapolation
+- **C**: derived, method-dependent (4D-echo volumes), or animal data; **C ovine**: fetal sheep near term
+
+## Measurement method matters
+
+- **Cordocentesis is rare at term.** The gases come from Siggaard-Andersen & Huch's week-40 column, extrapolated
+  from data mostly ≤ 38 wk. MRI at 36–37 wk (Prsa 2014, Sun 2015) gives flows and saturations in the same
+  fetuses; its umbilical-vein saturation (79 %) is higher than the cordocentesis one (72 %). The reference takes 75 %.
+- **Placental share:** MRI 29 % vs Doppler ~21 % after 32 wk (Kiserud 2006). The reference takes 25 %.
+- **Ventricular volumes** are derived from the MRI output split and 4D-echo ejection fractions (grade C).
+- **Arterial pressure** is ovine: fetal sheep at 140 d have their baroreflex centred on 54 mmHg (Segar 2002).
+- **The placenta no longer reaches equilibrium at term:** blood leaving the maternal side has pO₂ ~39 mmHg against
+  31.5 in the umbilical vein (~30 % apparent shunt, Siggaard-Andersen); at 30 weeks the two were equal.
+
+## Balance rules
+
+- **Right ventricle:** RV 58 % = duct 40 + lungs 18
+- **Left ventricle:** LV 42 % = foramen 24 + pulmonary venous return 18
+- **Aorta:** LV 42 + duct 40 = 82 % = SVC 30 + coronaries ~3 + descending aorta ~49 (MRI 55)
+- **Placenta:** 25 % of 450 ≈ 112 mL/kg/min ≈ the umbilical-vein reference 110
+- **Upper body:** SVC ~135 mL/kg/min = brain ~100 + rest ~35
+- **CO₂:** VCO₂ 0.95 × 6.5 ≈ 6.2 mL/kg/min over ~110 mL/kg/min of umbilical blood needs a ~2.5 mmol/L CO₂-content
+  gap, which a ~5 mmHg pCO₂ gap provides
+- **O₂ (Fick), an open conflict (as at 30 weeks):** Hb 15 with UV 75 % and UA 52 % gives a content gap of
+  ~2.1 mmol/L; × 110 mL/kg/min = **~5.2 mL/kg/min**, below VO₂ 6.5. VO₂ 6.5 needs ~140–145 mL/kg/min of umbilical
+  blood, a wider saturation gap, or VO₂ nearer its low end. Settled in step 5.
+
+## Reference values
+
+### Hemodynamics
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Heart rate (CTG baseline) | **136** bpm | 120–160 | A | Pildner von Steinburg 2013, Boito 2004, Amorim-Costa 2016 |
+| Systolic arterial pressure | **60** mmHg | — | C ovine | Segar 2002 |
+| Diastolic arterial pressure | **40** mmHg | — | C ovine | Segar 2002 |
+| Mean arterial pressure | **50** mmHg | 42–58 | C ovine | Segar 2002, Unno 1999, Schröder 2000 |
+| Pulse pressure | **20** mmHg | — | C ovine | Segar 2002 |
+| PA minus aorta, mean pressure | **0** mmHg | 0–2 | B | Johnson 2000 |
+| Atrial (central venous) pressure | **3** mmHg | 1–5 | C | Johnson 2000 |
+
+### Heart
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| LV end-diastolic volume | **1.95** mL/kg | 1.5–2.5 | C | Prsa 2014, Hamill 2011 |
+| LV end-systolic volume | **0.6** mL/kg | 0.4–0.85 | C | Prsa 2014, Hamill 2011 |
+| LV stroke volume | **1.35** mL/kg | 1.1–1.6 | C | Prsa 2014, Mielke 2001 |
+| LV ejection fraction | **70** % | 60–78 | C | Hamill 2011, Simioni 2012, Esh-Broder 2004 |
+| RV end-diastolic volume | **3** mL/kg | 2.4–3.7 | C | Prsa 2014, Zhang 2016 |
+| RV end-systolic volume | **1.15** mL/kg | 0.8–1.5 | C | Prsa 2014, Zhang 2016 |
+| RV stroke volume | **1.85** mL/kg | 1.5–2.2 | C | Prsa 2014, Mielke 2001 |
+| RV ejection fraction | **62** % | 55–70 | C | Zhang 2016, Hamill 2011 |
+| TAPSE | **8.7** mm | 6–11 | B | Messing 2013, Peixoto 2020 |
+
+### Flows and distribution
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Combined ventricular output | **450** mL/kg/min | 350–580 | A/B | Prsa 2014, Sun 2015, Kiserud 2006, Mielke 2001 |
+| RV share of combined output | **58** % | 55–62 | A | Prsa 2014, Rasanen 1996, Mielke 2001 |
+| Pulmonary blood flow, share of CVO | **18** % | 10–30 | B | Prsa 2014, Rasanen 1996 |
+| Foramen ovale flow (R->L), share of CVO | **24** % | 15–35 | B | Prsa 2014, Rasanen 1996 |
+| Ductus arteriosus flow (PA->Ao), share of CVO | **40** % | 30–50 | B | Prsa 2014, Rasanen 1996 |
+| Placental (umbilical) share of CVO | **25** % | 18–35 | B | Prsa 2014, Kiserud 2006 |
+| Umbilical vein flow | **110** mL/kg/min | 70–155 | A/B | Prsa 2014, Sun 2015, Acharya 2005, Boito 2004 |
+| SVC flow, share of CVO | **30** % | 20–40 | B | Sun 2015, Prsa 2014 |
+| Descending aorta flow, share of CVO | **55** % | 35–75 | B | Prsa 2014 |
+| Cerebral blood flow | **100** mL/kg/min | 75–125 | C | Sun 2015 |
+| Ductus venosus shunt fraction of UV flow (reference only) | **20** % | — | B | Kiserud 2006b |
+
+### Shunt anatomy
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Ductus arteriosus diameter | **3.95** mm | 3.3–4.6 | B | Szpinda |
+| Foramen ovale diameter | — | — | C | Phillipos 1994 |
+
+### Gases and oxygen
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Umbilical vein SO2 | **75** % | 65–85 | B | Siggaard-Andersen 1995, Sun 2015 |
+| Umbilical vein pO2 | **31.5** mmHg | 25–38 | B | Siggaard-Andersen 1995, Nicolaides 1989, Soothill 1986 |
+| Umbilical vein pCO2 | **38** mmHg | 34–42 | B | Siggaard-Andersen 1995, Nicolaides 1989 |
+| Umbilical vein pH | **7.38** - | 7.34–7.42 | B | Siggaard-Andersen 1995, Nicolaides 1989 |
+| Umbilical vein base excess | **-2.3** mmol/L | -5–0 | B | Siggaard-Andersen 1995, Soothill 1986 |
+| Umbilical artery SO2 | **52** % | 40–65 | B | Siggaard-Andersen 1995, Nicolaides 1989 |
+| Umbilical artery pO2 | **23** mmHg | 17–29 | B | Siggaard-Andersen 1995, Nicolaides 1989 |
+| Umbilical artery pCO2 | **43** mmHg | 39–48 | B | Siggaard-Andersen 1995, Nicolaides 1989 |
+| Umbilical artery pH | **7.35** - | 7.31–7.39 | B | Siggaard-Andersen 1995, Nicolaides 1989 |
+| UA minus UV pCO2 | **5** mmHg | 3–9 | B | Siggaard-Andersen 1995 |
+| Ascending aorta (pre-ductal) SO2 | **60** % | 50–70 | B/C | Sun 2015, Siggaard-Andersen 1995 |
+| Thoracic IVC SO2 | **66** % | — | C | Siggaard-Andersen 1995 |
+| SVC SO2 | **40** % | 30–50 | C | Siggaard-Andersen 1995 |
+| Descending aorta SO2 | **52** % | 40–65 | B/C | Siggaard-Andersen 1995 |
+| Hb-O2 P50 (standard) | **20** mmHg | 19–21.5 | B | Siggaard-Andersen 1995 |
+
+### Blood
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Hemoglobin | **15** g/dL | 13–17 | B | Siggaard-Andersen 1995, Nicolaides 1988 |
+| Hematocrit | **45** % | 39–51 | C | Nicolaides 1988 |
+| Fetal haemoglobin fraction | **80** % | 70–90 | B | Siggaard-Andersen 1995 |
+| Fetoplacental blood volume | **105** mL/kg | 90–125 | C | MacGregor 1988 |
+| Fetal body blood volume | **85** mL/kg | — | C | MacGregor 1988 |
+| Placental share of fetoplacental blood | **22** % | 15–30 | C | MacGregor 1988 |
+
+### Metabolism and thermal
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Oxygen consumption | **6.5** mL/kg/min | 5.4–8.1 | B | Sun 2015, VO2 review (Cetin) |
+| Respiratory quotient | **0.95** - | 0.9–1 | C ovine | VO2 review (Cetin) |
+| Core temperature | **37.5** degC | 37.3–37.9 | B | Asakura 2004 |
+| Plasma glucose (UV) | **3.7** mmol/L | 3–4.5 | B/C | Marconi 1996, Economides 1989 |
+| Lactate | **1** mmol/L | 0.6–1.8 | C | Nicolaides 1989, Soothill 1986 |
+
+### Kidneys
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Fetal urine production (reference only) | **20** mL/kg/h | 10–35 | B | Touboul 2008, Rabinowitz 1989 |
+| Plasma creatinine | **50** umol/L | 40–65 | C | Moniz 1985 |
+| GFR | — | — | - | — |
+| Cystatin C (reference only) | **1.66** mg/L | 1.26–2.06 | B | Bökenkamp 2001 |
+
+### Body
+
+| Variable | Reference | Range | Grade | Sources |
+|---|---|---|---|---|
+| Crown-heel length (reference only) | **51** cm | — | C | — |
+| Placental weight (reference only) | **500** g | — | C | — |
+
+## First look at the model (step 4, 2026-10-19)
+
+`node scripts/_make_fetus_validated.mjs --profile 40` (term_neonate + the fetal transform + the term profile;
+size/maturity levers at term_neonate's values, the 30-week fetal levers carried over, kidney = term_neonate's
+own), probed with `node scripts/probe_term_reference.mjs term_fetus --ref scripts/reference/term_fetus.json`:
+**43 graded rows in range, 8 out**. The fetal invariants hold after the bake.
+
+- **In range first time:** HR 138, BP 64.7/38.2 (MAP 50.0), CVP 3.0, LV/RV volumes, RV SV 1.81, output 403,
+  foramen 23 %, placenta 28 % (umbilical flow 113), SVC 33 %, CBF 92, UV pCO₂ 36 / pH 7.40, UA SO₂ 57, AA 62,
+  SVC 47, Hb/Hct, blood volumes (104 mL/kg, placenta 23 %), VO₂ 6.6, RQ 0.93, glucose, core 37.50 °C.
+- **Out of range:**
+  - UV SO₂ 85 / pO₂ 39 (ref 75 / 31.5): the umbilical vein equilibrates with the maternal pool (pO₂ ~39), but at
+    term it should stay below it (Siggaard-Andersen: ~30 % apparent shunt);
+  - UA pH 7.30 and UA − UV pCO₂ 11.3 (ref 5);
+  - RV share 62 % (ref 58), with duct 47 % / lungs 15 % (ref 40 / 18), PA − Ao 2.2 mmHg, LV EF 58;
+  - duct diameter 6.0 mm vs anatomy 3.95 (by design).
+- **Controllers (10-minute run):** brain autoregulation at its dilation floor (0.15) with CBF 92; baroreflex near
+  neutral (HR ×1.015, SVR ×1.03); Hormones SVR factor 0.90.
+
+## Recalibrations made from this reference (step 5)
+
+- **5.1 Placental O₂ diffusion (2026-10-19).** The umbilical vein equilibrated with the maternal pool (SO₂ 85 /
+  pO₂ 39); at term it stays ~30 % short of it (Siggaard-Andersen). `Placenta.dif_o2` 0.03 → **0.003** (the lever is
+  weak down to ~0.005): UV 80 % / 34 mmHg, UA 51 %, AA 56 %, SVC 41.5 %, IVC 63.5 %; hemodynamics unchanged.
+  At ≤ 0.0015 the fetus decompensates within minutes (HR 69, MAP 17): acute placental insufficiency, a 2× margin.
+  45 in range / 6 out.
+
+- **5.2 Flow split (2026-10-19).** RV share 62 % with duct 47 % / lungs 15 %, PA − Ao 2.2, LV EF 58. Pulmonary
+  resistance ×0.8 (on top of the fetal ×9.5) and ventricular contractility left 1.0 → **1.15**, right 1.2 → **1.0**
+  (with the RV's lower diastolic stiffness the term RV already out-filled the LV): RV:LV 58.6 : 41.4, lungs 17.7 %,
+  foramen 23.5 %, duct 40.7 %, PA − Ao 1.5, LV EF 63 / SV 1.20, RV EF 64, output 407. 48 in range / 3 out.
+
+- **5.3 CO₂ / UA pH (2026-10-19).** UA − UV pCO₂ 11.1 and UA pH 7.30: placental CO₂ diffusion ×3 or ×10 changed
+  nothing (the gap is fetal-side, as at 30 weeks). Placental resistances ×0.75 (`umb_art_res` 780 → 585, `plf_res`
+  1730 → 1298): umbilical flow 111 → 142 mL/kg/min (MRI 129–134), placental share 27 → 33 %, gap 8.8, UA pH 7.32,
+  AA SO₂ 56 → 62, SVC 46. **50 in range / 1 out** (the duct diameter, by design). As at 30 weeks, the
+  cordocentesis gases need more umbilical blood than the 25 % placental-share reference.
+
+- **Final (2026-10-19).** Brain autoregulation sat at its dilation floor with CBF 88: `BRAIN_R` 0.26 → **0.10** →
+  autoregulation 1.07 over minutes 8–10 at CBF 100.
+
+## Validation result (step 5 complete, 2026-10-19)
+
+`node scripts/probe_term_reference.mjs term_fetus --ref scripts/reference/term_fetus.json` on the final scenario:
+**50 graded rows in range, 1 out**: the duct diameter, 6.0 mm against 3.95 mm anatomy, by design (the model's duct
+size keeps PA ≈ Ao).
+
+A 10-minute run is steady (minute means, min 1 → 10): HR 142, MAP 48.1, CVP 3.3–3.4, output 426–469 (window noise),
+umbilical flow 141, AA SO₂ 61.4–62.1, UA SO₂ 56.9–57.7, UV pCO₂ 36.0–36.2, core 37.50 °C, brain autoregulation 1.05–1.08
+(CBF 100), baroreflex mildly active (HR ×1.045, SVR ×1.09: MAP 48 below its set-point 50), Hormones SVR factor 0.92.
+
+| Variable | Model | Reference | Range | |
+|---|---|---|---|---|
+| Heart rate (CTG baseline) | 142 | 136 | 120–160 | ref |
+| Systolic arterial pressure | 62.6 | 60 | — | ref |
+| Diastolic arterial pressure | 36.2 | 40 | — | ref |
+| Mean arterial pressure | 48.1 | 50 | 42–58 | ref |
+| Pulse pressure | 26.3 | 20 | — | ref |
+| PA minus aorta, mean pressure | 1.68 | 0 | 0–2 | ref |
+| Atrial (central venous) pressure | 3.32 | 3 | 1–5 | ref |
+| LV end-diastolic volume | 1.96 | 1.95 | 1.5–2.5 | ref |
+| LV end-systolic volume | 0.70 | 0.6 | 0.4–0.85 | ref |
+| LV stroke volume | 1.26 | 1.35 | 1.1–1.6 | ref |
+| LV ejection fraction | 64.2 | 70 | 60–78 | ref |
+| RV end-diastolic volume | 2.75 | 3.0 | 2.4–3.7 | ref |
+| RV end-systolic volume | 0.96 | 1.15 | 0.8–1.5 | ref |
+| RV stroke volume | 1.79 | 1.85 | 1.5–2.2 | ref |
+| RV ejection fraction | 65.2 | 62 | 55–70 | ref |
+| TAPSE | — | 8.7 | 6–11 | ref |
+| Combined ventricular output | 434 | 450 | 350–580 | ref |
+| RV share of combined output | 58.8 | 58 | 55–62 | ref |
+| Pulmonary blood flow, share of CVO | 16.1 | 18 | 10–30 | ref |
+| Foramen ovale flow (R->L), share of CVO | 25.2 | 24 | 15–35 | ref |
+| Ductus arteriosus flow (PA->Ao), share of CVO | 42.8 | 40 | 30–50 | ref |
+| Placental (umbilical) share of CVO | 32.6 | 25 | 18–35 | ref |
+| Umbilical vein flow | 141 | 110 | 70–155 | ref |
+| SVC flow, share of CVO | 31.1 | 30 | 20–40 | ref |
+| Descending aorta flow, share of CVO | 50.6 | 55 | 35–75 | ref |
+| Cerebral blood flow | 100 | 100 | 75–125 | ref |
+| Ductus venosus shunt fraction of UV flow | — | 20 | — | ref |
+| Ductus arteriosus diameter | 6.00 | 3.95 | 3.3–4.6 | ref |
+| Foramen ovale diameter | — | — | — | ref |
+| Umbilical vein SO2 | 79.8 | 75 | 65–85 | ref |
+| Umbilical vein pO2 | 33.9 | 31.5 | 25–38 | ref |
+| Umbilical vein pCO2 | 36.0 | 38 | 34–42 | ref |
+| Umbilical vein pH | 7.40 | 7.38 | 7.34–7.42 | ref |
+| Umbilical vein base excess | -2.46 | -2.3 | -5–0 | ref |
+| Umbilical artery SO2 | 57.0 | 52 | 40–65 | ref |
+| Umbilical artery pO2 | 25.4 | 23 | 17–29 | ref |
+| Umbilical artery pCO2 | 44.9 | 43 | 39–48 | ref |
+| Umbilical artery pH | 7.32 | 7.35 | 7.31–7.39 | ref |
+| UA minus UV pCO2 | 8.90 | 5 | 3–9 | ref |
+| Ascending aorta (pre-ductal) SO2 | 61.4 | 60 | 50–70 | ref |
+| Thoracic IVC SO2 | 68.0 | 66 | — | ref |
+| SVC SO2 | 47.0 | 40 | 30–50 | ref |
+| Descending aorta SO2 | 57.0 | 52 | 40–65 | ref |
+| Hb-O2 P50 (standard) | 20.0 | 20.0 | 19–21.5 | ref |
+| Hemoglobin | 15.0 | 15.0 | 13–17 | ref |
+| Hematocrit | 45.4 | 45 | 39–51 | ref |
+| Fetal haemoglobin fraction | — | 80 | 70–90 | ref |
+| Fetoplacental blood volume | 104 | 105 | 90–125 | ref |
+| Fetal body blood volume | 80.3 | 85 | — | ref |
+| Placental share of fetoplacental blood | 22.7 | 22 | 15–30 | ref |
+| Oxygen consumption | 6.61 | 6.5 | 5.4–8.1 | ref |
+| Respiratory quotient | 0.93 | 0.95 | 0.9–1 | ref |
+| Core temperature | 37.5 | 37.5 | 37.3–37.9 | ref |
+| Plasma glucose (UV) | 3.70 | 3.7 | 3–4.5 | ref |
+| Lactate | 1.49 | 1.0 | 0.6–1.8 | ref |
+| Fetal urine production | 1.10 | 20 | 10–35 | ref |
+| Plasma creatinine | — | 50 | 40–65 | ref |
+| GFR | 24.7 | — | — | ref |
+| Cystatin C | — | 1.66 | 1.26–2.06 | ref |
+| Crown-heel length | — | 51 | — | ref |
+| Placental weight | — | 500 | — | ref |
+
+**Compared with the 30-week fetus** (same generator, same reference variables): heart rate 142 vs 148, MAP 48 vs 38,
+umbilical vein SO₂ 80 vs 89 %, aorta 61 vs 70 %, placental O₂ diffusion 10× lower (the term placenta no longer
+equilibrates with the maternal side), the RV boost (`cont_factor_right`) no longer needed.
+
+**Known limitations** (as for the 30-week fetus): no ductus venosus route; no placental heat path; fetal urine
+reference only (the model keeps term_neonate's kidney, ~1 mL/kg/h); arterial pressure and RQ ovine; volumes derived.
+
+## Decisions log (2026-10-19)
+
+- Gestational age 40+0 wk (pairs with `term_neonate`); weight 3.545 kg (= `term_neonate`).
+- Same 61 variables, reference-only rows and read-outs as the 30-week set; the literature step was done in two groups.
+- Heart rate 136 (Pildner von Steinburg 2013); MAP 50 (ovine, Segar 2002).
+- Ventricular volumes derived from the MRI output split; placental share 25 % (between MRI 29 and Doppler 21).
+- Umbilical-vein saturation 75 % (between cordocentesis 72 and MRI 79); VO₂ 6.5 kept as the literature value, the Fick
+  conflict settled in step 5.3 (umbilical flow ~142 mL/kg/min, placental share ~33 %).
+- Sheep data allowed where no human value exists (grade C ovine); ductus venosus and fetal urine reference only.
+
+## Open items
+
+- The O₂ balance conflict above: settled in 5.3 by umbilical flow (~142 mL/kg/min).
+- Johnson 2000 (scanned PDF): absolute human intracardiac pressures (≤ 29 wk only).
+- A ductus venosus route (would lift the IVC stream and the aortic saturation).
+
+## Sources
+
+- **Acharya 2005**: Acharya G et al. Reference ranges for umbilical vein blood flow in the second half of pregnancy based on longitudinal data. Prenat Diagn 2005;25:99-111. doi:10.1002/pd.1091; PMID 15712315
+- **Amorim-Costa 2016**: Amorim-Costa C et al. Gender-specific reference charts for cardiotocographic parameters throughout normal pregnancy (9701 fetuses). Eur J Obstet Gynecol Reprod Biol 2016;199:102-7. doi:10.1016/j.ejogrb.2016.01.036; PMID 26921476
+- **Asakura 2004**: Asakura H. Fetal and neonatal thermoregulation. J Nippon Med Sch 2004;71:360-70.
+- **Boito 2004**: Boito SME et al. Umbilical venous volume flow and fetal behavioral states in the normally developing fetus (36-40 wk). Ultrasound Obstet Gynecol 2004;23:138-42. doi:10.1002/uog.956; PMID 14770392
+- **Bökenkamp 2001**: Bökenkamp A et al. Fetal serum concentrations of cystatin C and beta2-microglobulin as predictors of postnatal kidney function. Am J Obstet Gynecol 2001;185:468-75. doi:10.1067/mob.2001.115283; PMID 11518911
+- **Economides 1989**: Economides DL, Nicolaides KH. Blood glucose and oxygen tension levels in small-for-gestational-age fetuses. Am J Obstet Gynecol 1989;160:385-9. doi:10.1016/0002-9378(89)90453-5; PMID 2916623
+- **Esh-Broder 2004**: Esh-Broder E et al. Free-hand 3D echocardiography in the evaluation of fetal cardiac ejection fraction. Ultrasound Obstet Gynecol 2004;23:546-51. doi:10.1002/uog.1059; PMID 15170793
+- **Hamill 2011**: Hamill N et al. Fetal cardiac ventricular volume, cardiac output, and ejection fraction determined with 4D ultrasound (STIC/VOCAL). Am J Obstet Gynecol 2011;205:76.e1-10. doi:10.1016/j.ajog.2011.02.028; PMID 21531373
+- **Johnson 2000**: Johnson P, Maxwell DJ, Tynan MJ, Allan LD. Intracardiac pressures in the human fetus. Heart 2000;84:59-63. doi:10.1136/heart.84.1.59; PMID 10862590
+- **Kiserud 2006**: Kiserud T et al. Fetal cardiac output, distribution to the placenta and impact of placental compromise. Ultrasound Obstet Gynecol 2006;28:126-36. doi:10.1002/uog.2832; PMID 16826560
+- **Kiserud 2006b**: Kiserud T et al. Ductus venosus shunting in growth-restricted fetuses and the effect of umbilical circulatory compromise. Ultrasound Obstet Gynecol 2006;28:143-9. doi:10.1002/uog.2784; PMID 16770753
+- **MacGregor 1988**: MacGregor SN et al. Prediction of fetoplacental blood volume in isoimmunized pregnancy. Am J Obstet Gynecol 1988;159:1493-7. doi:10.1016/0002-9378(88)90581-9; PMID 3207128
+- **Marconi 1996**: Marconi AM et al. The impact of gestational age and fetal growth on the maternal-fetal glucose concentration difference. Obstet Gynecol 1996;87:937-42. doi:10.1016/0029-7844(96)00048-8; PMID 8649702
+- **Messing 2013**: Messing B et al. Fetal tricuspid annular plane systolic excursion (f-TAPSE). Ultrasound Obstet Gynecol 2013;42:182-8. doi:10.1002/uog.12375; PMID 23288668
+- **Mielke 2001**: Mielke G, Benda N. Cardiac output and central distribution of blood flow in the human fetus. Circulation 2001;103:1662-8. doi:10.1161/01.cir.103.12.1662; PMID 11273994
+- **Moniz 1985**: Moniz CF et al. Normal reference ranges for biochemical substances relating to renal, hepatic, and bone function in fetal and maternal plasma throughout pregnancy. J Clin Pathol 1985;38:468-72.
+- **Nicolaides 1988**: Nicolaides KH et al. Fetal haemoglobin by gestational age (mean and -2 SD table, 18-34 wk), as reproduced in clinical-trial protocol NCT03842189.
+- **Nicolaides 1989**: Nicolaides KH, Economides DL, Soothill PW. Blood gases, pH, and lactate in appropriate- and small-for-gestational-age fetuses. Am J Obstet Gynecol 1989;161:996-1001. doi:10.1016/0002-9378(89)90770-9; PMID 2801852
+- **Peixoto 2020**: Peixoto AB et al. Reference ranges for fetal MAPSE, TAPSE and SAPSE between 20 and 36+6 weeks. J Perinat Med 2020;48:601-8. doi:10.1515/jpm-2020-0002; PMID 32609650
+- **Phillipos 1994**: Phillipos EZ et al. The echocardiographic assessment of the human fetal foramen ovale. J Am Soc Echocardiogr 1994;7:257-63. doi:10.1016/s0894-7317(14)80396-9; PMID 8060642
+- **Pildner von Steinburg 2013**: Pildner von Steinburg S et al. What is the 'normal' fetal heart rate? PeerJ 2013;1:e82 (78,852 CTGs; mean baseline by gestational week). doi:10.7717/peerj.82; PMID 23761161
+- **Prsa 2014**: Prsa M et al. Reference ranges of blood flow in the major vessels of the normal human fetal circulation at term by phase-contrast MRI. Circ Cardiovasc Imaging 2014;7:663-70. doi:10.1161/CIRCIMAGING.113.001859; PMID 24874055
+- **Rabinowitz 1989**: Rabinowitz R et al. Measurement of fetal urine production in normal pregnancy by real-time ultrasonography. Am J Obstet Gynecol 1989;161:1264-6. doi:10.1016/0002-9378(89)90679-0; PMID 2686448
+- **Rasanen 1996**: Rasanen J et al. Role of the pulmonary circulation in the distribution of human fetal cardiac output during the second half of pregnancy. Circulation 1996;94:1068-73. doi:10.1161/01.cir.94.5.1068; PMID 8790048
+- **Schröder 2000**: Schröder HJ et al. Unloading of baroreceptors by carotid occlusion does not increase heart rate in fetal sheep. Eur J Obstet Gynecol Reprod Biol 2000;92:265-72 (ovine). doi:10.1016/s0301-2115(99)00285-7; PMID 10996692
+- **Segar 2002**: Segar JL et al. Effects of fetal ovine adrenalectomy on sympathetic and baroreflex responses at birth (fetal sheep 140-141 d). Am J Physiol Regul Integr Comp Physiol 2002;283:R460-7 (ovine). doi:10.1152/ajpregu.00056.2002; PMID 12121859
+- **Siggaard-Andersen 1995**: Siggaard-Andersen O, Huch R. The oxygen status of fetal blood. Acta Anaesthesiol Scand 1995;39 Suppl 107:129-35 (week-30 synthesis of cordocentesis data; http://www.siggaard-andersen.dk/FetalBlood.pdf).
+- **Simioni 2012**: Simioni C et al. Fetal cardiac output and ejection fraction by STIC: male vs female fetuses. Rev Bras Cir Cardiovasc 2012;27:275-82. doi:10.5935/1678-9741.20120058; PMID 22996979
+- **Soothill 1986**: Soothill PW et al. Effect of gestational age on fetal and intervillous blood gas and acid-base values in human pregnancy. Fetal Ther 1986;1:168-75. doi:10.1159/000262264; PMID 3454532
+- **Sun 2015**: Sun L et al. Reduced fetal cerebral oxygen consumption is associated with smaller brain size in fetuses with congenital heart disease (30 normal controls at 36 wk). Circulation 2015;131:1313-23. doi:10.1161/CIRCULATIONAHA.114.013051; PMID 25762062
+- **Szpinda**: Szpinda M, ductus arteriosus morphometry regression (diameter 0.2072 + 0.0935 x GA mm), as quoted in component_models/Pda.js.
+- **Touboul 2008**: Touboul C et al. Normal fetal urine production rate estimated with 3D ultrasonography (VOCAL). Am J Obstet Gynecol 2008;199:57.e1-5. doi:10.1016/j.ajog.2007.12.012; PMID 18295175
+- **Unno 1999**: Unno N et al. Blood pressure and heart rate in the ovine fetus: ontogenic changes and effects of fetal adrenalectomy. Am J Physiol 1999;276:H248-56 (ovine). doi:10.1152/ajpheart.1999.276.1.H248; PMID 9887039
+- **VO2 review (Cetin)**: Human fetal VO2 estimates as quoted in Cetin I et al., 'The hypoxic fetus as a patient: adaptations to the intrauterine environment' (Univ. Milan): Bonds 1986 calorimetry 6.8 mL/min/kg; Acharya & Sitras umbilical uptake 0.29 mmol/min/kg; Radaelli 0.24 mmol/min/kg; fetal lamb (Philipps) 8.1 mL/min/kg.
+- **Zhang 2016**: Zhang J et al. Evaluation of right ventricular function in fetal hypoplastic left heart syndrome using STIC (151 normal controls, mean 30.2 wk). Cardiovasc Ultrasound 2016;14:12. doi:10.1186/s12947-016-0056-5; PMID 27066831
+
+```
+
 ### FILE: explain-engine/docs/TermNeonateReference.md
 
 ```markdown
@@ -14588,13 +14927,18 @@ All PMIDs were retrieved and confirmed via PubMed metadata; Rashkind 1966 [#17] 
 ````markdown
 # Fetal circulation scenarios
 
-**Current scenario (2026-10-19):** [`fetus_30wk`](../model_definitions/fetus_30wk.json), a fetus in utero at
-30 wk, 1.5 kg, rebuilt from the literature-validated `term_neonate` by
-`node scripts/_make_fetus_validated.mjs --profile 30` (levers in `scripts/_fetal_profiles.mjs`) and validated
-against [Fetus30wkReference](./Fetus30wkReference.md) (49 of 51 graded rows in range). See
-[The rebuilt fetus_30wk](#the-rebuilt-fetus_30wk-2026-10-19) below.
+**Current scenarios (2026-10-19)**, both rebuilt from the literature-validated `term_neonate` by
+`node scripts/_make_fetus_validated.mjs --profile 30|40` (levers in `scripts/_fetal_profiles.mjs`):
+- [`fetus_30wk`](../model_definitions/fetus_30wk.json), 30 wk, 1.5 kg, validated against
+  [Fetus30wkReference](./Fetus30wkReference.md) (49 of 51 graded rows in range); see
+  [The rebuilt fetus_30wk](#the-rebuilt-fetus_30wk-2026-10-19) below;
+- [`term_fetus`](../model_definitions/term_fetus.json), 40 wk, 3.545 kg (as term_neonate), validated against
+  [TermFetusReference](./TermFetusReference.md) (50 of 51). What differs from 30 wk: placental O₂ diffusion 10× lower
+  (`dif_o2` 0.003: at term the umbilical vein stays ~30 % short of the maternal side), no RV boost
+  (`cont_factor_right` 1.0, `cont_factor_left` 1.15), PVR ×0.8 on the fetal ×9.5, umbilical flow ~142 mL/kg/min.
+  Operating point: HR 142, MAP 48, CVP 3.3, output ~430, RV:LV 59:41, UV 80 > IVC 68 > AA 61 > UA 57 %, core 37.5.
 
-The sections after that describe the **earlier pair**, now in `model_definitions/archive/` (built from the old
+The sections after that describe the **earlier pair**, now in `model_definitions/archive/` and replaced by these two (built from the old
 term base):
 
 | Scenario | GA | Weight | Built by |
@@ -17807,6 +18151,7 @@ Available scenarios are listed in `public/model_definitions/index.json`.
   "preterm_25wk",
   "preterm_28wk",
   "preterm_30wk",
+  "term_fetus",
   "term_neonate",
   "term_neonate_sle6000",
   "tof_severe"
