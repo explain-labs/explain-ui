@@ -30,8 +30,8 @@ proxy talks to. It wraps the Claude Agent SDK (`query()`), and adds the
   verdict in the answer hides a target that is inside tolerance but out of range, and
   any untargeted vital that drifted; `build` carries both.
 - Rejects a SPEC that would **apply the prematurity adjustments twice**
-  (`double_seed_error()`): a baseline that is itself preterm (`preterm_*`,
-  `bischoff_cohort`) combined with `targets.gestational_age` below 37. The builder
+  (`double_seed_error()`): a baseline that is itself preterm (`preterm_*`)
+  combined with `targets.gestational_age` below 37. The builder
   applies its gestational-age seed whenever that target is below 37, whatever the
   baseline. Fetal baselines use a separate seed table and are not checked.
 

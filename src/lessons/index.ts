@@ -26,9 +26,14 @@ const imageModules = import.meta.glob<string>("./*/img/*.{png,jpg,jpeg,svg,webp,
   import: "default",
 });
 
+// Lessons whose scenario is archived in the engine: their files stay, but they
+// are not served until the scenario is rebuilt (tof: tof_severe, 2026-10-20).
+const OFFLINE = new Set(["tof"]);
+
 const LESSONS: Record<string, Lesson> = {};
 for (const [key, lesson] of Object.entries(lessonModules)) {
   const folder = key.split("/")[1];
+  if (OFFLINE.has(folder)) continue;
   if (lesson.id !== folder) {
     console.warn(`lesson id "${lesson.id}" does not match its folder "${folder}"`);
   }

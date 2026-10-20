@@ -2,7 +2,7 @@
 
 A lesson is a guided, step-by-step page at **`/lesson/<id>`**, built for the [nicupicu.nl](https://nicupicu.nl) modules on congenital heart lesions. Each step shows text (and optionally an image) beside the live model. The model is shown as a diagram without an edit toolbar, a trimmed bedside monitor and a chosen set of numerics. There are also intervention controls, such as opening and closing the ductus arteriosus or foramen ovale. Lesson text is bilingual (NL/EN) with a toggle in the header.
 
-Lessons are **files in this repo**, bundled with the app. The working example is `src/lessons/tof/` (severe tetralogy of Fallot on the `tof_severe` scenario).
+Lessons are **files in this repo**, bundled with the app. The working example is `src/lessons/tof/` (severe tetralogy of Fallot on the `tof_severe` scenario). Since 2026-10-20 it is offline (listed in `OFFLINE` in `src/lessons/index.ts`), because `tof_severe` was built with an older engine and is archived; it comes back when a ToF scenario is rebuilt.
 
 ## What lives here
 

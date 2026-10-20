@@ -7572,8 +7572,10 @@ A scenario file is a single JSON document that describes one complete patient/ex
 > and validated against [Fetus30wkReference](./Fetus30wkReference.md); it replaces the archived version. The term
 > fetus `term_fetus` (40 wk, 3.545 kg) followed the same day (`--profile 40`, [TermFetusReference](./TermFetusReference.md)), and the 25-week fetus
 > `fetus_25wk` (0.7 kg) on 2026-10-20 (`--profile 25`, [Fetus25wkReference](./Fetus25wkReference.md)).
-> The frozen set that live pages need
-> (`bischoff_cohort`, `p1_baseline`, `p1_pda_none`, `tof_severe`) is kept in place; everything else
+> The frozen set that the P1 companion and the ToF lesson used (`bischoff_cohort`, `p1_baseline`,
+> `p1_pda_none`, `tof_severe`) was built on the older engine and was archived on 2026-10-20: the P1
+> experiments are to be re-run on the current engine, and the ToF lesson is offline until a ToF
+> scenario is rebuilt. Everything else
 > is in [`model_definitions/archive/`](../model_definitions/archive/README.md) until it is rebuilt from
 > the fixed term baby.
 >
@@ -18474,18 +18476,13 @@ Available scenarios are listed in `public/model_definitions/index.json`.
 
 ```json
 [
-  "bischoff_cohort",
   "fetus_25wk",
   "fetus_30wk",
-  "p1_baseline",
-  "p1_pda_none",
   "preterm_25wk",
   "preterm_28wk",
   "preterm_30wk",
   "term_fetus",
-  "term_neonate",
-  "term_neonate_sle6000",
-  "tof_severe"
+  "term_neonate"
 ]
 
 ```

@@ -137,7 +137,7 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
    knowledge pack / `public/model_definitions/index.json`).
    **For a preterm, choose one of two forms — never both.** Either `term_neonate` plus
    `targets.gestational_age` (the builder then applies the prematurity adjustments for that
-   gestation), or a `preterm_*wk` / `bischoff_cohort` baseline **without**
+   gestation), or a `preterm_*wk` baseline **without**
    `gestational_age` (the baseline already carries them). A preterm baseline combined with
    a `gestational_age` below 37 would apply the adjustments twice, so the server rejects
    that SPEC. Prefer `term_neonate` plus `gestational_age` when the user gives a
