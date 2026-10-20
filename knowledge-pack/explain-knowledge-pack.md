@@ -6737,7 +6737,7 @@ The RA is two chambers, `RAIVCI` (IVC return, coronary sinus) and `RASVC` (SVC r
 tricuspid half (`RAIVCI_RV`, `RASVC_RV`) and foramen-ovale half (`LA_RAIVCI`, `LA_RASVC`). They are joined
 by the `RAIVCI_RASVC` resistor (in `Heart.components`):
 
-- **Fetal scenarios** (`fetus_30wk`, `term_fetus`) keep the halves **separate** (`no_flow: true`). The
+- **Fetal scenarios** (`fetus_30wk`, `fetus_term`) keep the halves **separate** (`no_flow: true`). The
   split is what produces preferential streaming: ductus venosus / IVC blood → FO → LA, SVC blood → RV.
 - **All postnatal scenarios** (since 2026-10-01) **merge** them into one atrium. The link is open in both
   directions (`no_flow: false`, `no_back_flow: false`) with a small resistance
@@ -7570,7 +7570,7 @@ A scenario file is a single JSON document that describes one complete patient/ex
 > On 2026-10-19 the fetus `fetus_30wk` (30 wk, 1.5 kg, in utero, not in labour) was rebuilt the same way, from
 > `term_neonate` by `scripts/_make_fetus_validated.mjs --profile 30` (levers in `scripts/_fetal_profiles.mjs`),
 > and validated against [Fetus30wkReference](./Fetus30wkReference.md); it replaces the archived version. The term
-> fetus `term_fetus` (40 wk, 3.545 kg) followed the same day (`--profile 40`, [TermFetusReference](./TermFetusReference.md)), and the 25-week fetus
+> fetus `fetus_term` (40 wk, 3.545 kg) followed the same day (`--profile 40`, [TermFetusReference](./TermFetusReference.md)), and the 25-week fetus
 > `fetus_25wk` (0.7 kg) on 2026-10-20 (`--profile 25`, [Fetus25wkReference](./Fetus25wkReference.md)).
 > The frozen set that the P1 companion and the ToF lesson used (`bischoff_cohort`, `p1_baseline`,
 > `p1_pda_none`, `tof_severe`) was built on the older engine and was archived on 2026-10-20: the P1
@@ -7790,7 +7790,7 @@ Both are `{ settings, components }` objects. `settings` holds canvas-level optio
 A flat JSON array of scenario filename stems, e.g.:
 
 ```json
-["adult_female", "term_neonate", "term_fetus", "preterm_28wk", "..."]
+["adult_female", "term_neonate", "fetus_term", "preterm_28wk", "..."]
 ```
 
 Each entry `X` maps to `model_definitions/X.json` and is a valid argument to `Model.load("X")`. Add a scenario here to make it selectable in consuming apps. (In explain-ui, `sync-scenarios.mjs` rebuilds its served `index.json` as the union of the canonical set and any local snapshots.)
@@ -10771,7 +10771,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 
 | Doc | What it covers |
 |---|---|
-| [fetal_circulation](./fetal_circulation.md) | Fetal scenarios (`term_fetus`, `fetus_30wk`): the fetal invariants, why a gestational age costs a calibration pass, measured operating points, known limitations. |
+| [fetal_circulation](./fetal_circulation.md) | Fetal scenarios (`fetus_term`, `fetus_30wk`): the fetal invariants, why a gestational age costs a calibration pass, measured operating points, known limitations. |
 | [TermNeonateReference](./TermNeonateReference.md) | Literature reference values for a healthy term neonate at ~72 h (hemodynamics, heart, flows, breathing, gases, metabolism, shunts), graded by evidence, with the matching JSON for validating `term_neonate`. |
 | [Preterm28wkReference](./Preterm28wkReference.md) | Literature reference values for a preterm neonate born at 28 weeks (~1 kg) at ~72 h on nasal CPAP with a small PDA (hemodynamics, heart, flows, shunts, breathing, gases, metabolism, blood, kidneys), graded by evidence, with the balance rules and the matching JSON for validating `preterm_28wk`. |
 | [Preterm25wkReference](./Preterm25wkReference.md) | Literature reference values for a preterm neonate born at 25 weeks (~700 g) at ~72 h on nasal CPAP 7 after one LISA dose, with a small PDA (hemodynamics, heart, flows, shunts, breathing, gases, metabolism, blood, kidneys), graded by evidence, with the balance rules and the matching JSON for validating `preterm_25wk`. |
@@ -12792,7 +12792,7 @@ fail the run. One that starts passing reports `XPASS`: remove its entry. Options
 | **Core vitals / calibration** | `probe_vitals.mjs`, `probe_tune.mjs`, `probe_ea.mjs` | Regulated vitals + ABG vs normal ranges; the live closed-loop tuner; mitral E/A ratio. |
 | **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_surfactant.mjs`, `probe_derecruitment.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_apnea.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); RDS recruitment/derecruitment + surfactant; thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; apnea of prematurity (episode count, SpO2/HR nadirs, desat→brady lag; `--no-chemoreflex` attribution); conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
 | **Devices** | `probe_ventilator.mjs`, `probe_sle6000.mjs`, `probe_ecls.mjs`, `probe_resuscitation.mjs` | Pressure-control ventilation of a preterm RDS lung with spontaneous drive off, sweeping FiO2 / rate / PEEP; veno-arterial ECMO rescue under near-abolished alveolar diffusion, sweeping pump speed / sweep-gas flow (both report the **emergent** blood gas from the gas-exchange physics, not the device); the SLE6000 device model — pass/fail checks of its modes, settings validation, VTV, CPAP backup, O2 Boost and monitored values (exit 1 on failure); CPR — under a simulated arrest, verifies the compression waveform, that compressions drive forward aortic flow via `pres_ext`, the `vent_no`-breaths-per-pause timing, and a clean `switch_cpr` re-toggle. |
-| **Fetal / maternal** | `probe_fetus.mjs [scenario]`, `probe_uterus.mjs`, `probe_placenta.mjs` | Fetal circulation (takes a scenario stem, default `term_fetus`; see [fetal_circulation.md](./fetal_circulation.md)); uterine bed / pregnancy adaptation / contractions; maternal placenta. |
+| **Fetal / maternal** | `probe_fetus.mjs [scenario]`, `probe_uterus.mjs`, `probe_placenta.mjs` | Fetal circulation (takes a scenario stem, default `fetus_term`; see [fetal_circulation.md](./fetal_circulation.md)); uterine bed / pregnancy adaptation / contractions; maternal placenta. |
 | **PDA / CDH** | `probe_p1.mjs` | Reproduces the cardiovascular paper's validation experiments from `papers/p1/experiments.json` (paper vs engine vs literature) |
 | `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
 | **CHD family** | `probe_as.mjs`, `probe_coarc.mjs`, `probe_dtga.mjs`, `probe_hlhs.mjs`, `probe_paivs.mjs`, `probe_pavsd.mjs`, `probe_ps.mjs`, `probe_ta.mjs`, `probe_tapvc.mjs`, `probe_tof.mjs` | Duct/FO-dependent congenital heart disease scenarios (aortic stenosis, coarctation, d-TGA, HLHS, PA-IVS, PA-VSD, pulmonary stenosis, tricuspid atresia, TAPVC, tetralogy of Fallot). |
@@ -12901,13 +12901,13 @@ The complementary read-only telemetry helper is [DataCollector](./DataCollector.
 ```markdown
 # Term fetus (40 wk, 3.545 kg) in utero: literature reference values
 
-Reference values for validating a fetal scenario (`term_fetus`): a healthy human fetus in utero at 40+0 weeks,
+Reference values for validating a fetal scenario (`fetus_term`): a healthy human fetus in utero at 40+0 weeks,
 3.545 kg, the same weight as [`term_neonate`](TermNeonateReference.md), so fetus and 72-hour neonate compare one
 to one. Compiled 2026-10-19 with the method and most of the sources of
 [`Fetus30wkReference.md`](Fetus30wkReference.md) (PubMed and the web; no fetal PDFs in the reference folder),
 plus term-specific sources. Every judgement call was made by the model's author (see the decisions log).
 
-The machine-readable version is [`scripts/reference/term_fetus.json`](../scripts/reference/term_fetus.json), in
+The machine-readable version is [`scripts/reference/fetus_term.json`](../scripts/reference/fetus_term.json), in
 the same schema and with the same 61 variables as the 30-week set.
 
 ## The reference state
@@ -13059,7 +13059,7 @@ the same schema and with the same 61 variables as the 30-week set.
 
 `node scripts/_make_fetus_validated.mjs --profile 40` (term_neonate + the fetal transform + the term profile;
 size/maturity levers at term_neonate's values, the 30-week fetal levers carried over, kidney = term_neonate's
-own), probed with `node scripts/probe_term_reference.mjs term_fetus --ref scripts/reference/term_fetus.json`:
+own), probed with `node scripts/probe_term_reference.mjs fetus_term --ref scripts/reference/fetus_term.json`:
 **43 graded rows in range, 8 out**. The fetal invariants hold after the bake.
 
 - **In range first time:** HR 138, BP 64.7/38.2 (MAP 50.0), CVP 3.0, LV/RV volumes, RV SV 1.81, output 403,
@@ -13098,7 +13098,7 @@ own), probed with `node scripts/probe_term_reference.mjs term_fetus --ref script
 
 ## Validation result (step 5 complete, 2026-10-19)
 
-`node scripts/probe_term_reference.mjs term_fetus --ref scripts/reference/term_fetus.json` on the final scenario:
+`node scripts/probe_term_reference.mjs fetus_term --ref scripts/reference/fetus_term.json` on the final scenario:
 **50 graded rows in range, 1 out**: the duct diameter, 6.0 mm against 3.95 mm anatomy, by design (the model's duct
 size keeps PA ≈ Ao).
 
@@ -13652,7 +13652,7 @@ so they are not rediscovered as defects:
   coefficients physical at the cost of a small, bounded *transient* energy inexactness — zero at rest.
 - **`ctotal` is not gas-law-consistent in a sealed static gas pocket.** Pressure comes from elastance
   while `ctotal` sums species, and the two are not hard-coupled. For flowing gas this stays within ~2 %
-  (see [`GasCapacitance`](./GasCapacitance.md)); a never-ventilated compartment (`term_fetus` lungs)
+  (see [`GasCapacitance`](./GasCapacitance.md)); a never-ventilated compartment (`fetus_term` lungs)
   drifts to ~8.6 %.
 - **Warm-environment core response is more defended** than the former single-node model (rise ~0.57 vs
   ~0.82 °C in the probe's hot step) — a consequence of the blood/core thermal buffer, considered more
@@ -15264,7 +15264,7 @@ All PMIDs were retrieved and confirmed via PubMed metadata; Rashkind 1966 [#17] 
 - [`fetus_30wk`](../model_definitions/fetus_30wk.json), 30 wk, 1.5 kg, validated against
   [Fetus30wkReference](./Fetus30wkReference.md) (49 of 51 graded rows in range); see
   [The rebuilt fetus_30wk](#the-rebuilt-fetus_30wk-2026-10-19) below;
-- [`term_fetus`](../model_definitions/term_fetus.json), 40 wk, 3.545 kg (as term_neonate), validated against
+- [`fetus_term`](../model_definitions/fetus_term.json), 40 wk, 3.545 kg (as term_neonate), validated against
   [TermFetusReference](./TermFetusReference.md) (50 of 51). What differs from 30 wk: placental O₂ diffusion 10× lower
   (`dif_o2` 0.003: at term the umbilical vein stays ~30 % short of the maternal side), no RV boost
   (`cont_factor_right` 1.0, `cont_factor_left` 1.15), PVR ×0.8 on the fetal ×9.5, umbilical flow ~142 mL/kg/min.
@@ -15381,7 +15381,7 @@ The three traps that cost the most time, in order:
 
 Measured with `node scripts/probe_fetus.mjs <scenario>`, not copied from a script header.
 
-| | `term_fetus` (40 wk) | `fetus_30wk` | human reference |
+| | `fetus_term` (40 wk) | `fetus_30wk` | human reference |
 |---|---|---|---|
 | HR | 146.5 bpm | 147.8 | — |
 | ABP sys/dia/**map** | 67.2 / 44.0 / **55.7** | 44.6 / 32.0 / **38.3** | — |
@@ -15505,7 +15505,7 @@ node scripts/probe_fetus.mjs fetus_30wk --seconds 150 # read the panel; iterate 
 node scripts/reseed_fetus.mjs 30                      # dry run -> /tmp/fetus_30wk_reseed.json
 node scripts/reseed_fetus.mjs 30 --write              # bake the equilibrium into the scenario
 node scripts/probe_fetus.mjs fetus_30wk --seconds 20  # the reseed took if this matches the 150 s run
-node scripts/probe_fetus.mjs                          # regression: term_fetus must be unchanged
+node scripts/probe_fetus.mjs                          # regression: fetus_term must be unchanged
 ```
 
 Adding a gestation is one row in `FETAL` (`scripts/_ga_tables.mjs`) plus a make/probe/reseed loop.
@@ -18478,10 +18478,10 @@ Available scenarios are listed in `public/model_definitions/index.json`.
 [
   "fetus_25wk",
   "fetus_30wk",
+  "fetus_term",
   "preterm_25wk",
   "preterm_28wk",
   "preterm_30wk",
-  "term_fetus",
   "term_neonate"
 ]
 

@@ -133,7 +133,7 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
 
 2. **Pick the closest baseline** scenario to start from (it's much easier to calibrate a
    nearby baseline than to build from scratch): `term_neonate`, `preterm_24wk`…`preterm_36wk`,
-   `adult_female`, `term_fetus`, a CDH/CHD/PDA variant, etc. (see the scenario list in the
+   `adult_female`, `fetus_term`, a CDH/CHD/PDA variant, etc. (see the scenario list in the
    knowledge pack / `public/model_definitions/index.json`).
    **For a preterm, choose one of two forms — never both.** Either `term_neonate` plus
    `targets.gestational_age` (the builder then applies the prematurity adjustments for that
