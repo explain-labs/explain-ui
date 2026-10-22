@@ -1394,6 +1394,7 @@ Doppler 0.96 / −0.07 m/s: Bischoff's bidirectional pattern, not the left-to-ri
 | 3.2 | `FO_DIAM` 0.76 → 0.5 mm (new optional lever `CONT_R` tried) | RVO 200 / LVO/RVO 1.32: the PFO carried ~20 mL/kg/min left-to-right that the RV pumped again. RV contractility ×1.3/×1.6 raised RV EF only to 42/43 % while RVO rose and CVP fell. | PFO 5.6, RVO 190, LVO 274, LVO/RVO 1.44, RV EDV 2.39. Out (5): RV ESV 1.47 / EF 38.5 % (accepted exception, below), SpO₂ 95.2, PaO₂ 63, SvO₂ 78. |
 | 3.3 | `IPS_RES` 14860 → 7000, `PVR` 3.2 → 3.4, `MV_REF` 0.289 → 0.31 | Oxygen too high (SpO₂ 95, PaO₂ 63) with the size-rule lung shunt at FiO₂ 0.26. The larger shunt lowered PAP (PVR back up) and the chemoreflex drive sat at 1.08–1.12 (pCO₂ above the set-point). | SpO₂ 89.4, PaO₂ 45, SvO₂ (RA) 72, pH 7.34, pCO₂ 48.8, ventilation drive 1.02, PAP 30/26, ductal flow 94, Doppler 1.78/0.62. Out (3): RV ESV/EF (accepted), CVP 1.30 at the lower limit. |
 | 3.4 | `VEN_UVOL` 0.77 → 0.73, `BRAIN_R` 1.44 → 1.56 | Over 10 min CVP (1.30) and PAP sat just under their lower limits; brain autoregulation at 1.13 (constricted). | CVP 1.56, PAP 31/26, autoregulation 1.01, baroreflex 0.99/1.00. |
+| 3.5 | `AO_PROX_EL` 3, `PA_EL` 2 (new optional generator levers `AO_PROX_EL`, `PA_EL`, `AO_ZC`) | Ductal Doppler shape. With breathing paused the trace looked like the *restrictive* saw-tooth (peak/end-diastolic 1.9, end-diastolic 0.90 m/s, slow fall), not the pulsatile unrestrictive pattern of the neocardiolab example (peak ~2.3, end-diastolic ~0.55 m/s, ratio ~4). The lumped, compliant proximal aorta makes arch pressure follow the integral of LV flow, and aortic and PA runoff decay together. Stiffening the arch alone, or adding an arch→descending aorta resistance (`AO_ZC` 5–30), changed little; a more compliant PA caused diastolic reversal; stiffening both the arch and the PA gives the pulsatile shape. SVR (2.5–3.2) and PVR (3.8–4.6) did not restore diastolic BP. | Breathing paused: peak 2.02, end-diastolic 0.59 m/s, ratio 3.5, aligned profile RMS vs the image 0.25 → 0.16; fall to half the peak stays at ~35 % of the cycle (image 25 %). Breathing on: BP 55/19.5 (37), PAP 34/27, duct 93 with 1 % right-to-left time, Doppler 2.09 / 0.06 m/s, descending aorta lowest −119 (strong diastolic steal), RVO 199. Out (6): RV EDV/ESV/EF (accepted), RVO 199 at the upper limit, diastolic BP 19.5 and end-diastolic Doppler with breathing (accepted, below). |
 
 ## Validation result (step 3 complete, 2026-10-22)
 
@@ -1403,6 +1404,10 @@ EF 39 %, a pressure-loaded RV with near-systemic PA pressure). HR 162, BP 45/24 
 no right-to-left time, Doppler 1.81 / 0.61 m/s; PFO 5.8; SpO₂ 89.6, PaO₂ 45.5, SvO₂ (RA) 72, pH 7.34, pCO₂ 48.9,
 BE +0.3. Controllers at rest: baroreflex 0.99 / 1.00, heart 1.00, ventilation 1.02, brain autoregulation 1.01. A
 10-minute run shows no drift (per-minute averages constant from minute 2) and no autoregulation oscillation.
+
+## Validation after step 3.5 (2026-10-22)
+
+**57/63** in range; out: RV EDV 2.44 / ESV 1.50 / EF 38.5 % (accepted), RVO 199 (limit 198), diastolic BP 19.5 and end-diastolic Doppler 0.06 m/s with breathing on (accepted, 3.5). HR 159, BP 55/19.5 (37), PAP 34/27, duct 92.5 left-to-right with 1 % right-to-left time, SpO₂ 89.6, PaO₂ 45.5, SvO₂ (RA) 72.6. Controllers: baroreflex 0.98 / 0.98, heart 0.99, ventilation 1.02, brain autoregulation 1.08. A 10-minute run shows no drift.
 
 ## Decisions log (2026-10-22)
 
@@ -1415,6 +1420,7 @@ BE +0.3. Controllers at rest: baroreflex 0.99 / 1.00, heart 1.00, ventilation 1.
 - Step 3.1 revision: Bischoff's L->R group is not pure L->R (the bidirectional group starts at 10 % of time right-to-left). With an unrestrictive duct PA pressure is near-systemic (neocardiolab example, Shen 1997), so the PAP references are near-systemic and the duct is checked by its right-to-left time (< 10 %) and Doppler (peak ~2.4, end-diastolic ~0.7 m/s).
 - 3.1 duct lever: discharge coefficient 0.25 with PVR 3.2 (author's choice over Cd 0.35 / PVR 3.0).
 - 3.2 PFO 0.5 mm. **Accepted exception: RV EF ~38 % / ESV ~1.47** — the RV ejects against near-systemic PA pressure with the unrestrictive duct; the RV EF reference (50 %) was derived for a low-pressure pulmonary circulation, and Bischoff's 'no RV dysfunction' was TAPSE-based (no model read-out). RV contractility does not fix it without raising RVO.
+- 3.5 Doppler shape (author's choice of option 1): match the pulsatile unrestrictive pattern of the neocardiolab example with arch ×3 + PA ×2 stiffness, PVR unchanged. **Accepted exceptions: diastolic BP ~19.5 mmHg and end-diastolic ductal velocity ~0.06 m/s with spontaneous breathing on.** With an open duct the aorta empties into the PA in diastole until the pressures nearly meet, so diastolic BP follows the stiff arch's runoff (SVR and PVR do not raise it), and a ~1 mmHg end-diastolic gradient is cancelled by the breathing swings in PA pressure. A low diastolic BP with diastolic steal is the classic large-duct picture; the 26 mmHg reference is the general Elsayed preterm value. Measure the Doppler shape with breathing paused.
 
 ## Sources
 
