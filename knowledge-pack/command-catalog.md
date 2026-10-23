@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **466 settable params**, **52 functions**
+Snapshot: **45 model_types**, **467 settable params**, **52 functions**
 (+ 70 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -411,6 +411,7 @@ _setProp_:
 - `vent_escape_rate` — ventricular escape rate (bpm) (number, bpm, range 20–120) _(extra)_
 - `vt_rate` — ventricular tachycardia rate (bpm) (number, bpm, range 120–300) _(extra)_
 - `av_delay` — av delay time (ms) (number, ms, range 0.5–10) _(extra)_
+- `rv_delay` — RV activation delay (ms) (number, ms, range 0–40) _(extra)_
 - `p_amp` — ECG P amplitude (mV) (number, mV, range -5–5) _(extra)_
 - `q_amp` — ECG Q amplitude (mV) (number, mV, range -5–5) _(extra)_
 - `r_amp` — ECG R amplitude (mV) (number, mV, range -5–5) _(extra)_
