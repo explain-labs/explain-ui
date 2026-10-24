@@ -70,9 +70,9 @@ Core physics params (`el_base`, `u_vol`, `el_k` on capacitances; `r_for`, `r_bac
 
 - `<p>_factor` — **non-persistent**; reset to `1.0` every step (transient interventions).
 - `<p>_factor_ps` — **persistent**; survives steps (user/scenario adjustments).
-- `<p>_factor_scaling_ps` — **persistent scaling**; written by `ModelScaler` for allometric/weight scaling.
+- `<p>_factor_scaling_ps` — **persistent scaling**; written by `ModelScaler` (absolute group factors). It is the same name in every family, diffusors included. It is 1.0 in every shipped scenario: their size calibration is baked into the base values.
 
-Formula (see `Capacitance.calc_elastances`, `Resistor.calc_resistance`): `p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling_ps-1)*p`. Exceptions: `BloodVessel` (most of the circulation) and `HeartChamber` compose their layers **multiplicatively** (BloodVessel also multiplies in the ANS and viscosity/viscosity_ref) — see the engine's `docs/ARCHITECTURE.md`. When adding a tunable parameter, follow this convention so it composes with interventions and scaling. `ModelScaler` (`explain-engine/helpers/ModelScaler.js`) writes the `*_scaling_ps` layer for elastance/resistance/unstressed-volume scaling, but its volume and weight scaling change raw `vol`/`u_vol`, and the Calibrator also writes `r_factor_scaling_ps` (IPSL/IPSR); `scaleModel(group, factor)` in the API routes to its many `scale_*` methods via the big `switch` in `ModelEngine.scale_model`. `reset` restores `model.weight = model._baseline_weight`.
+Formula (see `Capacitance.calc_elastances`, `Resistor.calc_resistance`): `p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling_ps-1)*p`. Exception: `BloodVessel` (most of the circulation) composes its layers **multiplicatively** (and multiplies in the ANS, viscosity/viscosity_ref and the α R→E coupling). `HeartChamber` stays additive but adds drug/Mob/load/remodel/ANS terms — see the engine's `docs/ARCHITECTURE.md` §7a. When adding a tunable parameter, follow this convention so it composes with interventions and scaling. `ModelScaler` (`explain-engine/helpers/ModelScaler.js`) writes the `*_scaling_ps` layer for elastance/resistance/unstressed-volume scaling, but its volume and weight scaling change raw `vol`/`u_vol`, and the Calibrator also writes `r_factor_scaling_ps` (IPSL/IPSR); `scaleModel(group, factor)` in the API (`POST "scale"`) routes to its many `scale_*` methods via the big `switch` in `ModelEngine.scale_model`. The factor groups set the layer **absolutely** (1.0 = the scenario as loaded), so a calibration stored there would be wiped by the first `scale`; hence every shipped scenario is baked (`incorporate`), and the generators and `build_patient.mjs` bake before saving. `reset` returns every group to 1.0 and restores `model.weight = model._baseline_weight`.
 
 ## Flow / pressure mechanics
 
@@ -131,7 +131,7 @@ The **Vue UI layer** (everything under `src/`) is documented in [`docs/ui/`](doc
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 A framework-agnostic, dependency-free physiological simulation engine (whole-body neonatal
-and adult cardiorespiratory model). It runs in a dedicated Web Worker (`ModelEngine.js`) and
+and fetal cardiorespiratory model; the adult scenarios are archived). It runs in a dedicated Web Worker (`ModelEngine.js`) and
 is controlled from the main thread through the `Model` wrapper (`Model.js`).
 
 This repository is self-contained: it has no runtime or build dependencies, and the tooling
@@ -317,25 +317,28 @@ A few things that bite newcomers: payloads crossing the worker boundary are JSON
 
 ### 4. Editing definitions
 
-1. Definitions live in `model_definitions/*.json`.
-2. Each entry contains `{ name, model_type, settings, inputs }`.
+1. Definitions live in `model_definitions/*.json`; the model list is `model_definition.models`.
+2. Each entry is flat: `name`, `model_type`, `is_enabled`, then the model's config props by name (another model is referenced by its name as a string). `init_model` copies every key onto the instance.
 3. Example block:
 
 ```json
 {
   "name": "MyDevice",
   "model_type": "MyDevice",
-  "settings": { "pressure": 18 },
-  "inputs": { "Lung": "Lung" }
+  "is_enabled": true,
+  "pressure": 18,
+  "lung_name": "LL"
 }
 ```
+
+See [`./docs/MODEL_DEFINITIONS.md`](./docs/MODEL_DEFINITIONS.md) for the full format.
 
 4. Reload via `explain.load("my_definition")` or rebuild in place with `explain.restart()`.
 
 ### 5. Debugging checklist
 
 - Watch worker traffic in DevTools (console logs prefixed with `Model:`).
-- Hook events: `document.addEventListener("status", (evt) => console.log(evt.detail))`.
+- Hook events: `explain.on("status", () => console.log(explain.statusMessage))`; `state` likewise fills `explain.modelState`, while `model_ready` and `error` pass a payload.
 - Snapshot: `explain.getModelState()`; inspect the payload emitted by the worker.
 - Missing models usually mean `model_type` typos or missing exports in `ModelIndex` (or, for your own models, in `CustomModelIndex`).
 
@@ -447,6 +450,7 @@ The worker's outbound `type` strings are translated to `ModelEmitter` events you
 | `data_slow` | `data_slow` | stores `modelDataSlow` |
 | `rtf` | `rtf` | stores `modelData` (realtime fast) |
 | `rts` | `rts` | stores `modelDataSlow` (realtime slow) |
+| `rt_perf` | `rt_perf` | stores `realtime_factor`: simulated / wall-clock time over ~1 s of the realtime loop (< 1 = falling behind) |
 | `prop_value` | `prop_value` | — |
 | `model_props` | `model_props` | — |
 | `model_types` | `model_types` | — |
@@ -507,14 +511,15 @@ Listeners are stored in an instance field `_listeners: Map<string, Set<Function>
 1. **Reset.** `errors = 0`; `model_initialized = false`; clear `model_data`/`model_data_slow`; `clearInterval(rtClock)`.
 2. **Fresh `model` object** with empty `models: {}`, and empty `scaler_config`.
 3. **Copy engine-level settings.** Every top-level key of the definition except `models` is copied onto `model` (`weight`, `modeling_stepsize`, `model_time_total`, `scaler_config`, …).
-4. **Instantiate.** For each entry in `model_definition.models`, look up the class by `sub_model_def.model_type` in `available_model_map`. If found, `new model_class(model, name, model_type)` and store on `model.models[name]`. A missing type or a constructor throw increments `errors` and emits a `status` `ERROR:` message. (The constructor's 3rd `model_type` arg is ignored by the base class.)
-5. **Initialize (only if `errors < 1`).** For each instance, build `args` as a `[{key, value}, …]` list from the definition entry and call `init_model(args)`. An init throw increments `errors` and emits a `status` `ERROR:`.
-6. **Attach helpers.** `model.DataCollector = new DataCollector(model)`, `model.TaskScheduler = new TaskScheduler(model)`, `model.ModelScaler = new ModelScaler(model, model.scaler_config)`.
-7. **Freeze baseline weight.** `model._baseline_weight = model.weight` (the weight-scaling anchor `reset()`/`scale_to_weight()` use).
-8. **Wire the realtime data plane.** Construct `ChannelWriter` and `AnimationPacker`, acquire the anim snapshot, and `DataCollector.set_channels(...)`. Failures here are caught and degrade to the legacy object path (they do **not** fail the build).
-9. **Emit.** If `errors > 0`: `status` `ERROR: model build failed` and return `false`. Otherwise emit `model_ready` and return `true`.
+4. **Instantiate the top-level models.** For each entry in `model_definition.models`, look up the class by `sub_model_def.model_type` in `available_model_map`. If found, `new model_class(model, name, model_type)` and store on `model.models[name]`. A missing type or a constructor throw increments `errors` and emits a `status` `ERROR:` message. (The constructor's 3rd `model_type` arg is ignored by the base class.)
+5. **Instantiate the sub-models.** Every model declared in a `components` map is instantiated into `model.models` too, recursively, in the same order `BaseModelClass.init_model` would use (all of a model's components, then each component's own), with the same error handling.
+6. **Initialize (only if `errors < 1`).** For each **top-level** instance, build `args` as a `[{key, value}, …]` list from the definition entry and call `init_model(args)`. Each owner initializes its own sub-models from its `init_model`. An init throw increments `errors` and emits a `status` `ERROR:`.
+7. **Attach helpers.** `model.DataCollector = new DataCollector(model)`, `model.TaskScheduler = new TaskScheduler(model)`, `model.ModelScaler = new ModelScaler(model, model.scaler_config)`.
+8. **Freeze baseline weight.** `model._baseline_weight = model.weight` (the weight-scaling anchor `reset()`/`scale_to_weight()` use).
+9. **Wire the realtime data plane.** Construct `ChannelWriter` and `AnimationPacker`, acquire the anim snapshot, and `DataCollector.set_channels(...)`. Failures here are caught and degrade to the legacy object path (they do **not** fail the build).
+10. **Emit.** If `errors > 0`: `status` `ERROR: model build failed` and return `false`. Otherwise emit `model_ready` and return `true`.
 
-Note the two-pass structure: **all** instances are constructed before **any** are initialized. This is what lets `init_model` resolve cross-model references (`this._lv = this._model_engine.models["LV"]`) — every sibling already exists by the time init runs.
+Note the two-pass structure: **all** instances, sub-models included, are constructed before **any** are initialized. This is what lets `init_model` resolve cross-model references (`this._lv = this._model_engine.models["LV"]`, `Heart` finding Mob's `COR`, `Blood` and `Gas` collecting every compartment) regardless of where the owner sits in the definition. A model found that way may not be initialized yet: its definition values arrive when its owner's `init_model` runs.
 
 ---
 
@@ -527,7 +532,7 @@ Note the two-pass structure: **all** instances are constructed before **any** ar
 3. `TaskScheduler.run_tasks()`.
 4. `model.model_time_total += model.modeling_stepsize`.
 
-**What "insertion order" means in practice.** The top-level entries of `model_definition.models` are inserted first, in JSON order. Sub-models declared in a composite's `components` are inserted later, while that composite runs `init_model`, so every one of them steps **after all top-level entries**. For `term_neonate` (172 models):
+**What "insertion order" means in practice.** The top-level entries of `model_definition.models` are inserted first, in JSON order. Sub-models declared in a composite's `components` are inserted after them (build step 5, in owner order), so every one of them steps **after all top-level entries**. For `term_neonate` (172 models):
 1. the 25 systems (`Heart` at position 1, which sets the chambers' `act_factor`);
 2. the 43 top-level resistors;
 3. the `Heart` components (chambers, valves, `PERICARDIUM`);
@@ -551,7 +556,7 @@ Every model lives in `base_models/`, `component_models/`, or `device_models/` an
 
 - **`static model_type`** — the string key used in `available_model_map` and in definition JSON. Model classes carry **no UI metadata**; the edit schema is a consumer concern (in explain-ui it lives at `src/model-interface/registry.ts`).
 - **`constructor(model_ref, name = "")`** — `model_ref` is the whole engine `model` object; the base stores it as `this._model_engine` and caches `this._t = model_ref.modeling_stepsize`. Initialize independent props (config), dependent props (computed outputs), and `_`-prefixed local refs here. (`build()` passes a 3rd `model_type` arg the base ignores.)
-- **`init_model(args)`** — base impl maps each `{key, value}` in `args` onto `this[key]`, then instantiates and inits anything declared in `this.components` (registering each on `model.models`), and finally sets `this._is_initialized = true`. Override to resolve cross-model references, then call/replicate the base behaviour.
+- **`init_model(args)`** — base impl maps each `{key, value}` in `args` onto `this[key]`, then inits everything declared in `this.components` (instantiating any that don't exist yet, which in a normal build `build()` has already done), and finally sets `this._is_initialized = true`. Override to resolve cross-model references, then call/replicate the base behaviour.
 - **`step_model()`** — base impl runs `calc_model()` only when `is_enabled && _is_initialized`. Don't override unless you need custom gating.
 - **`calc_model()`** — where the physics happens. Override this.
 
@@ -574,7 +579,7 @@ Core physics params are never used raw. Each tunable has a base value plus three
 The formula (see `Capacitance.calc_elastances` / `Resistor.calc_resistance`):
 
 ```
-p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling-1)*p
+p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling_ps-1)*p
 ```
 
 When adding a tunable param, follow this convention so it composes with interventions and scaling.
@@ -584,12 +589,7 @@ When adding a tunable param, follow this convention so it composes with interven
 - **[`BloodVessel`](./BloodVessel.md)** — most of the circulation — overrides `calc_resistances`/`calc_elastances` and composes **multiplicatively**. The three R layers are multiplied by the ANS multiplier, `r_eff = r · factor · factor_ps · factor_scaling_ps · (1 + (ans_activity − 1)·ans_sens)`. Elastance follows R through the α-coupling: `el_eff = el_base · (el layers) · (R multiplier)^α`. Its `u_vol` uses the inherited additive layers, then is multiplied by the ANS unstressed-volume multiplier.
 - **[`HeartChamber`](./HeartChamber.md)** stays additive but adds extra terms: drug, Mob, load and remodelling factors, plus an ANS term that is *subtracted* for `el_min` (lusitropy).
 
-**⚠️ The scaling-layer suffix is NOT uniform across the engine.** Verify before you copy:
-
-- The **capacitance / resistor / time-varying-elastance** family uses **`*_factor_scaling_ps`** (e.g. `el_base_factor_scaling_ps`, `u_vol_factor_scaling_ps`, `r_factor_scaling_ps` in [`Capacitance.js`](../base_models/Capacitance.js) / [`Resistor.js`](../base_models/Resistor.js)).
-- The **diffusor / exchanger** family uses **`*_factor_scaling`** with **no `_ps`** (e.g. `dif_o2_factor_scaling`, `dif_co2_factor_scaling` in [`GasDiffusor.js`](../base_models/GasDiffusor.js); likewise `GasExchanger`, `BloodDiffusor`).
-
-If you scale a diffusor through the `*_scaling_ps` name it will silently do nothing.
+**The scaling layer is always named `*_factor_scaling_ps`**, in every family: `el_base_factor_scaling_ps`, `u_vol_factor_scaling_ps`, `r_factor_scaling_ps` ([`Capacitance.js`](../base_models/Capacitance.js), [`Resistor.js`](../base_models/Resistor.js)), and `dif_o2_factor_scaling_ps`, `dif_co2_factor_scaling_ps` ([`GasExchanger.js`](../base_models/GasExchanger.js), [`BloodDiffusor.js`](../base_models/BloodDiffusor.js)). The diffusors used `*_factor_scaling` (no `_ps`) until the v1.0 documentation pass.
 
 ### 7b. `ncc_*` cycle counters live on the components
 
@@ -597,17 +597,21 @@ The cycle counters are fields of the models that drive them, advanced once per s
 
 ### 7c. Blood/gas composition propagation
 
-There is no global solver moving solutes around — composition rides the flow. `Resistor.calc_flow` moves volume by calling `comp_from.volume_out(flow*dt)` then `comp_to.volume_in(...)`. `BloodCapacitance.volume_in(dvol, comp_from)` mixes the incoming substances by the incoming volume fraction:
+There is no global solver moving solutes around — composition rides the flow. `Resistor.calc_flow` moves volume by calling `comp_from.volume_out(flow*dt)` then `comp_to.volume_in(...)`. The blood compartments' `volume_in(dvol, comp_from)` (`BloodCapacitance`, `BloodTimeVaryingElastance`, `HeartChamber`, all through [`helpers/BloodMixing.js`](../helpers/BloodMixing.js) `mix_blood_in`) mixes the incoming blood by the incoming volume fraction, with `vol` the volume after the inflow (exact mass balance):
 
 ```
-concentration += ((concentration_from - concentration) * dvol) / vol
+concentration += (concentration_from - concentration) * dvol / vol
 ```
 
-applied to `to2`, `tco2`, every entry in `solutes` and `drugs`, plus `temp` and `viscosity` (treated as solutes). This dilution is how blood gases, solutes, drugs, and temperature propagate through the circuit. Gas compartments propagate analogously through `GasDiffusor`/`GasExchanger` partial-pressure-driven diffusion. See [`BloodCapacitance.md`](./BloodCapacitance.md).
+applied to `to2`, `tco2`, every entry in `solutes` and `drugs`, and `temp`. **Viscosity is not mixed**: `Blood` derives it from each compartment's haemoglobin every step. This dilution is how blood gases, solutes, drugs and temperature propagate through the circuit; a `fixed_composition` compartment keeps its composition.
 
-### 7d. ModelScaler touches only the scaling layer
+Gas compartments do the same for their gas composition in `GasCapacitance.volume_in`. Exchange **between** blood and gas, or across a membrane, is done by the diffusors and exchangers (`GasExchanger` alveolus↔capillary, `BloodDiffusor` placenta). Mixing without net flow between two compartments of one continuous pool is `Resistor.mix_flow` (see [Resistor](./Resistor.md#mixing-without-net-flow-mix_flow)). See [`BloodCapacitance.md`](./BloodCapacitance.md).
 
-[`ModelScaler`](./ModelScaler.md) writes the `*_factor_scaling_ps` layer (and direct volume adjustments) — never the `_ps` user layer — so its scaling composes cleanly with user/scenario adjustments. It is not the layer's only writer: the [Calibrator](./Calibrator.md)'s PAP lever writes `r_factor_scaling_ps` on `IPSL`/`IPSR`. The base params are written only by `incorporate()`, which bakes every scaling layer of every component named in the scaler config into its base and resets the factor to `1.0`. Weight scaling (`scale_to_weight`) is linear and volume-only — the inverse elastance/resistance scaling is commented out, and nothing scales heart rate or VO₂. `scaleModel(group, factor)` routes through the big `switch` in `ModelEngine.scale_model` to the many `scale_*` methods (`scale_blood_volume`, `scale_systemic_resistances`, `scale_to_weight`, …). `reset` calls `ModelScaler.reset()` and restores `model.weight = model._baseline_weight`.
+### 7d. Who writes the scaling layer
+
+[`ModelScaler`](./ModelScaler.md) writes the `*_factor_scaling_ps` layer for elastances, resistances and unstressed volumes, never the `_ps` user layer, so its scaling composes with user and scenario adjustments. Its **volume** scaling is the exception: it multiplies the raw `vol` and `u_vol` of the compartments in the scaler config. The factor groups set the layer **absolutely** (1.0 = no scaling), so anything left in it is replaced by the next `scale` command. `incorporate()` bakes the scaling layers of every component named in the scaler config into the base values (`u_vol`, `el_base`, `el_min`, `el_max`, `r_for`/`r_back`) and resets those factors to `1.0`, keeping the model's behaviour (BloodVessel's R→E coupling, HeartChamber's `el_k` and the additive models' `_ps` layers are carried along; only the heart chambers' additive ANS term changes, see [ModelScaler](./ModelScaler.md#incorporate-baking-the-layer)). **Since v1.0 every shipped scenario is baked**, and the generators and `build_patient.mjs` end with `incorporate`, so a scenario as loaded has all scaling layers at 1.0.
+
+ModelScaler is not the layer's only writer: the [Calibrator](./Calibrator.md)'s PAP lever writes `r_factor_scaling_ps` on `IPSL`/`IPSR`, and `Uterus` and `MaternalPlacenta` write the scaling layer of their own vessels (pregnancy adaptation). A `ModelScaler.reset()` or `incorporate()` on those components would interact with them. Weight scaling (`scale_to_weight`) is linear and volume-only — the inverse elastance/resistance scaling is commented out, and nothing scales heart rate or VO₂. `scaleModel(group, factor)` routes through the big `switch` in `ModelEngine.scale_model` to the many `scale_*` methods (`scale_blood_volume`, `scale_systemic_resistances`, `scale_to_weight`, …). `reset` calls `ModelScaler.reset()` and restores `model.weight = model._baseline_weight`.
 
 ---
 
@@ -620,22 +624,27 @@ applied to `to2`, `tco2`, every entry in `solutes` and `drugs`, plus `temp` and 
 5. **Export it from [`ModelIndex.js`](../ModelIndex.js).** The engine builds `available_model_map` from everything `ModelIndex` exports. **Forgetting this export is the usual cause of "model type not found" at build.**
 6. **Reference the `model_type`** in your `model_definitions/*.json` `models` map.
 7. **Add a `model_type` entry to the consumer's edit schema** (in explain-ui: `src/model-interface/registry.ts`) so the parameters become editable in the app (the engine ships no UI metadata).
-8. **Write a doc** in `docs/engine/` following the template in §10.
+8. **Write a doc** in `docs/` following the template in §9.
 
 ---
 
-## 9. The house doc template
+## 9. The house doc template (v1.0)
 
-Every per-class doc in `docs/engine/` should follow this structure (the canonical exemplar is [`BloodCapacitance.md`](./BloodCapacitance.md)):
+Every per-class doc in `docs/` follows this structure. The exemplar is [`BloodCapacitance.md`](./BloodCapacitance.md). A page has two layers: sections 1–2 are written for students and clinicians (plain language, no code), and sections 3–11 are the developer reference. Leave out a section only when it would be empty, and say so in one line when a reader would expect it (e.g. "No factors of its own").
 
-1. **Title + one-paragraph summary** — what the model is, in plain terms.
-2. **Inheritance** — an ASCII tree showing the chain up to `BaseModelClass`, and which classes extend this one.
-3. **What it models** — the physiological/engineering role.
-4. **Properties** — tables split into inherited vs. unique, with `Property | Unit | Description` columns. Mark sentinel values (e.g. `-1 = not calculated`).
-5. **Calc / math sections** — the equations and the order `calc_model()` runs them, referencing the actual method names.
-6. **Factor system** — the three-tier table for this model's tunables (link to §7a here rather than re-deriving it).
-7. **Example definition (JSON)** — a real, minimal `models` entry.
-8. **Usage in the model** — how it's wired into scenarios and which models reference it.
+1. **Title + summary.** One or two sentences: what the model is.
+2. **Physiology.** What it represents in the patient or device, in plain language, and what a clinician would see change when it changes. No code identifiers beyond the model's name.
+3. **Inheritance.** An ASCII tree up to `BaseModelClass`, plus the classes that extend this one.
+4. **Properties.** Tables with `Property | Unit | Default | Description`, split into *config* (set in the definition JSON), *outputs* (computed each step), and *set by other models* (props another model writes onto this one). The default is the constructor value; a scenario usually overrides it. Mark sentinel values (e.g. `-1 = not calculated`). For inherited props, link to the parent's table instead of repeating it.
+5. **Calculation.** The equations in the order `calc_model()` runs them, under the actual method names, plus any overridden hooks (`volume_in`, …).
+6. **Factor system.** Which tunables carry the three layers and whether they compose additively or multiplicatively. Link to §7a, don't re-derive it.
+7. **Inputs and outputs.** Which models this one reads and writes, and which models read or write it.
+8. **Assumptions and limitations.** Simplifications, calibrated constants and their rationale, and known gaps.
+9. **Example definition (JSON).** A real entry copied from a canonical scenario (`term_neonate` where possible), trimmed to the config props, with the scenario and path named.
+10. **Usage in the scenarios.** Where it is instantiated and what it is wired to.
+11. **References.** Literature for the equations and default values. If the class introduces no literature-derived values, say so.
+
+**Short form** for helpers and very small classes: title + summary, API (functions/methods with arguments and return values), where it is used, notes.
 
 ---
 
@@ -643,16 +652,20 @@ Every per-class doc in `docs/engine/` should follow this structure (the canonica
 
 One line each; follow the link for detail.
 
-- **[DataCollector](./DataCollector.md)** — fast (`watch_list`, default `sample_interval` 0.005 s) and slow (`watch_list_slow`, 1.0 s) watchlists of dot-path props; `collect_data()` buffers, `get_model_data()` drains, `clean_up()` drops disabled-model entries. Always watches `Heart.ncc_*`.
+- **[DataCollector](./DataCollector.md)** — fast (`watch_list`, default `sample_interval` 0.005 s) and slow (`watch_list_slow`, 1.0 s) watchlists of dot-path props; `collect_data()` buffers, `get_model_data()` drains, `clean_up()` drops entries whose model no longer exists (a disabled model keeps its watch). Always watches `Heart.ncc_*`.
 - **[TaskScheduler](./TaskScheduler.md)** — deferred mutations every `_task_interval` (0.015 s): numeric tweens (type 0), instant boolean/string swaps (type 1), scheduled method calls (type 2). Writes directly to model props (usually a `*_factor_ps` or base param).
-- **[ModelScaler](./ModelScaler.md)** — linear (volume-only) weight scaling and manual subsystem scaling; writes the `*_factor_scaling_ps` layer and raw volumes; routed via `ModelEngine.scale_model`.
+- **[ModelScaler](./ModelScaler.md)** — group scaling (absolute, on the `*_factor_scaling_ps` layer), linear volume-only weight scaling, and `incorporate` (bake); routed via `POST "scale"` → `ModelEngine.scale_model`.
+- **[BloodMixing](./BloodMixing.md)**, **[GasMixing](./GasMixing.md)** — composition mixing on inflow and exchange without net flow (§7c).
+- **[Orifice](./Orifice.md)** — Bernoulli orifice term and jet velocity (Shunts, Pda).
+- **[Units](./Units.md)** — shared physical constants (STPD O2 conversion, gas constant, water vapour).
 - **[Calibrator](./Calibrator.md)** — shared closed-loop secant calibration (`buildLiveControllers`/`runCalibration`/`measureWindow`); backs both offline patient-building and the live `tune_model` path.
 - **[ChannelWriter](./ChannelWriter.md)** — typed realtime data-plane writer (chart ring + anim snapshot); flushed each realtime tick.
 - **[RealtimeChannels](./RealtimeChannels.md)** — the `RT_MSG` message constants and channel/transport descriptors for the typed data plane.
 - **[AnimationPacker](./AnimationPacker.md)** — builds the component→slot registry and packs per-frame sprite animation data from the live model.
 - **[RealTimeMovingAverage](./RealTimeMovingAverage.md)** — moving-average helper used for smoothing realtime-derived signals.
+- **[ModelRegistry](./ModelRegistry.md)** — `model_type` → class lookup that lets `BaseModelClass` instantiate sub-models (built-in or custom) without an import cycle; filled by `ModelEngine` at startup.
 
-### Realtime read side (`explain/realtime/`, main thread)
+### Realtime read side (`realtime/`, main thread)
 
 The mirror of the `ChannelWriter`/`AnimationPacker` write side, running on the **main thread** — separate from the control-plane `ModelEmitter` events:
 
@@ -760,303 +773,425 @@ Frames follow the anim layout from [RealtimeChannels](./RealtimeChannels.md): `[
 ### FILE: explain-engine/docs/Ans.md
 
 ````markdown
-# Autonomic Nervous System (Ans, AnsAfferent, AnsEfferent)
+# Ans
 
-The autonomic nervous system (ANS) subsystem is a closed-loop reflex controller. It senses
-physiological quantities (pressures, blood gases), converts them to normalized **receptor firing
-rates**, and feeds those back as **effect factors** onto target models (heart rate, contractility,
-vascular tone, minute volume, …). It is the model's baroreflex and chemoreflex.
+`Ans` is the autonomic nervous system: the reflex network that keeps blood pressure and blood gases near their set-points. It is a small manager. It owns the reflex arcs as sub-models, switches them all on or off together, and solves the blood gases the chemoreceptors read. The reflexes themselves are [AnsAfferent](./AnsAfferent.md) receptors feeding [AnsEfferent](./AnsEfferent.md) effector pathways.
 
-Three classes work together:
+## Physiology
 
-| Class | Role | Analogy |
-|---|---|---|
-| `Ans` | Manager — enables/disables the loop and refreshes the blood gases its receptors read | central control |
-| `AnsAfferent` | Receptor — maps one input quantity to a firing rate (0–1) | baro-/chemoreceptor |
-| `AnsEfferent` | Effector — sums the weighted firing-rate deviations of its afferents and writes an effect factor to a target | efferent nerve |
+The autonomic nervous system adjusts the body continuously, without conscious control:
+- **Baroreflex.** Stretch receptors in the aortic arch and carotid sinus sense blood pressure. A fall in pressure raises heart rate, contractility and vascular tone (sympathetic) within seconds; a rise does the opposite (vagal).
+- **Chemoreflex.**
+  - Central chemoreceptors (mainly pCO2/pH) and peripheral ones in the carotid body (mainly pO2) raise ventilation when CO2 rises or O2 falls.
+  - In the newborn, hypoxaemia also slows the heart: the diving-reflex-like bradycardia that follows an apnoea.
 
-## Data flow
+Each reflex is an arc: a receptor that fires faster or slower as its input moves from its set-point, a central integration, and efferent nerves that change an organ's behaviour.
+
+## Inheritance
 
 ```
-            input_prop (e.g. AAR.pres, AA.po2)
-                   │
-                   ▼
-            ┌───────────────┐   firing_rate (0–1)      ┌───────────────┐   effector (factor)
-   sensor → │  AnsAfferent  │ ───────────────────────► │  AnsEfferent  │ ──────────────────────► target_model.target_prop
-            │  (receptor)   │   update_effector(fr, w)  │  (effector)   │   (e.g. Heart.ans_activity_hr)
-            └───────────────┘                           └───────────────┘
-                   ▲                                                                    │
-                   └──────────────────── physiological response ────────────────────────┘
+BaseModelClass
+  └── Ans
 ```
 
-An afferent can drive **several** efferents (its `efferents` list); an efferent can be driven by
-**several** afferents (they accumulate via `update_effector`). All three run on their own throttled
-interval, decoupled from the model step size.
+## Properties
 
-## `Ans` — the manager
+### Config (set in the definition JSON)
 
-`calc_model()` runs every `_update_interval` (0.05 s) and does two things:
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `ans_active` | boolean | `true` | Master switch, copied onto every sub-model; an inactive efferent outputs 1 (no effect). |
+| `blood_composition_models` | list | `[]` | Compartments whose blood gases are solved for the chemoreceptors (`["AA"]` in every scenario). |
+| `components` | object | `{}` | The afferents and efferents (built by the base class). |
 
-1. Propagates its `ans_active` flag to every sub-model listed in `components` (the afferents and
-   efferents), so the whole loop can be switched on/off at once.
-2. Recomputes the blood composition (`calc_blood_composition`) for every compartment named in
-   `blood_composition_models`, so chemoreceptor afferents reading `po2`/`pco2`/`ph` see fresh values.
+## Calculation
 
-`Ans` holds no control logic itself — it is wiring and gating.
+Every 50 ms:
+1. `ans_active` is written onto every component.
+2. While active, [`calc_blood_composition`](./BloodComposition.md) runs on each `blood_composition_models` entry, so the chemoreceptors read current pO2, pCO2 and pH.
 
-## `AnsAfferent` — receptor curve
+The reflexes run in the components: each afferent turns its input into a firing rate (0–1, 0.5 at the set-point) and passes it to its efferents. Each efferent adds the deviations of its afferents, maps the result to an effect factor (1 at rest) and writes it onto its target.
 
-Each afferent maps its input to a normalized firing rate in **[0, 1]**, with **0.5 as the setpoint**
-(no effect). Updated every `_update_interval` (0.015 s):
+## The reflex network in the scenarios
 
-1. **Read input:** `input_value = models[input_model][input_prop]`.
-2. **Activation** (deviation from setpoint, clamped to the configured window):
-   - `input_value > max_value` → `activation = max_value − set_value`
-   - `input_value < min_value` → `activation = min_value − set_value`
-   - otherwise → `activation = input_value − set_value`
-3. **Gain** — the slope that maps activation onto the firing-rate range, separately above and below
-   the setpoint so an asymmetric input window still spans 0→1:
-   - activation > 0: `gain = (1.0 − 0.5) / (max_value − set_value)`
-   - activation ≤ 0: `gain = (0.5 − 0.0) / (set_value − min_value)`
-   - (each guarded against a zero-width range → gain 0)
-4. **Target firing rate:** `new_firing_rate = 0.5 + gain · activation`.
-5. **First-order lag** with time constant `tc` (forward Euler), so the receptor responds gradually:
-   `firing_rate += (Δt / tc) · (new_firing_rate − firing_rate)`  (with `Δt = _update_interval`; if
-   `tc == 0` the new rate is applied instantly).
-6. **Broadcast:** call `update_effector(firing_rate, effect_weight, name)` on each connected efferent.
+Every scenario (term_neonate values; the set-points are re-anchored per scenario to its calibrated rest):
 
-So a rising input (e.g. arterial pressure) above setpoint drives the firing rate toward 1; below
-setpoint toward 0; at setpoint it sits at 0.5.
+| Afferent | Input | min / set / max | → Efferent(s) |
+|---|---|---|---|
+| `BR_MAP` (baroreceptor) | `AAR.pres` | 25 / 57.8 / 100 mmHg | `EF_HR`, `EF_SVR`, `EF_HEART` |
+| `CR_PCO2` (central chemoreceptor) | `AA.pco2` | 15 / 39.7 / 75 mmHg | `EF_MV` |
+| `CR_PO2` (peripheral chemoreceptor, weight −0.15) | `AA.po2` | 30 / 75.5 / 150 mmHg | `EF_MV` |
+| `CR_PH` | `AA.ph` | 6.9 / 7.36 / 7.7 | none |
 
-## `AnsEfferent` — effect translation
+| Efferent | Target | Effect at firing 0 / 1 | Time constant |
+|---|---|---|---|
+| `EF_HR` | `Heart.ans_activity_hr` | 1.5 / 0.43 | 2 s |
+| `EF_SVR` | `Circulation.ans_activity` (vascular tone) | 2.0 / 0.5 | 10 s |
+| `EF_HEART` | `Heart.ans_activity` (contractility) | 1.15 / 0.85 | 10 s |
+| `EF_MV` | `Breathing.mv_ans_factor` | 0.1 / 10 | 5 s |
 
-Each efferent collects firing rates from its afferents during the interval and, every
-`_update_interval` (0.015 s), turns them into an effect factor written to its target.
+So a fall in pressure (low baroreceptor firing) raises heart rate, vascular tone and contractility, and a rise in pCO2 raises minute ventilation. A fall in pO2 raises it too, through the negative weight on `CR_PO2`.
 
-**Accumulation** (`update_effector`, called by each afferent with its own name):
+**Hypoxic bradycardia** (the six preterm and Bischoff scenarios, added by `scripts/_add_apnea.mjs`): `CR_PO2_HR` (`AA.po2`, set-point a few mmHg below the resting pO2) → `EF_HR_CHEMO` → `Heart.hr_chemo_factor`, with effect 0.5 at firing 0 and 1 at 1, so it only slows the heart. See [Apnea](./Apnea.md).
+
+## Factor system
+
+None of its own; the efferents write the targets' ANS inputs (`ans_activity`, `ans_activity_hr`, `mv_ans_factor`, `hr_chemo_factor`), which the targets apply in their own way (e.g. [BloodVessel](./BloodVessel.md) through `ans_sens`).
+
+## Inputs and outputs
+
+- **Reads:** the `blood_composition_models` compartments (solved).
+- **Writes:** `ans_active` of its components; the solved blood gases of `AA`.
+- **Written by:** the user (`ans_active`); the scenario generators (set-points, wiring).
+- **Read by:** its components.
+
+## Assumptions and limitations
+
+- **One receptor per reflex, set-points fixed.** No baroreceptor resetting over hours, no adaptation of the chemoreceptors to chronic hypercapnia.
+- **Afferent deviations add in the efferent**, so two afferents on one efferent can drive its firing rate outside 0–1 (see [AnsEfferent](./AnsEfferent.md)).
+- **`CR_PH` is computed but drives nothing** in every scenario.
+- **Switching off is abrupt:** an inactive efferent jumps to 1 without its time constant.
+- **A component name that does not resolve throws** in the `ans_active` copy (the components are built from the definition, so this only happens with hand-edited state).
+- **Lag of up to one interval:** the afferents and efferents update every 15 ms and Ans every 50 ms, so the loop carries up to one interval of delay. This is intended and stable.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Ans` (trimmed; `components` holds the eight sub-models above):
+
+```json
+{
+  "name": "Ans",
+  "model_type": "Ans",
+  "is_enabled": true,
+  "ans_active": true,
+  "blood_composition_models": ["AA"]
+}
 ```
-_inputs[source].sum += (firing_rate − 0.5) · weight
-_inputs[source].n   += 1
-```
 
-**Summation** (`calc_model`): each afferent's reports in the window are averaged, and the afferents
-**add**, so a second receptor adds its drive instead of diluting the first (the old version averaged
-across afferents, which halved the CO2 drive as soon as an O2 input was added):
-```
-firing_rate = 0.5 + Σ_source  _inputs[source].sum / _inputs[source].n     (0.5 if nothing reported)
-```
-The weight sets sign and strength: a receptor whose firing falls with the stimulus (O2, pH) needs a
-negative weight to stimulate.
+## Usage in the scenarios
 
-**Translation** to an effect factor — piecewise linear, pinned to `1.0` (no effect) at firing rate
-0.5 and continuous at the breakpoint:
-```
-firing_rate ≥ 0.5 :  effector = 1.0 + (effect_at_max_firing_rate − 1.0) / 0.5 · (firing_rate − 0.5)
-firing_rate < 0.5 :  effector = effect_at_min_firing_rate + (1.0 − effect_at_min_firing_rate) / 0.5 · firing_rate
-```
-At firing rate 1.0 the effector equals `effect_at_max_firing_rate`; at 0.0 it equals
-`effect_at_min_firing_rate`; at 0.5 it equals 1.0. If `ans_active` is false the effector is forced to
-1.0 (no effect).
+One instance in every scenario, with the network above. The six preterm and Bischoff scenarios add the hypoxic-bradycardia arc.
 
-A first-order lag with time constant `tc` smooths the effector, then it is written straight onto the
-target: `models[target_model][target_prop] = effector`. The accumulator is reset for the next window.
+## References
 
-## Configuration (model-definition fields)
-
-**AnsAfferent**: `input_model`, `input_prop`, `min_value` / `set_value` / `max_value` (the receptor
-window, in the input's own units), `tc`, `efferents` (list of efferent names), `effect_weight`.
-
-**AnsEfferent**: `target_model`, `target_prop` (the factor it drives, e.g. `Heart.ans_activity_hr`),
-`effect_at_min_firing_rate`, `effect_at_max_firing_rate`, `tc`.
-
-**Ans**: `ans_active`, `components` (its afferents/efferents), `blood_composition_models`.
-
-Example wiring (term neonate): afferent `BR_MAP` reads `AAR.pres` and drives `EF_HR`, `EF_SVR`,
-`EF_HEART`; efferent `EF_HR` writes `Heart.ans_activity_hr` with
-`effect_at_max_firing_rate = 0.428`, `effect_at_min_firing_rate = 1.5` (high pressure → faster
-firing → factor < 1 → lower heart rate; the baroreflex).
-
-### Hypoxic-bradycardia chemoreflex (apnea of prematurity)
-
-The base ANS senses arterial pO₂ (`CR_PO2`) but drives **only breathing** (`CR_PCO2 → EF_MV →
-Breathing.mv_ans_factor`); there is no pO₂→heart-rate path, so hypoxia alone does not slow the heart.
-Scenarios patched by `scripts/_add_apnea.mjs` add one: a dedicated afferent `CR_PO2_HR` (input `AA.po2`)
-drives a new efferent `EF_HR_CHEMO` onto `Heart.hr_chemo_factor` with `effect_at_min_firing_rate ≈ 0.5`
-(low pO₂ → low firing → factor < 1 → **bradycardia**) and `effect_at_max_firing_rate = 1.0` (one-sided:
-hyperoxia gives no tachycardia). Its `set_value` is placed a few mmHg **below** the scenario's calibrated
-baseline `AA.po2`, so the reflex is neutral at rest and only fires when an apnea pulls pO₂ below baseline.
-See [Apnea](./Apnea.md).
-
-## Notes & caveats
-
-- **Timing / lag.** Afferents, efferents and the manager each run on their own interval and the
-  afferent→efferent hand-off depends on step order, so the loop carries up to one interval of lag.
-  This is intended (receptors and effectors are not instantaneous) and stable at the default
-  intervals.
-- **Reference guarding.** `AnsAfferent` skips its update when `input_model` is missing and only calls
-  `update_effector` on efferents that resolve to a model with that hook; `AnsEfferent` skips the write
-  when `target_model` is missing. So broken afferent/efferent wiring degrades gracefully. The `Ans`
-  manager itself (`components`, `blood_composition_models`) still dereferences its names directly — a
-  name that does not resolve to a built model there will throw.
-- **Setpoint = 0.5** everywhere — both the receptor output and the effector's neutral point. Keep new
-  afferents/efferents on that convention so resting tone composes to "no effect".
+No literature values; set-points are each scenario's calibrated rest, ranges and gains are model choices.
 
 ````
 
 ### FILE: explain-engine/docs/AnsAfferent.md
 
-```markdown
+````markdown
 # AnsAfferent
 
-An `AnsAfferent` is an autonomic **receptor**: it reads one input quantity (e.g. arterial pressure or
-a blood gas), maps it through a baro-/chemoreceptor curve to a normalized firing rate (0–1, setpoint
-0.5), low-passes it with a time constant, and broadcasts it to the connected efferents.
+An `AnsAfferent` is an autonomic **receptor**. It reads one quantity (arterial pressure, a blood gas), turns it into a normalised firing rate between 0 and 1 (0.5 at the set-point), smooths it with a time constant, and sends it to the efferents it is wired to. It is one of the parts of the reflex network managed by [Ans](./Ans.md); [AnsEfferent](./AnsEfferent.md) turns the firing into an effect.
 
-It is one of the three classes that make up the autonomic feedback loop — **see
-[Ans.md](./Ans.md)** for the full description of the receptor curve (input → activation → gain →
-firing rate), the data flow, the configuration fields (`input_model`, `input_prop`, `min/set/max`,
-`tc`, `efferents`, `effect_weight`), and the reference-guarding behaviour.
+## Physiology
+
+A baroreceptor fires faster as the arterial wall stretches; a chemoreceptor fires faster as pCO2 rises or pO2 falls. Around the normal value the response is roughly linear and saturates at the extremes: below some pressure the receptor is silent, above another it can't fire faster. The receptor also has a little inertia, so it follows changes with a lag of a second or more.
+
+## Inheritance
 
 ```
+BaseModelClass
+  └── AnsAfferent
+```
+
+## Properties
+
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `input_model`, `input_prop` | – | `""` | The quantity sensed, e.g. `AAR` / `pres`, `AA` / `pco2`. |
+| `min_value` | input unit | 0 | Input at which the firing rate is 0. |
+| `set_value` | input unit | 0 | Set-point: firing rate 0.5. Re-anchored per scenario to its calibrated rest. |
+| `max_value` | input unit | 0 | Input at which the firing rate is 1. |
+| `tc` | s | 1.0 | Time constant of the firing rate (0 = instantaneous). |
+| `efferents` | list | `[]` | Efferents that receive the firing rate. |
+| `effect_weight` | – | 1.0 | Weight (and sign) of this afferent in its efferents. Negative for a receptor whose effect opposes its firing, e.g. `CR_PO2` (−0.15): falling pO2 must raise ventilation. |
+| `ans_active` | boolean | `true` | Copied from Ans. The afferent keeps firing; the efferents apply the gate. |
+
+### Outputs
+
+| Property | Unit | Description |
+|---|---|---|
+| `input_value` | input unit | Last value read. |
+| `firing_rate` | 0–1 | Smoothed firing rate. |
+
+## Calculation
+
+Every 15 ms (skipped if `input_model` is missing or the input is not a finite number):
+
+1. **Clamp** the input to `min_value … max_value` and take its deviation from the set-point.
+2. **Piecewise-linear receptor curve**, with separate gains above and below the set-point:
+   ```
+   input ≥ set:  rate = 0.5 + 0.5 · (input − set) / (max − set)
+   input < set:  rate = 0.5 − 0.5 · (set − input) / (set − min)
+   ```
+   (a zero-width side gives gain 0).
+3. **Time constant:** `firing_rate += 0.015/tc · (rate − firing_rate)`.
+4. **Report** to every efferent: `update_effector(firing_rate, effect_weight, name)`.
+
+**Example**, `BR_MAP` in term_neonate (25 / 57.8 / 100 mmHg, tc 4 s): a MAP of 45 mmHg gives `0.5 − 0.5·12.8/32.8 = 0.30`, so the heart-rate and tone efferents see a firing deficit of 0.2.
+
+## Factor system
+
+None.
+
+## Inputs and outputs
+
+- **Reads:** `input_model.input_prop`.
+- **Writes:** nothing directly; it calls `update_effector` on its efferents.
+- **Written by:** Ans (`ans_active`); the scenario generators (set-points, ranges, wiring).
+- **Read by:** its efferents; `DataCollector` watchers (`firing_rate`).
+
+## Assumptions and limitations
+
+- **Static, piecewise-linear curve.** No rate sensitivity (a real baroreceptor responds to the rate of pressure rise as well as its level) and no resetting of the set-point.
+- **Saturation by clamping** the input, not a sigmoid: the firing rate stops exactly at 0 and 1.
+- **The asymmetric gains are set by the window:** a set-point closer to `max_value` makes the receptor more sensitive above it than below.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Ans.components.BR_MAP` (trimmed to the config props):
+
+```json
+{
+  "name": "BR_MAP",
+  "model_type": "AnsAfferent",
+  "is_enabled": true,
+  "input_model": "AAR",
+  "input_prop": "pres",
+  "min_value": 25,
+  "set_value": 57.81,
+  "max_value": 100,
+  "tc": 4,
+  "efferents": ["EF_HR", "EF_SVR", "EF_HEART"],
+  "effect_weight": 1
+}
+```
+
+## Usage in the scenarios
+
+`BR_MAP`, `CR_PCO2`, `CR_PO2` and `CR_PH` in every scenario; `CR_PO2_HR` in the six preterm and Bischoff scenarios. Their settings are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
+
+## References
+
+No literature values; set-points are each scenario's calibrated rest.
+
+````
 
 ### FILE: explain-engine/docs/AnsEfferent.md
 
-```markdown
+````markdown
 # AnsEfferent
 
-An `AnsEfferent` is an autonomic **effector**: it sums the weighted firing-rate deviations pushed to it
-by the afferents, translates the result into an effect factor, smooths it with a time constant, and writes
-it onto a target model property (e.g. `Heart.ans_activity_hr`).
+An `AnsEfferent` is an autonomic **effector pathway**. It collects the firing rates its [AnsAfferent](./AnsAfferent.md) receptors send it, combines them into one firing rate, maps that to an effect factor (1 at rest), smooths it with a time constant, and writes it onto one property of a target model: heart rate, contractility, vascular tone or ventilation. It is part of the reflex network managed by [Ans](./Ans.md).
 
-It is one of the three classes that make up the autonomic feedback loop — **see
-[Ans.md](./Ans.md)** for the full description of the firing-rate summation (each afferent's deviation from 0.5 adds, so
-the resting rate stays 0.5 regardless of how many afferents feed it), the effect
-translation, the configuration fields (`target_model`, `target_prop`, `effect_at_min/max_firing_rate`,
-`tc`), and the reference-guarding behaviour.
+## Physiology
+
+The brainstem integrates the receptors and sends the result out over sympathetic and vagal nerves. More sympathetic and less vagal activity raises heart rate, contractility and vascular tone; the reverse lowers them. Each organ responds at its own speed:
+- the heart rate within one or two beats (vagal, fast);
+- the vessels and contractility over 5–15 s (sympathetic, slower);
+- ventilation over several breaths.
+
+## Inheritance
 
 ```
+BaseModelClass
+  └── AnsEfferent
+```
+
+## Properties
+
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `target_model`, `target_prop` | – | `""` | The property written, e.g. `Heart` / `ans_activity_hr`. |
+| `effect_at_min_firing_rate` | – | 0 | Effect factor at firing rate 0. |
+| `effect_at_max_firing_rate` | – | 0 | Effect factor at firing rate 1. |
+| `tc` | s | 1.0 | Time constant of the effect (0 = instantaneous). |
+| `ans_active` | boolean | `true` | Copied from Ans; when false the effect is 1. |
+
+### Outputs
+
+| Property | Unit | Description |
+|---|---|---|
+| `firing_rate` | 0–1 | Combined firing rate of the last update. |
+| `effector` | – | Current effect factor (the value written to the target). |
+
+## Calculation
+
+**`update_effector(rate, weight, source)`**, called by each afferent on its own update, accumulates `(rate − 0.5) · weight` per source.
+
+**Every 15 ms:**
+1. **Combine.** `firing_rate = 0.5 + Σ over afferents of (their average weighted deviation in this window)`, clamped to 0–1. Afferents **add**: a second receptor adds its drive instead of diluting the first.
+2. **Map to an effect**, piecewise linear with 1 at 0.5:
+   ```
+   firing ≥ 0.5:  effect = 1 + (effect_at_max − 1) · (firing − 0.5) / 0.5
+   firing < 0.5:  effect = effect_at_min + (1 − effect_at_min) · firing / 0.5
+   ```
+   With the clamp, the effect always stays between `effect_at_min_firing_rate` and `effect_at_max_firing_rate`.
+3. **Gate:** with `ans_active` false the effect is 1 at once (no time constant).
+4. **Time constant:** `effector += 0.015/tc · (effect − effector)`.
+5. **Write** `target_model.target_prop = effector` (skipped if the target is missing), and clear the accumulators.
+
+**Example**, `EF_HR` in term_neonate (effect 1.5 at firing 0, 0.43 at firing 1, tc 2 s): the baroreceptor firing 0.30 at a MAP of 45 mmHg gives an effect of `1.5 + (1 − 1.5) · 0.30/0.5 = 1.2`, so over a few seconds Heart adds `0.2 · heart_rate_ref · ans_sens` to its rate.
+
+## Factor system
+
+None of its own. What the target does with the value is the target's business: Heart adds `(ans_activity_hr − 1) · heart_rate_ref · ans_sens` to its rate and scales contractility and relaxation with `ans_activity` (see [Heart](./Heart.md)), Circulation passes `ans_activity` to each vessel's `ans_sens`, and Breathing multiplies the minute volume by `mv_ans_factor`.
+
+## Inputs and outputs
+
+- **Reads:** the afferents' reports (through `update_effector`).
+- **Writes:** `target_model.target_prop`.
+- **Written by:** its afferents; Ans (`ans_active`); the scenario generators (ranges, time constants).
+- **Read by:** its target; `DataCollector` watchers (`effector`, `firing_rate`).
+
+## Assumptions and limitations
+
+- **Additive integration, then a clamp.** Two afferents on one efferent add their deviations; the clamp caps the combined drive at the configured range. In the shipped wiring only `EF_MV` has two (pCO2 and pO2); the clamp keeps `mv_ans_factor` within 0.1–10 (it reached −0.035 and 11.35 at the extremes before v1.0).
+- **One target per efferent;** a nerve with several effects is several efferents fed by the same afferent (as `BR_MAP` → `EF_HR`, `EF_SVR`, `EF_HEART`).
+- **No separate sympathetic and vagal limbs** with their own dynamics; one time constant per efferent.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Ans.components.EF_HR` (trimmed to the config props):
+
+```json
+{
+  "name": "EF_HR",
+  "model_type": "AnsEfferent",
+  "is_enabled": true,
+  "target_model": "Heart",
+  "target_prop": "ans_activity_hr",
+  "effect_at_max_firing_rate": 0.428,
+  "effect_at_min_firing_rate": 1.5,
+  "tc": 2
+}
+```
+
+## Usage in the scenarios
+
+`EF_HR`, `EF_SVR`, `EF_HEART` and `EF_MV` in every scenario; `EF_HR_CHEMO` in the six preterm and Bischoff scenarios. Their targets, ranges and time constants are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
+
+## References
+
+No literature values; ranges and time constants are model choices.
+
+````
 
 ### FILE: explain-engine/docs/Apnea.md
 
 ````markdown
 # Apnea
 
-The Apnea model reproduces **apnea of prematurity (AOP)** — the intermittent breathing pauses of the
-preterm neonate that cause **oxygen desaturation** and, seconds later, **bradycardia**. It is a small
-**episodic controller**: it owns an eupnea ↔ apnea state machine and, during a pause, suppresses
-ventilation by driving the existing [Breathing](./Breathing.md) and upper-airway levers. It computes no
-physiology of its own — the desaturation and the bradycardia both **emerge** through the unchanged
-gas-exchange and ANS machinery downstream.
+`Apnea` generates the recurring breathing pauses of apnoea of prematurity. It runs a breathing ↔ apnoea cycle with irregular but reproducible timing. During a pause it uses existing levers: it switches spontaneous breathing off (central), closes the upper airway (obstructive), or both (mixed). It computes no physiology itself: the desaturation and, through the chemoreflex, the bradycardia follow from the gas exchange and the ANS.
+
+## Physiology
+
+Preterm infants have an immature respiratory control: breathing stops for 10–20 s or longer, several times an hour, more often the more preterm the infant.
+- **Central** apnoea (no respiratory effort) is the most common type.
+- **Obstructive** apnoea is effort against a closed upper airway, no flow.
+- **Mixed** apnoea starts obstructive and continues central.
+
+During the pause alveolar O2 falls and the blood desaturates. The low pO2 triggers a reflex bradycardia within seconds. Longer pauses desaturate deeper and are more often followed by bradycardia. Heart rate usually recovers before saturation, because the vagal reflex is faster than reoxygenation.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Apnea   (episodic ventilation-suppression controller — owns no compartment)
+  └── Apnea
 ```
-
-Extends [`BaseModelClass`](./BaseModelClass.md) directly. Like [Mob](./Mob.md) (which drives the Heart)
-it is a controller that writes to other models rather than a physical element.
-
-## What it models
-
-```
-episode timer ──► onset ──► suppress ventilation ──►  falling alveolar/arterial pO2
-                                │                              │
-                    central: Breathing.switch_breathing(false) │ (GasExchanger stops loading O2)
-                    obstructive: MOUTH_DS.no_flow = true        ▼
-                    mixed: obstruct, then also cut drive    AA.to2 ↓ → AA.so2 ↓  (DESATURATION)
-                                                                │
-                                             CR_PO2_HR (pO2 chemoreceptor) fires low
-                                                                ▼
-                                        EF_HR_CHEMO → Heart.hr_chemo_factor < 1  (BRADYCARDIA)
-```
-
-The three mechanisms of a clinical apnea:
-
-- **central** — respiratory drive ceases: `Breathing.switch_breathing(false)` zeroes the muscle effort.
-- **obstructive** — the upper airway collapses: the `MOUTH_DS` resistor is set `no_flow = true`, so
-  effort continues but no air moves. Breathing's tidal-volume feedback ramps `rmp_gain` against the
-  obstruction, producing a realistic recovery breath on release.
-- **mixed** — obstruction first, then central drive loss for the remainder of the pause.
-
-Central is the dominant type in AOP and is the default. The desat→brady coupling (the
-`CR_PO2_HR` afferent and `EF_HR_CHEMO` efferent) lives in the ANS wiring, not in this class — see
-[Ans](./Ans.md) and [Usage](#usage-in-the-model).
 
 ## Properties
 
-### Configuration (set in the model definition)
+### Config (set in the definition JSON)
 
-| Property | Default | Unit | Description |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| `apnea_enabled` | `false` | — | master switch; episodes only occur when `true` (`switch_apnea`) |
-| `apnea_frequency` | `0.5` | episodes/min | mean episode onset rate |
-| `apnea_duration` | `12.0` | s | mean pause duration |
-| `apnea_variability` | `0.3` | — | coefficient of variation on interval and duration (0–1) |
-| `apnea_type` | `"central"` | — | `"central"` \| `"obstructive"` \| `"mixed"` |
-| `mixed_obstructive_fraction` | `0.5` | — | for mixed: leading obstructed fraction of the pause |
-| `seed` | `42` | — | PRNG seed (deterministic episode timing) |
-| `breathing_model` | `"Breathing"` | — | name of the spontaneous-breathing model to suppress |
-| `airway_model` | `"MOUTH_DS"` | — | name of the upper-airway resistor to occlude |
+| `apnea_enabled` | boolean | `false` | Switch (`switch_apnea`). Off in every scenario. |
+| `apnea_frequency` | /min | 0.5 | Mean number of episodes per minute. Scenarios: 25 wk 1.2, 28 wk 0.7, 30 wk 0.5, Bischoff 0.9. |
+| `apnea_duration` | s | 12 | Mean episode duration. Scenarios 14–20. |
+| `apnea_variability` | 0–1 | 0.3 | Uniform jitter of interval and duration (± fraction of the mean). |
+| `apnea_type` | – | `"central"` | `"central"`, `"obstructive"` or `"mixed"`. |
+| `mixed_obstructive_fraction` | 0–1 | 0.5 | In a mixed episode, the leading obstructive share of the pause. |
+| `seed` | – | 42 | Seed of the deterministic random generator. |
+| `breathing_model` | – | `"Breathing"` | Model whose breathing is switched off. |
+| `airway_model` | – | `"MOUTH_DS"` | Upper-airway resistor that is closed. |
 
-### Computed / reported (outputs)
+### Episode state (saved with the state)
 
 | Property | Unit | Description |
 |---|---|---|
-| `in_apnea` | — | whether an episode is currently running |
-| `active_type` | — | type of the running episode (`""` when eupneic) |
-| `apnea_count` | — | number of completed episodes |
-| `last_apnea_duration` | s | duration of the most recent completed episode |
-| `longest_apnea_duration` | s | longest episode so far |
-| `time_since_last_apnea` | s | time since the last episode ended |
+| `baseline_breathing` | boolean or null | Breathing state at the first build. A non-breathing patient (fetus) is never started; null until captured. |
+| `drive_off` | boolean | Apnea has switched breathing off. |
+| `airway_obstructed` | boolean | Apnea has closed the airway. |
+| `episode_timer` | s | Time in the current phase. |
+| `episode_duration` | s | Drawn duration of the running episode. |
+| `next_interval` | s | Drawn gap until the next onset. |
 
-### Local (internal)
+### Outputs
 
-`_breathing` / `_airway` (resolved target refs), `_baseline_breathing` (spontaneous-breathing state at
-init — respected, so a non-breathing scenario is never force-started), `_timer` (phase timer, reset each
-transition), `_next_interval` / `_current_duration` (drawn timings), `_obstructed` / `_drive_off`
-(which levers this model currently holds), `_rng_state` (LCG state).
+| Property | Unit | Description |
+|---|---|---|
+| `in_apnea` | boolean | An episode is running. |
+| `active_type` | – | Type of the running episode (`""` when breathing). |
+| `apnea_count` | – | Completed episodes. |
+| `last_apnea_duration`, `longest_apnea_duration` | s | Duration of the last and the longest episode. |
+| `time_since_last_apnea` | s | Time since the last episode ended. |
 
-## Calculation (`calc_model`)
+## Calculation
 
-Each step, if `apnea_enabled` is false or the patient is not a baseline spontaneous breather, the model
-guarantees eupnea (restores both levers) and returns. Otherwise it advances the phase timer and runs the
-state machine:
+Each step:
+- **Not active** (`apnea_enabled` false, or a non-breathing patient): ventilation is restored if Apnea had suppressed it; nothing else.
+- **Breathing:** count toward `next_interval`, then start an episode. Its duration is drawn, and
+  - **central:** `Breathing.switch_breathing(false)`;
+  - **obstructive / mixed:** `MOUTH_DS.no_flow = true`.
+- **In an episode:**
+  - a mixed episode also switches breathing off after `mixed_obstructive_fraction` of its duration;
+  - at the end, ventilation is restored, the counters are updated and the next interval is drawn.
 
-- **Eupnea:** when `_timer ≥ _next_interval` → **onset**. Draw a duration; apply the mechanism
-  (`_set_central(true)`, `_set_obstruction(true)`, or obstruction-then-handover for mixed).
-- **Apnea:** for a mixed episode, at `_current_duration · mixed_obstructive_fraction` add central drive
-  loss. When `_timer ≥ _current_duration` → **terminate**: restore both levers, update the episode
-  counters, and draw the next inter-onset interval.
+**Timing.** The gap is drawn so the *episode rate* matches `apnea_frequency`: mean gap = 60/frequency − mean duration (at least 1 s). Gap and duration each get a uniform jitter of ± `apnea_variability`. A linear congruential generator seeded by `seed` keeps headless runs reproducible.
 
-### Deterministic timing
+**After a pause.** In an obstructive pause Breathing keeps its effort against the closed airway. Its load compensation raises the effort over the missed breaths (up to about ×2 at the default `load_compensation`), so the first breath after release is a large one.
 
-Episodes are stochastic but **reproducible**: a seeded linear-congruential generator (`_rand`, no
-`Math.random`) keeps headless probe runs deterministic while the episodes stay irregular. `_jitter`
-applies a symmetric multiplicative spread of `±apnea_variability` around a mean. The inter-onset gap is
-derived from `apnea_frequency` **minus** the mean duration, so the *rate of episodes* matches
-`apnea_frequency` rather than the rate of eupneic gaps.
+**Desaturation and bradycardia** are emergent:
+- the lungs stop refreshing alveolar gas, so [GasExchanger](./GasExchanger.md) loads less O2 and the arterial saturation falls;
+- in the scenarios patched by `scripts/_add_apnea.mjs`, a pO2 heart-rate chemoreceptor (`CR_PO2_HR`, reading `AA.po2`) drives `EF_HR_CHEMO` onto `Heart.hr_chemo_factor` (see [Ans](./Ans.md));
+- its set-point is a few mmHg below the baseline pO2, so the reflex is neutral at rest.
+
+**Current behaviour** (`node scripts/probe_apnea.mjs preterm_28wk`, 2026-10-24, FiO2 0.25, no device in the model definition): 3 central episodes of 11.5–13.3 s in 5 min. SpO2 falls only from 93.3 to ~91.6 % and the heart rate from 153 to ~152 /min: no bradycardia. That is milder than clinical apnoeas of that length, which often desaturate below 85 %. It is listed for the scenario re-validation.
 
 ## Factor system
 
-This model has **no factor/`_eff` tunables of its own** — it is a controller, not a physical element.
-It drives targets through their existing hooks: the boolean `Breathing.breathing_enabled` (via
-`switch_breathing`) and `MOUTH_DS.no_flow`. The heart-rate side is the additive
-`Heart.hr_chemo_factor` written by the `EF_HR_CHEMO` efferent (see [Heart](./Heart.md) §heart rate and
-[Ans](./Ans.md)).
+None. It switches `Breathing.breathing_enabled` and the airway resistor's `no_flow`.
+
+## Inputs and outputs
+
+- **Reads:** `Breathing.breathing_enabled` (baseline, once).
+- **Writes:** `Breathing.breathing_enabled` (via `switch_breathing`), `MOUTH_DS.no_flow`.
+- **Written by:** the user and bot (`apnea_enabled`, the settings); `scripts/_add_apnea.mjs`.
+- **Read by:** `scripts/probe_apnea.mjs`; `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **Episodes are scheduled, not caused.** They don't follow sleep state, hypoxia, temperature, feeds or caffeine, and they don't end early on hypoxaemia: a pause runs its drawn duration.
+- **Obstruction closes `MOUTH_DS`.** With an endotracheal tube the airway is the tube, so an obstructive episode in an intubated patient closes the wrong path.
+- **Shared levers.** [Resuscitation](./Resuscitation.md) also switches breathing; Apnea only reopens what it closed itself (`drive_off`, `airway_obstructed`).
+- **Saved states keep the episode.** A state saved mid-pause finishes that pause after reload and restores ventilation.
 
 ## Example definition (JSON)
 
-Inserted by `scripts/_add_apnea.mjs` (GA-graded defaults); a preterm 28 wk block:
+From `preterm_28wk.json`, `models.Apnea` (trimmed to the config props):
 
 ```json
 {
   "name": "Apnea",
-  "description": "apnea of prematurity — episodic ventilation suppression",
-  "is_enabled": true,
   "model_type": "Apnea",
-  "components": {},
+  "is_enabled": true,
   "apnea_enabled": false,
   "apnea_frequency": 0.7,
   "apnea_duration": 16,
@@ -1069,38 +1204,13 @@ Inserted by `scripts/_add_apnea.mjs` (GA-graded defaults); a preterm 28 wk block
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- **Desaturation is emergent.** With drive off (or the airway occluded) the lungs stop refreshing
-  alveolar gas; [GasExchanger](./GasExchanger.md) stops replenishing `AA.to2`; and
-  [`calc_blood_composition`](./BloodComposition.md) recomputes a falling `so2`. [Monitor](./Monitor.md)
-  surfaces it as `sao2_pre`.
-- **Bradycardia is emergent, via the chemoreflex.** `scripts/_add_apnea.mjs` also closes the
-  hypoxia→bradycardia loop the base ANS lacks: a dedicated pO₂ heart-rate chemoreceptor afferent
-  `CR_PO2_HR` (reading `AA.po2`) drives a new efferent `EF_HR_CHEMO` onto `Heart.hr_chemo_factor`. The
-  afferent's setpoint is placed a few mmHg **below** the scenario's calibrated baseline `AA.po2`, so the
-  reflex is neutral at rest and engages only when an apnea pulls pO₂ below baseline; its dynamic range is
-  centred on the pO₂ band an apnea actually reaches (~35–50 mmHg). The **desat→brady lag** (a few
-  seconds) is not hard-coded — it emerges from O₂ washout plus the afferent/efferent time constants, and
-  heart rate recovers before saturation because the vagal reflex (tc ≈ 1 s) is faster than re-oxygenation.
-- **Ships dormant.** Patched scenarios keep `apnea_enabled = false` so their calibrated baseline vitals
-  are unchanged; enable it per run (probe / UI) or patch with `<scenario>=on`. `Heart.hr_chemo_factor`
-  defaults to `1.0`, so the chemoreflex efferent is neutral wherever it is not wired.
-- **Verification:** `node scripts/probe_apnea.mjs preterm_28wk` reports per-episode duration, SpO₂ nadir,
-  HR nadir, and the desat→brady lag; `--no-chemoreflex` disables `EF_HR_CHEMO` to show the episodes still
-  desaturate identically but the heart rate no longer falls. See [TESTING](./TESTING.md).
-- **Interaction:** [Resuscitation](./Resuscitation.md) also toggles `Breathing.breathing_enabled`; the
-  two are mutually exclusive clinical states. Apnea records and restores the baseline breathing state, so
-  a non-breathing scenario (e.g. a fetus) is never force-started.
+In the six preterm and Bischoff scenarios, dormant (`apnea_enabled` false), so their baseline vitals are unchanged. Not in term_neonate or the fetal scenarios. Verification: `node scripts/probe_apnea.mjs <scenario>` reports per-episode duration, SpO2 and HR nadirs and the desaturation → bradycardia lag; `--no-chemoreflex` disables `EF_HR_CHEMO` for comparison. See [TESTING](./TESTING.md).
 
-## Notes & caveats
+## References
 
-- **Duration-dependent bradycardia is intended.** Short pauses (~10 s) desaturate but rarely bradycard;
-  longer pauses (>15–20 s) reach a lower pO₂ and drive a clear bradycardia — matching the clinical
-  observation that bradycardia probability rises with apnea length.
-- **Obstructive episodes ramp `rmp_gain`.** During an occlusion Breathing keeps trying and its
-  tidal-volume feedback climbs toward `rmp_gain_max`; on release this yields an exaggerated recovery
-  breath (physiologically apt).
+No literature values; frequencies and durations are set per scenario for teaching.
 
 ````
 
@@ -1109,87 +1219,100 @@ Inserted by `scripts/_add_apnea.mjs` (GA-graded defaults); a preterm 28 wk block
 ````markdown
 # BaseModelClass
 
-`BaseModelClass` is the abstract root every model in the engine extends. It defines the common
-**lifecycle** (construct → init → step → calc) and the shared fields the engine relies on; subclasses
-add the actual physics in `calc_model()`. It has **no `model_type`** of its own and is never
-instantiated directly, and it carries **no factor system** — the factor / effective-value pattern is
-introduced by the elastance/resistance subclasses ([`Capacitance`](./Capacitance.md),
-[`Resistor`](./Resistor.md), [`TimeVaryingElastance`](./TimeVaryingElastance.md)).
+`BaseModelClass` is the root class every model in the engine extends. It defines the lifecycle (construct → `init_model` → `step_model` → `calc_model`), the shared fields the engine relies on, and the `components` mechanism through which a model owns sub-models. It has no `model_type` of its own and is never instantiated directly.
+
+## Physiology
+
+None. This class is the contract that makes something a "model" the engine can build, step, record and scale. All physiology lives in the subclasses.
 
 ## Inheritance
 
 ```
-BaseModelClass                       (abstract root — lifecycle + shared fields)
-  ├── Capacitance                        → BloodCapacitance → BloodVessel, GasCapacitance
-  ├── Resistor                           → HeartValve
-  ├── TimeVaryingElastance               → HeartChamber, BloodTimeVaryingElastance
+BaseModelClass
+  ├── Capacitance
+  │     ├── BloodCapacitance
+  │     │     └── BloodVessel
+  │     └── GasCapacitance
+  ├── TimeVaryingElastance
+  │     ├── BloodTimeVaryingElastance
+  │     └── HeartChamber
+  ├── Resistor
+  │     └── HeartValve
   ├── Container
-  └── … every component & device model (Heart, Breathing, Ans, Ventilator, …)
+  ├── BloodDiffusor, GasExchanger
+  ├── Ventilator
+  │     └── Sle6000
+  └── every other component and device model (Heart, Circulation, Blood, Gas, Ans, Kidneys, Ecls, Monitor, …)
 ```
 
-## What it models
-
-Nothing physiological on its own — it is the contract that makes a class a "model" the engine can
-build, step, collect from and scale. Every component lives in `explain/base_models/`,
-`explain/component_models/`, or `explain/device_models/` and ultimately extends this class.
+The base classes live in `base_models/`, the component models in `component_models/` and the devices in `device_models/`.
 
 ## Properties
 
-### Shared fields (independent / config)
+### Config (set in the definition JSON)
 
-| Property | Description |
-|---|---|
-| `name` | Unique model name (its key in `model.models`) |
-| `description` | Free-text description (documentation only) |
-| `is_enabled` | When false the model is skipped in the step loop; defaults to `false` |
-| `model_type` | The class key used at build time and in the definition JSON (set by subclasses) |
-| `components` | Dictionary of sub-models this model owns (composite-model mechanism) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `name` | – | constructor argument | Unique model name, and its key in `model.models`. |
+| `description` | – | `""` | Free text, for documentation and the UI only. |
+| `is_enabled` | boolean | `false` | When `false`, `step_model` skips the model. Every definition sets it explicitly. |
+| `model_type` | – | `""` | Class key, used at build time to pick the class. Set from the definition (the class's static `model_type` holds the same string). |
+| `components` | object | `{}` | Sub-models this model owns: `{ name: definition }`. See [Composite models](#composite-models-components). |
 
-### Local / internal fields
+### Internal
 
-| Property | Description |
-|---|---|
-| `_model_engine` | Reference to the whole engine `model` object (shared state, counters, other models) |
-| `_t` | The modeling step size, **captured at construction** from `model_engine.modeling_stepsize` |
-| `_is_initialized` | Set `true` at the end of `init_model`; gates stepping |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `_model_engine` | – | constructor argument | Reference to the whole engine `model` object (other models, `weight`, `modeling_stepsize`, …). |
+| `_t` | s | `modeling_stepsize` | Step size, copied once at construction. |
+| `_is_initialized` | boolean | `false` | Set `true` at the end of `init_model`. Gates stepping. |
 
-## Lifecycle
+## Calculation (lifecycle)
 
-1. **Construct** `(model_ref, name = "")` — store the engine reference as `_model_engine`, snapshot
-   the step size into `_t`, and set the shared-field defaults. (`build()` passes a 3rd `model_type`
-   argument that the base constructor ignores.)
-2. **`init_model(args)`** — apply the definition's `{key, value}` args onto the instance
-   (`this[arg.key] = arg.value`); then for each entry in `this.components`: instantiate the sub-model
-   into `model.models` (only if a model of that name does not already exist) and call `init_model` on
-   it with its own args. Finally set `_is_initialized = true`.
-3. **`step_model()`** — called every step by the engine; runs `calc_model()` **only when
-   `is_enabled && _is_initialized`**. Don't override unless you need custom gating.
-4. **`calc_model()`** — empty here; **overridden by almost every subclass** to do the per-step
-   calculation. This is where the physics lives.
+1. **`constructor(model_ref, name = "")`**: stores the engine reference, copies the step size into `_t`, and sets the defaults above. `build()` passes a third `model_type` argument, which the base ignores. A subclass calls `super(model_ref, name)` first, then declares its own config props, outputs and `_`-prefixed locals.
+2. **`init_model(args)`**: `args` is the definition as a list of `{key, value}` pairs.
+   1. Each pair is copied onto the instance (`this[key] = value`), including `components`.
+   2. For each entry in `this.components`, a sub-model is instantiated into `model.models`, **unless a model with that name already exists**. `build()` has already created all declared sub-models (see below), so in a normal build this step only matters for models added at runtime.
+   3. Each sub-model is initialized with its own definition as args, so its sub-models are handled the same way, recursively.
+   4. `_is_initialized` is set `true`.
+3. **`step_model()`**: called every step by the engine. Runs `calc_model()` only when `is_enabled && _is_initialized`. Override it only to change that gate.
+4. **`calc_model()`**: empty here. Subclasses put their per-step calculation in it.
 
-## Composite models (`components`)
+A subclass that overrides `init_model` to resolve references to other models (e.g. `this._lv = this._model_engine.models["LV"]`) calls `super.init_model(args)`, or applies the args and sets `_is_initialized = true` itself.
 
-A model can own a local sub-network by declaring sub-models in `components`. `init_model` instantiates
-each into the global `model.models` map (skipping any name that already exists) and initializes it, so
-the children still participate in the global step loop, data collection and scaling. `Pda`,
-`Placenta`, `Ecls` and the `Ventilator` use this to own their internal circuits.
+### Composite models (`components`)
 
-## Subclass contract
+A model can own a local sub-network by listing sub-models in `components`. The sub-models are full members of `model.models`: they are stepped, recorded by the `DataCollector` and scaled like any other model. In the shipped scenarios 11 models own sub-models: Heart, Circulation (most vessels), Mob (the coronaries), Ans, Respiration, Ventilator, Ecls, Placenta, Pda, Shunts and Kidneys. Some sub-models own sub-models of their own.
 
-- Declare a static `model_type` string (the key used at build time and in the definition JSON), and
-  add an `export` line in `explain/ModelIndex.js` so the engine's `available_model_map` can find it.
-- In the constructor, call `super(model_ref, name)`, then initialize independent (config) props,
-  dependent (computed) props, and `_`-prefixed local refs.
-- Override `init_model` only to resolve cross-model references (e.g.
-  `this._lv = this._model_engine.models["LV"]`); call `super.init_model(args)` (or set
-  `_is_initialized = true` yourself) so stepping is enabled.
-- Override `calc_model()` with the per-step physics.
+**Build order.** `ModelEngine.build()`:
+1. instantiates every model in the definition, in definition order;
+2. instantiates every declared sub-model, recursively, before any `init_model` runs;
+3. calls `init_model` on the top-level models, in definition order. Each owner initializes its own sub-models from its `init_model`.
+
+So when any `init_model` runs, every model of the scenario already exists, and a lookup by name finds it regardless of where its owner sits in the file. A model found that way may not be initialized yet; its definition values are applied when its owner's `init_model` runs.
+
+**Step order.** The step loop runs models in insertion order: the top-level models in definition order, then the sub-models, each owner's direct sub-models first, then theirs.
+
+## Factor system
+
+None. The factor/effective-value layers start at [`Capacitance`](./Capacitance.md), [`Resistor`](./Resistor.md) and [`TimeVaryingElastance`](./TimeVaryingElastance.md). See [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
+
+## Inputs and outputs
+
+- **Reads:** `model_ref.modeling_stepsize` at construction.
+- **Written by:** `ModelEngine.build()` (construction, `init_model`); `TaskScheduler` and the UI (`setPropValue`), which can write any prop including `is_enabled`.
+- **Read by:** `ModelEngine` (`step_model` every step), `DataCollector` (watched props), `ModelScaler`, and every model that resolves a reference to another model by name.
+
+## Assumptions and limitations
+
+- **Unknown args are kept, not rejected.** `init_model` copies every key onto the instance, so a typo or a key left over from an older class becomes a stray property instead of a build error. `scripts/doc_audit.mjs` lists such keys per class ("scenario keys unknown to the class").
+- **`_t` is a snapshot.** It is copied at construction. No runtime setter changes `modeling_stepsize`, so this is safe today. A future runtime step-size change would have to refresh `_t` on every model (and on `TaskScheduler`).
+- **A sub-model whose name is already a top-level model is not replaced.** The owner initializes the existing model again with the sub-model's definition, so the later values win.
+- **Models added at runtime** (`add_model_to_engine`) create their sub-models in their own `init_model`. Models that collect compartments at build time (`Blood`, `Gas`) don't see them.
 
 ## Example definition (JSON)
 
-`BaseModelClass` is abstract — there is no definition block for it. Every concrete model's definition,
-however, carries the shared fields it defines (`name`, `description`, `is_enabled`, `model_type`,
-`components`) alongside that model's own parameters:
+`BaseModelClass` has no definition of its own. Every definition carries its shared fields next to the class's own parameters. From `term_neonate.json`, `models.PA_PAAL` (trimmed):
 
 ```json
 {
@@ -1201,21 +1324,13 @@ however, carries the shared fields it defines (`name`, `description`, `is_enable
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- The foundational contract for every model; you extend it (directly or via an intermediate like
-  `Capacitance` / `Resistor` / `TimeVaryingElastance`) to add a new model.
-- The engine's build/step machinery (`ModelEngine`), `DataCollector` and `ModelScaler` all rely on
-  these shared fields and the `is_enabled && _is_initialized` gate.
+Every model extends it, directly or through `Capacitance`, `Resistor`, `TimeVaryingElastance` or another intermediate class. To add a model, see [ARCHITECTURE §8](./ARCHITECTURE.md#8-how-to-add-a-new-model).
 
-## Notes
+## References
 
-- **`_t` is a snapshot.** It is read once at construction. There is no runtime setter for
-  `modeling_stepsize`, and the build sets it before any model is constructed, so `_t` is always correct
-  in practice — but a future runtime step-size change would need `_t` refreshed on every model (and on
-  `TaskScheduler`).
-- The base `init_model` does **not** error on unknown args — it assigns any `{key, value}` straight
-  onto the instance, so definition typos become stray properties rather than build failures.
+None: this is software structure, not physiology.
 
 ````
 
@@ -2058,166 +2173,142 @@ drift (per-minute averages constant from minute 2) and no autoregulation oscilla
 ````markdown
 # Blood
 
-`Blood` is a **manager model**, not a compartment. It owns the circulating blood properties (haemoglobin and the other solutes, dissolved gases, temperature, viscosity, the O₂–Hb affinity baseline and the Haldane coefficient), seeds them onto every blood-containing compartment at build time, exposes setters to change them at runtime, and once per second samples representative compartments to publish arterial and venous blood gases. The acid-base / oxygenation chemistry itself lives in [`BloodComposition`](./BloodComposition.md); `Blood` only sets the inputs and reads the outputs.
+`Blood` manages the circulating blood as a whole; it is not a compartment. It holds the reference composition (haemoglobin and the other solutes, O2 and CO2 content, temperature), seeds it into every blood compartment at build, sets the blood-wide properties (O2–Hb affinity, Haldane effect, viscosity), and once per second solves the blood gases at the sites a clinician samples. The chemistry itself is in [BloodComposition](./BloodComposition.md).
+
+## Physiology
+
+Blood carries oxygen bound to haemoglobin, CO2 mostly as bicarbonate, and the electrolytes and buffers that set its pH. A few properties belong to the blood as a whole:
+- **O2–Hb affinity (P50).** Fetal haemoglobin binds oxygen more tightly (P50 ~18–19 mmHg) than adult haemoglobin (~27 mmHg), so a fetus or newborn is more saturated at the same pO2.
+- **Haldane effect.** Deoxygenated blood carries more CO2, which helps unload CO2 in the tissues and the lungs.
+- **Viscosity** rises steeply with the haematocrit. Polycythaemia raises vascular resistance; anaemia or haemodilution lowers it.
+- **Temperature.** Blood is warmed or cooled by the tissues it passes through.
+
+The clinician samples blood gases at fixed sites: **pre-ductal** (right arm, ascending aorta), **post-ductal** (umbilical artery, descending aorta) and **mixed venous** (pulmonary artery). A pre/post-ductal difference signals right-to-left shunting across the duct.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Blood   (whole-blood property manager)
+  └── Blood
 ```
-
-`Blood` extends `BaseModelClass` directly. It holds no volume or pressure of its own — it operates on the [`BloodCapacitance`](./BloodCapacitance.md)-family compartments via references collected at init.
-
-## What it models
-
-A single `Blood` instance per scenario represents the circulating blood as a whole:
-
-- the **reference composition** every freshly-built blood compartment starts from,
-- the **propagation path** that pushes `haldane_coeff` / `P50_0` (and, via setters, temperature, viscosity, gases and solutes) out to all blood compartments, and
-- the **blood-gas read-outs** (pre-ductal arterial, post-ductal arterial, venous, mixed-venous) that the Monitor and UI display.
-
-It does not move volume or compute pressure; flow mixing is done per-compartment in [`BloodCapacitance.volume_in`](./BloodCapacitance.md), gas exchange in the diffusors/exchangers, and metabolism in the metabolic models.
 
 ## Properties
 
-### Configuration (set from the model definition / `init_model`)
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `to2`, `tco2` | mmol/L | 0, 0 | Total O2 and CO2 content seeded into fresh compartments. |
+| `solutes` | object | `{}` | Solute set seeded into fresh compartments (mmol/L; `albumin` g/L): `na`, `k`, `ca`, `cl`, `mg`, `lact`, `phosphates`, `uma` (unmeasured anions), `albumin`, `hemoglobin`, `glucose`. |
+| `temp` | °C | 37.0 | Temperature seeded into fresh compartments (not the live temperature, see `set_temperature`). |
+| `blood_temp_tc` | s | 10 | Time constant with which each compartment relaxes toward its perfusion target `body_temp`. |
+| `P50_0` | mmHg | 20.0 | O2–Hb affinity at standard conditions, given to every compartment that has none: fetal ~18.8, neonatal 20, adult 26.7. Scenarios 18.5–20. |
+| `haldane_coeff` | – | 1.0 | Haldane-effect strength in the CO2 solver (0 = off), given to every compartment. **2.2 in every scenario.** |
+| `viscosity_plasma` | cP | 1.3 | Plasma viscosity. |
+| `viscosity_hct_k` | per unit Hct | 3.13 | Exponential haematocrit coefficient (low-shear, in vivo). |
+| `blood_containing_modeltypes` | list | 4 types | Model types treated as blood compartments: `BloodVessel`, `HeartChamber`, `BloodCapacitance`, `BloodTimeVaryingElastance`. |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `viscosity_plasma` | cP | Plasma viscosity in the haematocrit relation (default 1.3) |
-| `viscosity_hct_k` | 1/Hct | Exponential haematocrit coefficient, low-shear in vivo value (default 3.13) |
-| `viscosity` | cP | Output: blood viscosity at the build-time Hb (derived in `init_model`; a definition value is overwritten) |
-| `viscosity_ref` | cP | Output: the viscosity the vessel resistances are calibrated at, from the volume-weighted Hb of the circulating blood at build; copied onto every compartment |
-| `temp` | degC | Reference blood temperature (default 37.0) |
-| `blood_temp_tc` | s | Perfusion equilibration time constant — how fast blood warms toward its perfusion target (default 10.0); seeded onto each compartment as `blood_temp_tc` |
-| `to2` | mmol/L | Reference total O₂ concentration seeded into compartments |
-| `tco2` | mmol/L | Reference total CO₂ concentration seeded into compartments |
-| `solutes` | object | Reference circulating solute set (Na, K, Ca, Mg, Cl, lactate, albumin, phosphates, uma, hemoglobin, glucose, …) |
-| `P50_0` | mmHg | O₂–Hb affinity baseline (pO₂ at 50% saturation): fetal HbF ≈ 18.8, neonatal 20.0, adult 26.7 (default 20.0) |
-| `haldane_coeff` | unitless | Haldane-effect strength propagated to every compartment; `0` disables it (default 1.0) |
-| `blood_containing_modeltypes` | array | Model types treated as blood compartments: `BloodVessel`, `HeartChamber`, `BloodCapacitance`, `BloodTimeVaryingElastance`, `BloodPump` |
+| `viscosity` | cP | Viscosity at the build-time haemoglobin (a definition value is overwritten at build); changed by `set_viscosity`. |
+| `viscosity_ref` | cP | Viscosity the vessel resistances are calibrated at: from the volume-weighted Hb of the circulating blood at build, copied onto every compartment. |
+| `preductal_art_bloodgas` | object | `{ph, pco2, po2, hco3, be, so2}` of `AA`, every 1 s. |
+| `art_bloodgas` | object | Same for `AD` (post-ductal). |
+| `art_solutes` | object | Copy of `AD.solutes`. |
 
-### Computed / published (dependent)
+## Calculation
 
-| Property | Unit | Description |
-|---|---|---|
-| `preductal_art_bloodgas` | object | `{ph, pco2, po2, hco3, be, so2}` sampled from the ascending aorta `AA` |
-| `art_bloodgas` | object | Post-ductal arterial blood gas sampled from the descending aorta `AD` |
-| `ven_bloodgas` | object | Venous read-out (declared on the model; venous solves run on `IVCI`/`SVC`/`RAIVCI`/`PA`) |
-| `art_solutes` | object | Snapshot of `AD.solutes` (arterial solute concentrations) |
+**Build (`init_model`).** For every model of one of the four types (except those with `blood_pool: false`):
+- `haldane_coeff` is set, and `P50_0` if the compartment has none (so `PL_MAT` keeps its adult 26.7);
+- a fresh compartment (empty `solutes`) gets `to2`, `tco2`, `solutes`, `temp` and `viscosity`. A loaded state keeps its own composition;
+- the thermal fields are added if missing: `body_temp` (= its temperature), `blood_temp_tc`, `temp_ext_override` (false).
 
-### Local references (`_`-prefixed)
+Then `viscosity_ref` is computed from the volume-weighted Hb of the enabled compartments and copied to all.
 
-| Property | Description |
+**Every step**, for every compartment except `fixed_composition` ones:
+```
+temp      += (body_temp − temp) · min(1, dt / blood_temp_tc)
+viscosity  = viscosity_plasma · exp(viscosity_hct_k · Hct),   Hct = Hb[mmol/L] / 0.6206 / 33,  clamped 0–0.9
+```
+A neonatal Hb of 10 mmol/L gives Hct 0.49 and ~6 cP. [BloodVessel](./BloodVessel.md) scales its resistance with `viscosity / viscosity_ref`, so a change in Hb moves the resistances.
+
+**Every 1 s:** `calc_blood_composition` on `AA` and `AD` (stored in the two blood gas objects), and on `IVCI`, `SVC`, `RAIVCI` and `PA`. The Monitor reads SvO2 from `PA`, the true mixed-venous blood.
+
+## Methods
+
+| Method | Effect |
 |---|---|
-| `_update_interval` | Sampling period for `calc_model` (1.0 s) |
-| `_update_counter` | Time accumulator toward `_update_interval` |
-| `_ascending_aorta` | Reference to `model.models["AA"]` (pre-ductal site) |
-| `_descending_aorta` | Reference to `model.models["AD"]` (post-ductal site) |
-| `_blood_components` | Array of every blood-containing compartment, collected at init |
+| `set_solute(solute, value, site = "")` | One compartment, or every compartment plus the reference `solutes`. |
+| `set_to2(value, site = "")`, `set_tco2(value, site = "")` | One compartment or all; the reference `to2`/`tco2` is not updated. A perturbation: gas exchange and metabolism take over from there. |
+| `set_P50(p50)` | Every compartment and `P50_0`. |
+| `set_haldane_coeff(k)` | Every compartment and `haldane_coeff`. |
+| `set_viscosity(cP)` | Scales `viscosity_plasma` so the viscosity at the current reference becomes `cP` (plasma proteins, cold agglutinins); resistances follow. |
+| `set_temperature(t, site = "")` | A **cold or warm blood bolus**: stamps `temp` on all compartments (or one), which then relax back to `body_temp`. 37 → 34 °C in term_neonate is back to 36.6 °C within 30 s and cools the core 0.3 °C. Lasting changes go through Thermoregulation. |
+| `set_perfusion_target(core)` | Called by Thermoregulation: `body_temp` of every compartment not under device control (`temp_ext_override`). |
+| `get_thermal_state(density, cp)` | Heat capacity and mean temperature of the enabled, non-fixed blood, for Thermoregulation's heat balance. |
+| `calc_viscosity(hb)` | The viscosity law above. |
 
-## Build-time bootstrap (`init_model`)
+## Factor system
 
-After applying the definition args, `init_model` walks `model.models` and, for every model whose `model_type` is in `blood_containing_modeltypes`:
+None. Viscosity reaches the resistances through `BloodVessel`'s viscosity term.
 
-1. pushes it onto `_blood_components`,
-2. propagates `model.haldane_coeff = this.haldane_coeff`,
-3. sets `model.P50_0 = this.P50_0` **only if the compartment has no `P50_0` of its own** (`model.P50_0 === undefined`) — a maternal pool kept at adult affinity therefore survives,
-4. **only for freshly-constructed compartments** (`Object.keys(model.solutes).length === 0`) copies the reference composition: `to2`, `tco2`, a shallow clone of `solutes`, `temp`, `viscosity`.
+## Inputs and outputs
 
-The empty-solutes guard (rather than a `to2 == 0 && tco2 == 0` proxy) is deliberate: a restored / loaded saved state already carries per-compartment composition, and that composition is preserved even when a compartment legitimately has `to2 == 0`. Finally it caches the `AA`/`AD` references and sets `art_solutes = {...this.solutes}`.
+- **Reads:** `AA`, `AD`, `IVCI`, `SVC`, `RAIVCI`, `PA` (composition); every blood compartment's Hb, volume and temperature.
+- **Writes:**
+  - every blood compartment: `temp`, `viscosity`; at build also `haldane_coeff`, `P50_0`, `viscosity_ref`, the seed composition and the thermal fields;
+  - the solved composition of the six sampling sites.
+- **Written by:** `Thermoregulation` (`set_perfusion_target`); the user (the setters); scenario generators (`set_solute`, `set_P50`).
+- **Read by:** `Monitor`, scripts and `DataCollector` watchers (`art_bloodgas`, `preductal_art_bloodgas`).
 
-## Warming blood toward the body (`calc_model`, every step)
+## Assumptions and limitations
 
-Blood temperature is **a warmed, advecting field, not a stamp.** Every step, `calc_model` relaxes each
-blood compartment's `temp` toward its `body_temp` over `blood_temp_tc` —
-`temp += (body_temp − temp)·min(1, _t/blood_temp_tc)` — the blood counterpart of
-[`GasCapacitance.add_heat`](./GasCapacitance.md) (incompressible, so temperature only). `body_temp` is
-the perfusion target set by [`Thermoregulation`](./Thermoregulation.md) via `set_perfusion_target`
-(= core), or a device setpoint on a compartment flagged `temp_ext_override` (e.g. an
-[`Ecls`](./Ecls.md) heater-cooler). Combined with the temperature advection in `volume_in`, blood
-temperature now carries real gradients around the circuit instead of being re-pinned to core each
-second. The heat this exchange carries is fed back into Thermoregulation's core balance (`Q_perf`),
-so cooling the blood cools the core. Each compartment therefore also carries three thermal fields,
-seeded in `init_model`: `body_temp` (perfusion target), `blood_temp_tc` (relaxation tc),
-`temp_ext_override` (device-controlled flag).
-
-## Publishing blood gases (`calc_model`)
-
-The same `calc_model` also accumulates `_t` into `_update_counter` and, once `_update_counter >= _update_interval` (1.0 s), resets the counter. On each tick it calls `calc_blood_composition` (see [BloodComposition](./BloodComposition.md)) on selected compartments and copies the results:
-
-- **`AA`** → `preductal_art_bloodgas`
-- **`AD`** → `art_bloodgas`, and `art_solutes = {...AD.solutes}`
-- **`IVCI`** and **`SVC`** → venous solve (composition updated in place)
-- **`RAIVCI`** (if present) → right-atrial (IVC-side) solve. The two RA halves are coupled by a low resistance, so their pressures match, but they barely exchange blood (~7 mL/min in `term_neonate`). `RAIVCI` therefore holds IVC-side blood, not mixed venous blood.
-- **`PA`** (if present) → **mixed-venous** solve. The RV mixes both RA halves, so the PA carries true mixed-venous blood, and the Monitor reads SvO₂ here. Its composition must be solved here, or `so2` stays at the `-1` sentinel.
-
-## Runtime setters
-
-Each setter updates the reference value on `Blood` and/or pushes a value out to the compartments. Those that accept a `bc_site` apply to a single named compartment when one is given, otherwise to every compartment in `_blood_components`.
-
-| Setter | Effect |
-|---|---|
-| `set_temperature(temp, bc_site = "")` | Sets `temp` **directly** on all compartments (or one site); updates `this.temp`. Kept for build-time seeding / manual resets — **not** the runtime thermal path (see below) |
-| `set_perfusion_target(core)` | Sets `body_temp = core` on every compartment except those with `temp_ext_override` (device-controlled). The effector channel [`Thermoregulation`](./Thermoregulation.md) drives each update; blood then warms toward it over `blood_temp_tc` |
-| `get_thermal_state(density, cp)` | Returns `{ c_blood, t_mean }` — the heat capacity of the enabled blood pool `Σ vol·density·cp` (J/K) and its heat-capacity-weighted mean temperature. Used by Thermoregulation's two-node balance. Fixed-composition compartments (the maternal pool `PL_MAT`) are left out, as `calc_model` does not relax them: counting `PL_MAT` (pinned at 37.0 °C) as patient blood made a fetus at 37.5 °C lose ~4 W to it |
-| `set_viscosity(viscosity)` | Sets the blood viscosity at the reference Hb by scaling `viscosity_plasma` (e.g. plasma proteins); vessel resistances follow `viscosity / viscosity_ref`. Hb-driven changes need no setter |
-| `set_haldane_coeff(coeff)` | Sets `haldane_coeff` on all compartments; updates `this.haldane_coeff` |
-| `set_P50(p50)` | Sets `P50_0` on all compartments; updates `this.P50_0` (pick the dissociation curve, e.g. fetal vs adult) |
-| `set_to2(to2, bc_site = "")` | Sets `to2` on all compartments (or one site) |
-| `set_tco2(tco2, bc_site = "")` | Sets `tco2` on all compartments (or one site) |
-| `set_solute(solute, value, bc_site = "")` | Sets one solute on a named site; or (no site) sets it on every compartment **and** on the reference `this.solutes` |
-
-Note: `set_temperature`, `set_viscosity`, `set_haldane_coeff`, `set_P50` and `set_solute` (no site) write back to the matching reference property; `set_to2` / `set_tco2` (no site) push to the compartments only and do **not** update `this.to2` / `this.tco2`.
+- **Setters reach every blood compartment, the maternal pool included.** `set_solute`, `set_P50`, `set_to2` and `set_tco2` without a site also change `PL_MAT` and the ECLS circuit. See [Placenta](./Placenta.md#assumptions-and-limitations) for why the generators restore `PL_MAT`.
+- **Membership is by `model_type` string.** A custom subclass of a blood compartment with its own `model_type` must be added to `blood_containing_modeltypes`, or it is never seeded, warmed or given a viscosity.
+- **Fixed sampling sites.** The scenario must have `AA` and `AD`; `IVCI`, `SVC`, `RAIVCI` and `PA` are used when present. Other compartments' gases are solved only by whoever needs them.
+- **Blood gases are refreshed once per second.**
+- **Viscosity is low-shear** and depends on haematocrit only: no shear-thinning, no Fåhræus effect in small vessels. Hct is derived from Hb with a fixed MCHC of 33 g/dL.
+- **`haldane_coeff` 2.2** is a calibration value of the model's own CO2 formulation (see [BloodComposition](./BloodComposition.md)), not a measured quantity.
 
 ## Example definition (JSON)
 
-From `term_neonate.json` (`model_definition.models.Blood`):
+From `term_neonate.json`, `models.Blood` (trimmed to the config props):
 
 ```json
 {
   "name": "Blood",
-  "description": "blood composition model",
-  "is_enabled": true,
   "model_type": "Blood",
-  "viscosity": 6,
-  "temp": 37.0,
+  "is_enabled": true,
+  "viscosity_plasma": 1.3,
+  "viscosity_hct_k": 3.13,
+  "temp": 37,
+  "blood_temp_tc": 10,
   "to2": 7,
   "tco2": 25.5,
-  "solutes": {
-    "na": 138, "k": 3.5, "ca": 1, "cl": 106, "lact": 1, "mg": 0.75,
-    "albumin": 25, "phosphates": 1.64, "uma": 6, "hemoglobin": 10, "glucose": 4
-  },
   "P50_0": 20,
-  "haldane_coeff": 1
+  "haldane_coeff": 2.2,
+  "solutes": {
+    "na": 138, "k": 3.5, "ca": 1, "cl": 106, "lact": 1.5, "mg": 0.75,
+    "albumin": 25, "phosphates": 1.64, "uma": 5.5933, "hemoglobin": 10, "glucose": 4
+  }
 }
 ```
 
-`hemoglobin` is carried in `solutes` in **mmol/L** (the solver converts to g/dL internally). The `preductal_art_bloodgas` / `art_bloodgas` / `ven_bloodgas` / `art_solutes` objects also appear in a saved scenario, but they are computed outputs, not inputs.
+## Usage in the scenarios
 
-## Usage in the model
+One instance in every scenario.
 
-- Exactly one `Blood` instance per scenario. It must be built after the compartments exist so `_blood_components`, `AA` and `AD` resolve.
-- The reference `to2`/`tco2`/`solutes` are **seeds only**; after build the simulation tracks per-compartment values updated by flow mixing ([BloodCapacitance](./BloodCapacitance.md)), diffusion ([BloodDiffusor](./BloodDiffusor.md)) and metabolism.
-- `set_P50` / `set_haldane_coeff` are the levers for selecting a dissociation curve (fetal vs neonatal vs adult) and tuning the arterio-venous CO₂ behaviour respectively.
-</content>
+| Scenario | `P50_0` (mmHg) | Hb (mmol/L) |
+|---|---|---|
+| term_neonate / fetus_term | 20 | 10 / 9.3 |
+| preterm_30wk / fetus_30wk | 19 | 9.6 / 8.4 |
+| preterm_25wk, bischoff ×3 / preterm_28wk / fetus_25wk | 18.5 | 8.4 / 9.0 / 7.9 |
 
-## Viscosity from haematocrit
+## References
 
-Each step `calc_model` sets every compartment's viscosity from its own haemoglobin:
-
-```
-Hct = Hb[mmol/L] / 0.6206 / 33          (g/dL over an MCHC of 33 g/dL, clamped to 0..0.9)
-eta = viscosity_plasma · exp(viscosity_hct_k · Hct)
-```
-
-With the defaults a neonatal Hb of 10 mmol/L (Hct 0.49) gives ~6 cP. The coefficient is a low-shear
-(in vivo) value, steeper than the high-shear viscometer curve, which is what the microcirculation
-sees. `BloodVessel` scales its viscous resistance by `viscosity / viscosity_ref`, so haemodilution
-lowers and polycythaemia raises SVR and PVR (Poiseuille), while the scenario at its build-time Hb is
-unchanged. Viscosity is not mixed as a tracer any more: it follows the Hb wherever the blood goes.
-`Pda` and `Shunts` read the absolute viscosity for their Poiseuille terms.
+No literature is cited in the code for the viscosity constants; they are calibration choices (k = 3.13 gives ~6 cP at a neonatal haematocrit of 0.49). Per-scenario P50 and Hb come from the scenario validations (see the `*Reference.md` pages).
 
 ````
 
@@ -2226,129 +2317,155 @@ unchanged. Viscosity is not mixed as a tracer any more: it follows the Hb wherev
 ````markdown
 # BloodCapacitance
 
-A BloodCapacitance is a volume compartment that holds blood with tracked composition: dissolved gases, solutes, drugs, temperature, and viscosity. It extends the base `Capacitance` class with blood-specific mixing logic.
+A BloodCapacitance is an elastic compartment that holds blood and tracks what is in it: oxygen and carbon dioxide content, solutes, drugs and temperature. It is a [`Capacitance`](./Capacitance.md) plus composition mixing. It is the parent class of every blood vessel in the model.
+
+## Physiology
+
+Think of a BloodCapacitance as a balloon filled with blood. The more blood is in it, the higher the pressure inside. How quickly the pressure rises with volume depends on how stiff the wall is, the *elastance*. Below a certain volume, the *unstressed volume*, the wall is slack and the pressure is zero.
+
+When blood flows in from a neighbouring compartment, it mixes completely with the blood already there. If oxygen-rich blood enters a compartment that holds venous blood, the oxygen content inside rises in proportion to how much new blood came in. Solutes, drugs and temperature mix the same way. This is how oxygen, CO2, drugs and warmth travel around the simulated circulation: they ride along with the flow, one compartment at a time.
+
+A BloodCapacitance has no resistance of its own. Blood enters and leaves through separate connectors (`Resistor` models), or the compartment is a [`BloodVessel`](./BloodVessel.md), which adds its own resistance.
+
+In the shipped scenarios a plain BloodCapacitance is used only for compartments outside the main circulation: the urine in the bladder, the maternal blood pool of the placenta, and the inlet tubing of the ECLS circuit (see [Usage](#usage-in-the-scenarios)). Every vessel of the circulation is a `BloodVessel`, which inherits everything on this page.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Capacitance            (volume, elastance, pressure)
-        └── BloodCapacitance (blood composition tracking)
+  └── Capacitance              (volume, elastance, pressure)
+        └── BloodCapacitance   (blood composition mixing)
+              └── BloodVessel  (adds resistance, flow, ANS coupling)
 ```
 
-BloodCapacitance is itself the parent of `BloodVessel` (adds resistance and flow) and is used standalone for compartments that hold blood but have no built-in resistance (e.g., a pure compliance chamber). Flow into and out of a standalone BloodCapacitance is handled by separate `Resistor` models that reference it.
-
-## What it models
-
-A passive blood-containing compartment. It holds a volume of blood at a pressure determined by its elastance, and tracks the composition of that blood as fluid flows in and out. It does not have its own resistance or flow -- those are provided by connected `Resistor` or `BloodVessel` models.
+`BloodTimeVaryingElastance` and `HeartChamber` carry the same blood properties but descend from `TimeVaryingElastance`. All three classes (and `BloodVessel` through this one) share the mixing code in [`BloodMixing`](./BloodMixing.md).
 
 ## Properties
 
-### Inherited from Capacitance
+Volume, elastance and pressure props (`vol`, `u_vol`, `el_base`, `el_k`, `pres`, `pres_in`, `pres_ext`, `fixed_composition` and the factor layers) are inherited. See [Capacitance → Properties](./Capacitance.md#properties).
 
-All capacitance properties are available. See the Capacitance base model for the full list. Key ones:
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume |
-| `el_base` | mmHg/L | Baseline elastance |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient |
-| `vol` | L | Current volume |
-| `pres` | mmHg | Total pressure |
-| `pres_in` | mmHg | Recoil pressure |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `temp` | °C | 37.0 | Blood temperature. Mixed on inflow, and relaxed toward `body_temp` by `Blood` every step. |
+| `viscosity` | cP | 6.0 | Blood viscosity. Not mixed: `Blood` derives it from this compartment's haemoglobin every step, so a definition value is overwritten. |
+| `solutes` | object | `{}` | Solute concentrations keyed by name (e.g. `hemoglobin`, `na`, `glucose`, `lact`), in each solute's own unit. Seeded from `Blood.solutes` at build when empty. |
+| `drugs` | object | `{}` | Drug concentrations keyed by drug name. Filled by `Drugs`. |
+| `blood_pool` | boolean | `true` | `false` marks a non-circulating sink (URINE). `Blood`, `Lactate`, `Glucose` and `Drugs` then skip the compartment. |
 
-### Blood composition (unique to BloodCapacitance)
+### Outputs
 
-| Property | Unit | Description |
-|---|---|---|
-| `temp` | degC | Blood temperature |
-| `viscosity` | cP | Blood viscosity |
-| `to2` | mmol/L | Total oxygen concentration |
-| `tco2` | mmol/L | Total carbon dioxide concentration |
-| `ph` | unitless | Blood pH (-1 = not calculated) |
-| `pco2` | mmHg | Partial pressure of CO2 (-1 = not calculated) |
-| `po2` | mmHg | Partial pressure of O2 (-1 = not calculated) |
-| `so2` | unitless | Oxygen saturation (-1 = not calculated) |
-| `hco3` | mmol/L | Bicarbonate concentration (-1 = not calculated) |
-| `be` | mmol/L | Base excess (-1 = not calculated) |
-| `solutes` | object | Dictionary of solute concentrations (keyed by name) |
-| `drugs` | object | Dictionary of drug concentrations (keyed by name) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `to2` | mmol/L | 0.0 | Total oxygen content (bound + dissolved). Mixed on inflow; seeded from `Blood.to2` at build. |
+| `tco2` | mmol/L | 0.0 | Total CO2 content. Mixed on inflow; seeded from `Blood.tco2` at build. |
+| `ph` | – | -1 | pH. `-1` = not calculated. |
+| `pco2` | mmHg | -1 | CO2 partial pressure. `-1` = not calculated. |
+| `po2` | mmHg | -1 | O2 partial pressure. `-1` = not calculated. |
+| `so2` | fraction | -1 | O2 saturation (0–1). `-1` = not calculated. |
+| `hco3` | mmol/L | -1 | Bicarbonate. `-1` = not calculated. |
+| `be` | mmol/L | -1 | Base excess. `-1` = not calculated. |
 
-Note: `ph`, `pco2`, `po2`, `so2`, `hco3`, and `be` are initialized to -1 and are calculated by external gas exchange models (e.g., `AcidBase`). They are not computed by the BloodCapacitance itself.
+The blood-gas outputs (`ph` … `be`) are **not** computed by this class. They are solved from `to2`, `tco2` and the solutes by [`BloodComposition.calc_blood_composition`](./BloodComposition.md), and only for the compartments that some model asks for:
 
-### Haldane effect
+- `Blood`, once per second: `AA`, `AD`, `IVCI`, `SVC`, `RAIVCI`, `PA`;
+- `Ans`, at its update interval: its chemoreceptor sites;
+- `Ecls`: `ECLS_TUBING_IN` and the oxygenator.
 
-`calc_blood_composition` (in `BloodComposition.js`) couples oxygen saturation back into the CO2
-dissociation. The plasma CO2 partition gains an SO₂-dependent term:
+Everywhere else these fields stay at `-1`, or hold the last solved value.
 
-```
-cco2p = tco2 / (1 + kc/hp + kc*kd/hp² + haldane_coeff * (1 - so2))
-pco2  = cco2p / alpha_co2p
-```
+### Set by other models
 
-Lower SO₂ raises the effective CO2-carrying capacity, so at a given `tco2` deoxygenated blood shows a
-lower `pco2`/`hco3` — the Haldane effect. `so2` is taken from the previous calculation step (the
-acid-base and oxygen solvers run sequentially); at steady state the one-step lag vanishes. The
-strength is set by `haldane_coeff` on the `Blood` model (propagated to every blood component and
-adjustable at runtime via `Blood.set_haldane_coeff`); `haldane_coeff = 0` disables the effect and
-reproduces the previous behaviour. Note this is distinct from the **CO₂-Bohr effect** (high pCO₂
-right-shifts P50, reducing O₂ affinity), which is modelled separately via the `dpCO2` term.
+These props are not declared in the constructor. Other models write them onto the blood compartments at build or when solving:
 
-## Mixing logic (`volume_in`)
+| Property | Unit | Written by | Description |
+|---|---|---|---|
+| `haldane_coeff` | – | `Blood.init_model` | Haldane-effect strength, used by `BloodComposition`. |
+| `P50_0` | mmHg | `Blood.init_model` (only if absent) | O2–Hb affinity baseline. A per-compartment value is kept, e.g. adult 26.7 on `PL_MAT`. |
+| `viscosity_ref` | cP | `Blood.init_model` | Viscosity at which the vessel resistances were calibrated. |
+| `body_temp` | °C | `Blood.init_model`, then `Thermoregulation` via `Blood.set_perfusion_target` | Perfusion target that `temp` relaxes toward. |
+| `blood_temp_tc` | s | `Blood.init_model` | Time constant of that relaxation. |
+| `temp_ext_override` | boolean | `Blood.init_model`, devices | `true` when a device (e.g. the ECLS heater) owns `body_temp`. |
+| `prev_ph`, `prev_po2` | –, mmHg | `BloodComposition` (on each solve) | Solver warm start: the last solved pH and pO2, which bound the next solve. Only on compartments that have been solved; saved with the state. |
 
-BloodCapacitance overrides the `volume_in` method to perform composition mixing when blood flows in from another compartment. The mixing itself lives in [`helpers/BloodMixing.js`](../helpers/BloodMixing.js) (`mix_blood_in`), shared with `BloodTimeVaryingElastance` and `HeartChamber`. Because it runs after the volume is added, the formula is exact mass balance. For each tracked substance, the mixing uses a linear dilution formula:
+## Calculation
 
-```
-concentration += ((concentration_from - concentration) * dvol) / vol
-```
+BloodCapacitance does not override `calc_model()`. Each step runs the inherited [Capacitance cycle](./Capacitance.md#calculation): `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
 
-This is applied to:
-- `to2` and `tco2` (dissolved gases)
-- All entries in `solutes`
-- All entries in `drugs`
-- `temp` (temperature treated as a solute for mixing)
-- `viscosity` (treated as a solute for mixing)
+The class adds one thing, an override of **`volume_in(dvol, comp_from)`**. A `Resistor` (or the compartment's own outflow) calls it when blood arrives:
 
-The `comp_from` parameter (the upstream compartment) must have matching properties (`to2`, `tco2`, `solutes`, `drugs`, `temp`, `viscosity`).
+1. `Capacitance.volume_in` adds `dvol` to `vol` (skipped when `fixed_composition`).
+2. `mix_blood_in(this, dvol, comp_from)` mixes the composition. With `V` the volume *after* the inflow:
 
-## Three-tier factor system
+   ```
+   c += (c_from − c) · dvol / V
+   ```
 
-BloodCapacitance inherits the full three-tier factor system from Capacitance:
+   This is exact mass balance: `c_new·V = c_old·(V − dvol) + c_from·dvol`. It is applied to `to2`, `tco2`, every key in `solutes` and `drugs` that the receiving compartment carries (a key missing on the source counts as 0), and `temp`.
 
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `u_vol_factor`, `el_base_factor`, `el_k_factor` | Transient effects, reset each step |
-| Persistent (`_ps`) | `u_vol_factor_ps`, `el_base_factor_ps`, `el_k_factor_ps` | Ongoing physiological modulation |
-| Scaling (`_scaling_ps`) | `u_vol_factor_scaling_ps`, `el_base_factor_scaling_ps`, `el_k_factor_scaling_ps` | ModelScaler weight/manual scaling |
+The mixing is skipped when:
+- `fixed_composition` is `true`, so the compartment acts as an infinite reservoir whose composition never changes;
+- `vol ≤ 0`, which guards against NaN on an empty compartment.
 
-## Calculation cycle
+Outflow (`volume_out`) changes only the volume; concentrations don't change when blood leaves.
 
-BloodCapacitance does not override `calc_model()` -- it inherits the Capacitance cycle:
+## Factor system
 
-1. `calc_elastances()` -- compute effective elastance from base + all factor tiers
-2. `calc_volumes()` -- compute effective unstressed volume from base + all factor tiers
-3. `calc_pressure()` -- compute recoil (`pres_in`) and total pressure
+Inherited unchanged from `Capacitance`: `u_vol`, `el_base` and `el_k` each carry the three layers (`_factor`, `_factor_ps`, `_factor_scaling_ps`), composed **additively**. See [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern). (`BloodVessel` overrides this and composes multiplicatively.)
+
+## Inputs and outputs
+
+- **Reads:** the upstream compartment (`comp_from`) on inflow: its `to2`, `tco2`, `solutes`, `drugs`, `temp`.
+- **Written by:**
+  - `Resistor`: volume moves;
+  - `Blood`: seed composition, temperature relaxation, viscosity, the props in [Set by other models](#set-by-other-models);
+  - `BloodComposition`: the blood-gas outputs;
+  - `Drugs`, `Lactate`, `Glucose`: their `drugs`/`solutes` entries;
+  - owner models of specific instances (`Kidneys` on URINE, `Placenta`/`Uterus` on PL_MAT, `Ecls` on ECLS_TUBING_IN).
+- **Read by:** `Resistor` (`pres`), `Monitor` and `DataCollector` watchers, `Blood` (Hb-weighted viscosity reference, thermal state).
+
+## Assumptions and limitations
+
+- **Instant, complete mixing.** Every compartment is well stirred. Streaming inside a compartment isn't modelled. Where it matters (the two halves of the right atrium), it is approximated by splitting the compartment and joining the halves with a `Resistor` with `mix_flow` (see [`Resistor`](./Resistor.md)).
+- **No concentration change on outflow.** Concentration changes only on inflow, and through the models that add or remove substances.
+- **Composition is carried, not computed.** Blood gases are solved on demand for a handful of sites only, so `po2`/`so2` on an arbitrary compartment can be stale or `-1`.
+- **Fixed-composition reservoirs** freeze both volume and composition: `volume_in`/`volume_out` leave `vol` unchanged and nothing is mixed. Blood flowing in or out is created or destroyed at the boundary, which is the intent for an infinite reservoir. `Blood` also skips them for temperature relaxation, viscosity and the thermal balance.
 
 ## Example definition (JSON)
 
+From `term_neonate.json`, `models.Kidneys.components.URINE` (trimmed to the config props). The `Kidneys` model builds it through the `components` mechanism:
+
 ```json
 {
-  "name": "PV",
-  "description": "pulmonary veins",
+  "name": "URINE",
+  "description": "bladder / urine sink",
   "model_type": "BloodCapacitance",
   "is_enabled": true,
-  "vol": 0.04,
-  "u_vol": 0.038,
-  "el_base": 3100,
+  "u_vol": 0,
+  "el_base": 1000,
   "el_k": 0,
-  "fixed_composition": false
+  "fixed_composition": false,
+  "blood_pool": false,
+  "vol": 0.0046
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- Used for compartments that are pure compliances (no built-in resistance), such as specific pooling volumes
-- Serves as the parent class for `BloodVessel`, which adds resistance, flow, and ANS coupling
+All shipped scenarios have the same three instances, each owned by a composite model:
+
+| Instance | Owner | Role |
+|---|---|---|
+| `URINE` | `Kidneys` | Bladder / urine sink, `blood_pool: false`. `Kidneys._transfer` moves water and each solute into it by its own mass balance, **not** through `volume_in` (which would carry albumin and Hb into the urine). |
+| `PL_MAT` | `Placenta` | Maternal blood pool of the placenta: `fixed_composition: true`, adult `P50_0` 26.7. Its gases are written by `Placenta`, or by `Uterus` when coupled. Disabled after birth. |
+| `ECLS_TUBING_IN` | `Ecls` | Inlet tubing of the ECLS circuit. `Ecls` sets its volume and solves its blood gas. Disabled unless ECLS runs. |
+
+Through inheritance, the class also carries every `BloodVessel` instance (all of the circulation).
+
+## References
+
+This class introduces no literature-derived values: the mixing rule is exact mass balance. For the pressure–volume relation see [Capacitance](./Capacitance.md). For viscosity, temperature and the blood-gas chemistry see [Blood](./Blood.md) and [BloodComposition](./BloodComposition.md).
 
 ````
 
@@ -2357,161 +2474,121 @@ BloodCapacitance does not override `calc_model()` -- it inherits the Capacitance
 ````markdown
 # BloodComposition
 
-`BloodComposition.js` is **not a model class** — it is a module that exports the function **`calc_blood_composition(bc)`**, the acid-base and blood-gas solver for the engine. Given a blood compartment's total dissolved-gas contents (`to2`, `tco2`), its solutes and temperature, it computes pH, pCO₂, pO₂, SO₂, HCO₃⁻ and base excess and writes them back onto the compartment. It is invoked by [`Blood`](./Blood.md), by [`BloodDiffusor`](./BloodDiffusor.md) and the gas exchangers, and by any read-out (Monitor, ANS chemoreceptors, ECLS) that needs partial pressures.
+`BloodComposition` is the blood-gas solver: the function `calc_blood_composition(bc)`. Given a blood compartment's **contents** (total O2, total CO2, strong ions, buffers, haemoglobin, temperature), it computes what a blood-gas analyser reports: **pH, pCO2, HCO3, base excess, pO2 and SO2**. The compartments carry only contents. The partial pressures and pH exist only where someone calls this solver.
 
-## Inheritance
+It is a module of functions, not a model class: no `model_type`, no instance.
 
+## Physiology
+
+The body transports amounts (mmol of O2 and CO2, mmol of ions), but gases diffuse and receptors sense along partial pressures and pH. Converting one to the other is what this solver does.
+
+- **Acid-base (physicochemical, Stewart / Figge).** A sample's pH is set by three independent things:
+  - the **strong ion difference** (Na + K + 2Ca + 2Mg − Cl − lactate);
+  - the **total CO2**;
+  - the **weak acids**: albumin, phosphate, haemoglobin.
+
+  pH is whatever makes the solution electrically neutral. So a high chloride (saline) or a high lactate lowers the SID and causes a metabolic acidosis; CO2 retention a respiratory one.
+- **Oxygen.** O2 is carried bound to haemoglobin (1.36 mL per g, Hüfner) and a little dissolved (0.0031 mL/dL per mmHg). Saturation follows the sigmoid dissociation curve. Its position (P50) shifts right with acidosis (Bohr effect), higher pCO2, higher temperature and more 2,3-DPG, and left in fetal haemoglobin.
+- **Haldane effect.** Deoxygenated blood binds more CO2 (carbamino), so at the same total CO2 desaturated blood has a lower pCO2.
+
+## API
+
+```js
+import { calc_blood_composition } from "./component_models/BloodComposition.js";
+calc_blood_composition(bc);   // solves in place on bc
 ```
-(module function — not a class)
 
-  calc_blood_composition(bc)                      ← exported entry point + result cache
-    └── _calc_blood_composition_js(bc)            ← the solve
-          ├── _brent_root_finding(_net_charge_plasma, …)   acid-base (H⁺)
-          │     └── _net_charge_plasma(hp)        Stewart charge balance + CO₂ partition
-          └── _brent_root_finding(_do2_content, …)         oxygenation (pO₂)
-                ├── _do2_content(po2)             O₂ content residual
-                └── _calc_so2(po2)                Hill saturation
-```
+### Read from `bc`
 
-These are plain module-scoped functions. The constants, independent variables and state variables (`ph`, `po2`, `so2`, `pco2`, `hco3`, `be`, `P50`, …) are **module-level `let`/`const` globals**, reused across every call — the solver is single-threaded and stateful per call, not re-entrant. Results are returned by mutating the passed-in compartment object `bc`.
-
-## What it models
-
-Two coupled physiological solves, each implemented as a Brent root-find:
-
-1. **Acid-base** — a Stewart strong-ion / charge-balance model. Total CO₂ is partitioned into dissolved CO₂, bicarbonate and carbonate via the carbonic-acid equilibria; albumin, phosphate and haemoglobin provide non-bicarbonate buffering. The solver finds the plasma H⁺ that makes net charge zero, yielding pH, pCO₂, HCO₃⁻ and base excess.
-2. **Oxygenation** — an O₂–haemoglobin dissociation model (Hill equation) with a P50 that is right/left-shifted by pH (Bohr), pCO₂ (carbamino CO₂-Bohr), temperature and 2,3-DPG. The solver finds the pO₂ whose total O₂ content (Hb-bound + dissolved) matches the compartment's `to2`; SO₂ falls out of the Hill equation.
-
-The two solves are coupled through the **Haldane effect** (O₂ saturation → CO₂ carrying capacity) and the **CO₂-Bohr effect** (pCO₂ → O₂ affinity).
-
-## Inputs and outputs
-
-Read from the compartment `bc`:
-
-| Input | Source | Description |
+| Field | Unit | Description |
 |---|---|---|
-| `bc.to2` | mmol/L | Total O₂ concentration (target for the O₂ solve) |
-| `bc.tco2` | mmol/L | Total CO₂ concentration (input to the acid-base solve) |
-| `bc.temp` | degC | Temperature (CO₂ solubility, P50 shift). A real per-compartment field: warmed toward core by [`Blood`](./Blood.md)'s relaxation and advected by flow, so it can carry genuine gradients (e.g. blood cooled by an [`Ecls`](./Ecls.md) heater-cooler) rather than a uniform stamp |
-| `bc.solutes.na/k/ca/mg/cl/lact` | mmol/L | Strong ions → SID |
-| `bc.solutes.albumin/phosphates/uma` | — | Non-bicarbonate buffers / unmeasured anions |
-| `bc.solutes.hemoglobin` | mmol/L | Haemoglobin (converted to g/dL via `/0.6206`) |
-| `bc.P50_0` | mmHg | O₂–Hb affinity baseline (falls back to 20.0) |
-| `bc.haldane_coeff` | unitless | Haldane strength (falls back to `DEFAULT_HALDANE_COEFF = 1.0`) |
-| `bc.so2` | % | **Previous-step** SO₂ used for the Haldane term (falls back to 0.98 fraction) |
-| `bc.prev_ph`, `bc.prev_po2` | — | Previous results used to set narrow root-find brackets |
+| `to2`, `tco2` | mmol/L | Total O2 and CO2 content. |
+| `solutes.na`, `k`, `ca`, `mg`, `cl`, `lact` | mmol/L | Strong ions (SID). |
+| `solutes.albumin` | g/L | Weak acid. |
+| `solutes.phosphates` | mmol/L | Weak acid. |
+| `solutes.uma` | mmol/L | Unmeasured anions, a fixed negative charge (the anion-gap calibration). |
+| `solutes.hemoglobin` | mmol/L | O2 capacity and non-bicarbonate buffer (1 g/dL = 0.6206 mmol/L). |
+| `temp` | °C | Shifts P50 only. |
+| `P50_0` | mmHg | Dissociation-curve position at standard conditions (default 20). |
+| `haldane_coeff` | – | Haldane strength (default 1; 2.2 in the scenarios). |
+| `hb_buffer_fraction` | – | Optional; share of Hb that buffers (default 1/3). No scenario sets it. |
+| `so2`, `prev_ph`, `prev_po2` | %, –, mmHg | Last solution: the Haldane input and the warm start of both root searches. |
 
-Written back to the compartment `bc`:
+### Written to `bc`
 
-| Output | Unit | Description |
+| Field | Unit | Description |
 |---|---|---|
-| `bc.ph` | — | Plasma pH |
-| `bc.pco2` | mmHg | Partial pressure of CO₂ |
-| `bc.hco3` | mmol/L | Bicarbonate |
-| `bc.be` | mmol/L | Base excess |
-| `bc.po2` | mmHg | Partial pressure of O₂ |
-| `bc.so2` | % | O₂ saturation |
-| `bc.prev_po2` | mmHg | Updated to the solved pO₂ (next-call bracket seed) |
+| `ph`, `pco2`, `hco3`, `be` | –, mmHg, mmol/L, mmol/L | Acid-base result; `be` is the **standard** base excess. |
+| `po2`, `so2` | mmHg, % | Oxygen result. |
+| `prev_ph`, `prev_po2` | | Warm start for the next call (persisted state, saved with the scenario). |
+| `_bc_prev_*`, `_bc_cache_initialized` | | Result cache (see below). |
 
-## Constants
+## Calculation
 
-| Constant | Value | Meaning |
+**1. Cache.** If the step time (`model_time_total`) and every input above equal the last call's, it returns at once. In practice it skips only repeated calls within one step (several models solving the same compartment).
+
+**2. Acid-base: charge balance.** Brent's method finds [H⁺] (mmol/L) that zeroes the net charge:
+```
+cCO2  = tco2 / (1 + Kc/H + Kc·Kd/H² + haldane_coeff·(1 − SO2_prev))     dissolved CO2
+HCO3  = Kc·cCO2 / H,   CO3 = Kd·HCO3 / H,   OH = Kw / H,   pCO2 = cCO2 / 0.03067
+A_alb+P = albumin·(0.123·pH − 0.631) + phosphates·(0.309·pH − 0.469)        (Figge)
+A_Hb    = 2.3 · Hb · hb_buffer_fraction · (pH − 7.4)                       (Van Slyke)
+0 = H + SID − HCO3 − 2·CO3 − OH − A_alb+P − A_Hb − uma
+```
+Constants: pK′ 6.1 (`Kc`), pK 10.22 (`Kd`), pKw 13.6, CO2 solubility 0.03067 mmol/L/mmHg; all at 37 °C. The search is bracketed at the last pH ± 0.1; if that fails, at pH 6.0–8.5.
+```
+BE = 0.93 · (HCO3 − 24.4 + 14.83·(pH − 7.4))       standard base excess (Siggaard-Andersen)
+```
+
+**3. P50.**
+```
+log10 P50 = log10 P50_0 − 0.48·(pH − 7.4) + 0.0015·(pCO2 − 40) + 0.024·(T − 37) + 0.051·(DPG − 5)
+```
+DPG is fixed at 5, so its term is always 0.
+
+**4. Oxygen.** Brent's method finds the pO2 for which
+```
+SO2 = pO2ⁿ / (pO2ⁿ + P50ⁿ),   n = 2.7                         (Hill)
+to2 = (0.0031·pO2 + 1.36·Hb[g/dL]·SO2) · 10 / 22.414          (mL/L at STPD → mmol/L)
+```
+equals the compartment's `to2`. It is bracketed at the last pO2 ± 10 mmHg; if that fails, at 0–1000 mmHg.
+
+**Order and lag.** The acid-base solve runs first with the previous SO2 (Haldane); then the O2 solve uses the new pH and pCO2 (Bohr). The O2↔CO2 coupling therefore lags by one call and converges at steady state.
+
+## Behaviour (bench test, term_neonate composition, Hb 10 mmol/L)
+
+| Change | Result |
+|---|---|
+| tCO2 24 → 28 mmol/L | pCO2 38 → 69 mmHg, pH 7.38 → 7.17, HCO3 22.1 → 24.5: **~0.8 mmol/L HCO3 per 10 mmHg** (in vivo acute ~1). SBE drifts −2.4 → −3.1. |
+| to2 7 mmol/L | SO2 71 %, pO2 32 mmHg at pH 7.30 |
+| temp 37 → 33.5 °C | pO2 32 → 27 mmHg at the same SO2; **pH and pCO2 unchanged** |
+
+## Assumptions and limitations
+
+- **No temperature correction of acid-base.** The dissociation constants and CO2 solubility are 37 °C values; temperature moves only P50. So pH and pCO2 are what an analyser reports at 37 °C (alpha-stat values), also during therapeutic hypothermia. pO2 does follow the patient's temperature (via P50).
+- **Plasma model with an ECF-equivalent Hb buffer.** The charge balance is a plasma model; Hb buffers at a third of its concentration to stand in for the extracellular fluid the blood equilibrates with. No red-cell compartment, no chloride shift.
+- **Fixed Hill curve** (n 2.7): less accurate at very low and very high saturations than the full Kelman / Severinghaus curves. 2,3-DPG is fixed; methaemoglobin and carboxyhaemoglobin are absent.
+- **Carbamino CO2** appears only in the Haldane term; it isn't reported separately, and `hco3` excludes it.
+- **Failed solves keep the last values.** Outside pH 6.0–8.5, or above the content reachable at 1000 mmHg, the solve fails, logs once per call, and the compartment keeps its previous pH, pCO2, pO2 and SO2. A compartment that has never solved keeps the `-1` sentinel; [GasExchanger](./GasExchanger.md) handles that case.
+- **Not re-entrant.** The solver keeps its working values in module-level variables; it must not run for two compartments at once (it never does in the single-threaded worker).
+- **Contents are whole blood, chemistry is plasma.** `to2`/`tco2` are per litre of blood, the acid-base constants are plasma ones; the calibration (`uma`, `haldane_coeff`) absorbs the difference.
+
+## Callers
+
+| Caller | Compartments | When |
 |---|---|---|
-| `kw` | 2.5119e-11 | Water dissociation constant |
-| `kc` | 7.94328235e-4 | Carbonic-acid dissociation constant |
-| `kd` | 6.0255959e-8 | Bicarbonate dissociation constant |
-| `alpha_co2p` | 0.03067 | CO₂ solubility coefficient |
-| `n` | 2.7 | Hill coefficient |
-| `alpha_o2` | 1.38e-5 | O₂ solubility coefficient (declared) |
-| `gas_constant` | 62.36367 | For the mmol/L → mL conversion factor |
-| `left_hp_wide` / `right_hp_wide` | 3.16e-6 / 1.0e-3 | Wide H⁺ brackets (mmol/L): pH 8.5–6.0. Outside them both solves fail and the gases keep their last value |
-| `left_o2_wide` / `right_o2_wide` | 0 / 800.0 | Wide pO₂ brackets (mmHg) |
-| `delta_ph_limits` | 0.1 | ± window for the narrow pH bracket |
-| `delta_o2_limits` | 10.0 | ± window for the narrow pO₂ bracket |
-| `brent_accuracy` | 1e-6 | Root-find tolerance |
-| `max_iterations` | 60 | Root-find iteration cap |
-| `DEFAULT_HALDANE_COEFF` | 1.0 | Haldane fallback when `bc.haldane_coeff` is undefined |
+| [Blood](./Blood.md) | `AA`, `AD`, `IVCI`, `SVC`, `RAIVCI`, `PA` | every 1 s |
+| [GasExchanger](./GasExchanger.md) | the lung capillaries | its own update interval |
+| [BloodDiffusor](./BloodDiffusor.md) | both sides (e.g. placenta) | every step it runs |
+| [Ans](./Ans.md) | its `blood_composition_models` (chemoreceptor sites) | its update interval, while `ans_active` |
+| [Ecls](./Ecls.md) | tubing and oxygenator | its update interval |
+| `ModelEngine` | any named compartment | on request (`GET "blood_composition"`) |
 
-## Result cache (`calc_blood_composition`)
+## References
 
-The exported wrapper memoises the last solve per compartment. It stores `_bc_prev_*` snapshots of `tco2`, `to2`, `temp`, `prev_ph`, `prev_po2`, the strong ions, buffers, haemoglobin and `model_time_total` on `bc`. If every cached input matches the current values (and the step stamp matches, when defined), it returns immediately without re-solving. Otherwise it calls `_calc_blood_composition_js(bc)` and refreshes the cache. This is what makes it cheap to call `calc_blood_composition` from many places each second.
-
-## Acid-base solve (Stewart / charge balance)
-
-`_calc_blood_composition_js` computes the **strong ion difference**:
-
-```
-SID = Na + K + 2·Ca + 2·Mg − Cl − lactate
-```
-
-then brackets H⁺. If `prev_ph > 0` the brackets are tightened to `10^−(prev_ph ± 0.1)·1000`; the narrow solve is retried with the wide brackets if it fails. `_brent_root_finding` solves `_net_charge_plasma(H⁺) = 0`:
-
-```
-cco2p = tco2 / (1 + kc/H + kc·kd/H² + haldane_coeff·(1 − SO₂_prev))
-hco3  = kc · cco2p / H
-co3p  = kd · hco3 / H
-ohp   = kw / H
-pco2  = cco2p / alpha_co2p
-a_base = albumin·(0.123·pH − 0.631) + phosphates·(0.309·pH − 0.469)
-a_hb   = 2.3 · Hb · hb_buffer_fraction · (pH − 7.4)
-
-net charge = H + SID − hco3 − 2·co3p − ohp − a_base − a_hb − uma
-```
-
-`a_hb` is **haemoglobin as a buffer**. Without it, albumin and phosphate were the only non-bicarbonate buffers (~3.5 mmol/L per pH), and HCO₃ rose only ~0.3 mmol/L per 10 mmHg pCO₂. Each compartment stands in for the extracellular fluid it exchanges with, so Hb buffers at its effective ECF concentration: `hb_buffer_fraction` (per compartment, default 1/3) of the blood Hb. That is the same basis as the standard base excess (Hb_eff ≈ 3 mmol/L at a blood Hb of ≈ 9). The coefficient 2.3 mmol/L per pH per mmol/L Hb is Van Slyke's. In `term_neonate` the acute response becomes ≈ +0.85 mmol/L HCO₃ and −0.074 pH per +10 mmHg pCO₂, close to the clinical rule of +1 per 10.
-
-The `haldane_coeff·(1 − SO₂_prev)` term in the CO₂ partition is the **Haldane effect**: as saturation falls it raises the effective CO₂-carrying capacity, lowering dissolved CO₂ (hence `pco2`/`hco3`) at a given `tco2`. It uses the *previous-step* SO₂ (`bc.so2/100`, default 0.98) to break the O₂↔CO₂ coupling; at steady state `SO₂_prev == SO₂` so the one-step lag vanishes. `haldane_coeff = 0` disables it.
-
-Once H⁺ is found, base excess is the **standard base excess** (cBase(Ecf), Siggaard-Andersen; what blood-gas analysers report as SBE):
-
-```
-be = 0.93 · (hco3 − 24.4 + 14.83·(pH − 7.4))
-```
-
-With the Hb buffer above it is nearly independent of pCO₂ (−0.5 mmol/L over +21 mmHg in `term_neonate`, against −4 with the earlier whole-blood formula on the unbuffered solve).
-
-and `ph`, `pco2`, `hco3`, `be` are written to `bc`.
-
-## P50 shift (Bohr / CO₂-Bohr / temperature / DPG)
-
-Before the O₂ solve, P50 is shifted from its baseline `P50_0`:
-
-```
-ΔpH   = ph − 7.40        (Bohr)
-ΔpCO2 = pco2 − 40.0       (carbamino CO₂-Bohr)
-ΔT    = temp − 37.0
-ΔDPG  = dpg − 5.0
-
-log10(P50) = log10(P50_0) − 0.48·ΔpH + 0.0015·ΔpCO2 + 0.024·ΔT + 0.051·ΔDPG
-P50   = 10^log10(P50)
-P50_n = P50^n
-```
-
-`dpg` is a module variable fixed at 5.0 (no DPG input is wired in, so `ΔDPG = 0` in practice). The `0.0015·ΔpCO2` term is the carbamino-specific CO₂-Bohr coefficient; the pH-mediated part of the CO₂ effect already runs through `−0.48·ΔpH`.
-
-## Oxygen solve (Hill + dissolved O₂)
-
-A second Brent solve finds the pO₂ whose O₂ content matches `to2`. Brackets are `prev_po2 ± 10` when available (retried wide on failure). `_do2_content(po2)` returns the residual `to2 − to2_estimate`, where:
-
-```
-SO₂        = po2^n / (po2^n + P50_n)                       (Hill, _calc_so2)
-to2_est    = (0.0031·po2 + 1.36·Hb_gdl·SO₂) · 10           (mL O₂ per L blood)
-to2_est    = to2_est · O2_MMOL_PER_ML                      (→ mmol/L)
-```
-
-with `Hb_gdl = hemoglobin / 0.6206` and `O2_MMOL_PER_ML = 1/22.414` (STPD molar volume, [`helpers/Units.js`](../helpers/Units.js); Hüfner's 1.36 and the 0.0031 solubility are STPD volumes, so the conversion does not depend on blood temperature). On success `bc.po2`, `bc.so2 = so2·100`, and `bc.prev_po2` are written. The Hill SO₂ uses the shifted `P50_n`, so the Bohr/CO₂-Bohr/temperature shifts feed directly into saturation.
-
-## Root finder (`_brent_root_finding`)
-
-A standard Brent solver combining inverse quadratic interpolation, the secant method and bisection fallback, capped at `max_iterations` with `brent_accuracy` tolerance. It returns `-1` if the bracket does not straddle a root (`f(x0)·f(x1) > 0`) or if it fails to converge — which is why both the acid-base and O₂ solves fall back from narrow to wide brackets and log a failure if even the wide bracket fails.
-
-## Notes & caveats
-
-- **Two distinct CO₂↔O₂ couplings.** The CO₂→O₂-affinity term (`ΔpCO2`, "CO₂-Bohr") shifts P50; the **Haldane effect** (SO₂→CO₂ capacity) is the separate term in the CO₂ partition. Don't conflate them.
-- **One-step lag.** Because the Haldane term reads the previous SO₂, and the acid-base solve runs before the O₂ solve within a call, the coupling is explicit (lagged), not simultaneous. It converges at steady state.
-- The module-level state variables make the solver **non-re-entrant** — it must not be called concurrently for two compartments.
-- See [Blood.md](./Blood.md) for how the inputs are seeded and the outputs published, and [BloodCapacitance.md](./BloodCapacitance.md) for the compartment that carries the values.
-</content>
+- Figge J, Mydosh T, Fencl V. Serum proteins and acid-base equilibria: a follow-up. *J Lab Clin Med* 1992 (albumin and phosphate charge).
+- Stewart PA. Modern quantitative acid-base chemistry. *Can J Physiol Pharmacol* 1983.
+- Siggaard-Andersen O. The Van Slyke equation. *Scand J Clin Lab Invest Suppl* 1977 (standard base excess).
 
 ````
 
@@ -2520,277 +2597,180 @@ A standard Brent solver combining inverse quadratic interpolation, the secant me
 ````markdown
 # BloodDiffusor
 
-A `BloodDiffusor` exchanges gases and solutes between **two blood compartments**. It is used wherever blood equilibrates with blood across a membrane rather than with a gas phase — most notably the placenta (fetal capillary ↔ maternal pool). O₂ and CO₂ move down their **partial-pressure** gradients; each configured solute moves down its **concentration** gradient.
+`BloodDiffusor` exchanges gases (and optionally solutes) by diffusion between **two blood compartments** that don't share flow: O2 and CO2 move down their partial-pressure gradient, solutes down their concentration gradient. In the scenarios it is `PL_GASEX`, the placental barrier between the fetal villous capillaries and the mother's blood.
+
+For blood ↔ alveolar gas exchange (the lungs, the ECLS oxygenator) see [GasExchanger](./GasExchanger.md); for gas ↔ gas exchange without flow, [GasMixing](./GasMixing.md).
+
+## Physiology
+
+In the placenta, fetal and maternal blood never mix: they are separated by the villous membrane. Gases cross it passively, driven by the difference in partial pressure (Fick's law: flux = diffusing capacity × gradient). Maternal intervillous pO2 is higher than fetal, so O2 moves to the fetus; fetal pCO2 is higher, so CO2 moves to the mother. Fetal haemoglobin's higher affinity lets the fetus load a lot of oxygen at a low pO2. Small solutes (glucose, urea, ions) cross by their concentration gradients.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── BloodDiffusor   (blood↔blood gas/solute exchange)
+  └── BloodDiffusor
 ```
-
-`BloodDiffusor` extends `BaseModelClass` directly (note: the source lives in `base_models/`, not `component_models/`). It is not a capacitance — it holds no volume and computes no pressure; it only mutates the composition of the two compartments it references.
-
-## What it models
-
-```
-blood1 (po2, pco2, solutes)  ⇌[BloodDiffusor]⇌  blood2 (po2, pco2, solutes)
-   gases:   flux = (p1 − p2) · dif_step · Δt        (partial-pressure driven)
-   solutes: flux = (c1 − c2) · dif · solutes_step · Δt   (concentration driven)
-```
-
-Each step it refreshes both compartments' blood composition (so the partial pressures are current), composes the effective diffusion constants from the factor tiers, then transfers O₂, CO₂ and each configured solute from the higher to the lower side, conserving mass.
 
 ## Properties
 
-### Configuration
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `comp_blood1`, `comp_blood2` | – | `"PLF"`, `"PLM"` | Names of the two blood compartments (legacy defaults; every scenario sets `PL_FETAL_CAP` and `PL_MAT`). Positive flux runs 1 → 2. |
+| `dif_o2` | mmol/(mmHg·s) | 0.01 | O2 diffusing capacity. |
+| `dif_co2` | mmol/(mmHg·s) | 0.01 | CO2 diffusing capacity. |
+| `dif_solutes` | L/s per solute | `{}` | Solute diffusing capacities, e.g. `{"glucose": 0.0001}` (mmol/s per mmol/L of gradient). Empty in every scenario. |
+
+In the placenta, `dif_o2` and `dif_co2` are **overwritten every 15 ms by [Placenta](./Placenta.md)** from its own `dif_o2`/`dif_co2`: set them there, or use the factors below.
+
+### Factors
+
+| Property | Default | Layer |
+|---|---|---|
+| `dif_o2_factor`, `dif_co2_factor`, `dif_solutes_factor` | 1.0 | Non-persistent (reset to 1 after each step). |
+| `dif_o2_factor_ps`, `dif_co2_factor_ps`, `dif_solutes_factor_ps` | 1.0 | Persistent. |
+| `dif_o2_factor_scaling_ps`, `dif_co2_factor_scaling_ps`, `dif_solutes_factor_scaling_ps` | 1.0 | Scaling layer (`_ps` since v1.0, was `*_factor_scaling`); nothing writes it (`ModelScaler` doesn't scale diffusors). |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `comp_blood1` | name | First blood compartment (default `"PLF"` — a legacy name no scenario defines; scenarios set it, e.g. `PL_FETAL_CAP`) |
-| `comp_blood2` | name | Second blood compartment (default `"PLM"` — likewise legacy; e.g. `PL_MAT`) |
-| `dif_o2` | mmol/(mmHg·s) | O₂ diffusion constant |
-| `dif_co2` | mmol/(mmHg·s) | CO₂ diffusion constant |
-| `dif_solutes` | object | Per-solute diffusion constants, keyed by solute name (L/s: the flux in mmol/s per mmol/L of gradient) |
+| `dif_o2_step`, `dif_co2_step` | mmol/(mmHg·s) | Effective O2 and CO2 diffusing capacity with the factors. |
 
-### Factor tiers (see below)
+## Calculation
 
-`dif_o2_factor`, `dif_o2_factor_ps`, `dif_o2_factor_scaling`; `dif_co2_factor`, `dif_co2_factor_ps`, `dif_co2_factor_scaling`; `dif_solutes_factor`, `dif_solutes_factor_ps`, `dif_solutes_factor_scaling` — all default `1.0`.
+Each step (skipped if either compartment is missing):
 
-### Computed / dependent
-
-| Property | Unit | Description |
-|---|---|---|
-| `dif_o2_step` | mmol/(mmHg·s) | Effective O₂ diffusion constant for the current step |
-| `dif_co2_step` | mmol/(mmHg·s) | Effective CO₂ diffusion constant for the current step |
-
-### Local references (`_`-prefixed)
-
-`_comp_blood1`, `_comp_blood2` — resolved each step from `model.models[comp_blood1/2]`.
+1. **Partial pressures.** [`calc_blood_composition`](./BloodComposition.md) on both compartments (a full solve on each, every step).
+2. **Factors**, additive:
+   ```
+   dif_o2_step = dif_o2 · (1 + (factor − 1) + (factor_ps − 1) + (factor_scaling − 1))      likewise CO2 and solutes
+   ```
+3. **Gases** (Fick), in mmol per step:
+   ```
+   ΔO2  = (pO2₁ − pO2₂)   · dif_o2_step  · dt      moved from to2 of 1 to to2 of 2
+   ΔCO2 = (pCO2₁ − pCO2₂) · dif_co2_step · dt      moved between the tco2s
+   ```
+   A gas is skipped this step if either side has the `-1` sentinel (failed solve).
+4. **Solutes:** `Δ = (c₁ − c₂) · dif_solutes[s] · solutes_factor · dt`, for every solute present on both sides.
+5. **Transfer** (`_transfer`). Amounts become concentrations through each compartment's volume. The flux is capped at what the donor holds. A `fixed_composition` compartment (an infinite reservoir such as `PL_MAT`) or an empty one keeps its concentration, while the other side still changes.
 
 ## Factor system
 
-`dif_o2`, `dif_co2` and the per-solute `dif_solutes` follow the engine's three-tier factor / effective-value pattern (same convention as [Capacitance](./Capacitance.md)). For O₂ and CO₂ the effective constant is built additively against the base:
+Additive layers (as Capacitance and Resistor), on `dif_o2`, `dif_co2` and one shared multiplier for all solutes. See [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
 
-```
-dif_o2_step = dif_o2
-            + (dif_o2_factor       − 1)·dif_o2
-            + (dif_o2_factor_ps    − 1)·dif_o2
-            + (dif_o2_factor_scaling − 1)·dif_o2
-```
+## Inputs and outputs
 
-(identically for `dif_co2_step`). Solutes share one dimensionless multiplier applied to every per-solute constant:
+- **Reads:** both compartments' `po2`, `pco2`, `to2`, `tco2`, `solutes`, `vol`, `fixed_composition`.
+- **Writes:** `to2`, `tco2`, `solutes` of the non-fixed compartment(s); their solved `ph`, `pco2`, `po2`, `so2`, … through `calc_blood_composition`.
+- **Written by:** [Placenta](./Placenta.md) (`dif_o2`, `dif_co2`, `is_enabled` every 15 ms); the fetal generators set the Placenta values.
+- **Read by:** `DataCollector` watchers.
 
-```
-solutes_step = 1 + (dif_solutes_factor − 1) + (dif_solutes_factor_ps − 1) + (dif_solutes_factor_scaling − 1)
-```
+## Assumptions and limitations
 
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `dif_o2_factor`, `dif_co2_factor`, `dif_solutes_factor` | Transient interventions; **reset to 1.0 at the end of every `calc_model`** |
-| Persistent (`_ps`) | `dif_o2_factor_ps`, `dif_co2_factor_ps`, `dif_solutes_factor_ps` | Ongoing scenario/user modulation; persist across steps |
-| Scaling | `dif_o2_factor_scaling`, `dif_co2_factor_scaling`, `dif_solutes_factor_scaling` | ModelScaler weight/manual scaling |
-
-## Calculation cycle (`calc_model`)
-
-1. Resolve `_comp_blood1` / `_comp_blood2` from the engine map; return (no exchange) if either is missing.
-2. Call [`calc_blood_composition`](./BloodComposition.md) on both compartments so `po2`/`pco2`/solute concentrations are current.
-3. Compose `dif_o2_step`, `dif_co2_step` and `solutes_step` from the factors.
-4. **O₂:** `do2 = (blood1.po2 − blood2.po2) · dif_o2_step · _t`, then update each side's `to2` by `(to2·vol ∓ do2)/vol`. Skipped this step if either `po2` is negative — the `−1` sentinel a failed acid-base / O₂ solve leaves behind, which would otherwise drive a spurious flux.
-5. **CO₂:** same with `pco2` / `dif_co2_step` → `tco2` (same `−1` sentinel guard).
-6. **Solutes:** for each key in `dif_solutes`, `dsol = (c1 − c2) · dif_solutes[sol] · solutes_step · _t`, update each side's concentration. A solute that is not a number on either side is skipped.
-7. Reset the non-persistent factors (`dif_o2_factor`, `dif_co2_factor`, `dif_solutes_factor`) to `1.0`.
-
-`_t` is the modeling stepsize. All transfers go through `_transfer()`:
-
-- **Donor limit** — the flux is capped at what the (non-fixed) donor holds (`conc · vol`), so no concentration goes below zero.
-- Every write is **guarded by `!fixed_composition && vol > 0`**, so a fixed reservoir (e.g. the maternal pool) supplies/absorbs gas and solute without changing its own composition (and without a donor cap), and an empty compartment never divides by zero.
+- **Fick diffusion on partial pressures, no geometry.** A diffusing capacity lumps membrane area, thickness and permeability. No counter-current or concurrent flow pattern; each compartment is well mixed.
+- **Full equilibration at the shipped settings.** Fetal capillary blood leaves the exchanger at the maternal pCO2, so the diffusing capacities have little authority over fetal gases; the maternal contents set them (see [Placenta](./Placenta.md#assumptions-and-limitations)).
+- **Explicit, one step.** A very large capacity with a small compartment could overshoot the equilibrium in one step; the cap only stops a negative concentration.
+- **Two blood solves every step** while it runs (fetal scenarios only), including on the fixed `PL_MAT`.
 
 ## Example definition (JSON)
 
-From `archive/term_fetus.json` — `PL_GASEX`, a component of the `Placenta` model, connecting the fetal capillary to the fixed maternal pool:
+From `fetus_term.json`, `models.Placenta.components.PL_GASEX` (trimmed to the config props):
 
 ```json
 {
   "name": "PL_GASEX",
-  "description": "blood diffusor model of the diffusion across the placenta",
-  "is_enabled": true,
   "model_type": "BloodDiffusor",
+  "is_enabled": true,
   "comp_blood1": "PL_FETAL_CAP",
   "comp_blood2": "PL_MAT",
-  "dif_o2": 0.03,
+  "dif_o2": 0.003,
   "dif_co2": 0.04,
-  "dif_solutes": {},
-  "dif_o2_factor": 1,
-  "dif_co2_factor": 1,
-  "dif_solutes_factor": 1,
-  "dif_o2_factor_ps": 1,
-  "dif_co2_factor_ps": 1,
-  "dif_solutes_factor_ps": 1,
-  "dif_o2_factor_scaling": 1,
-  "dif_co2_factor_scaling": 1,
-  "dif_solutes_factor_scaling": 1
+  "dif_solutes": {}
 }
 ```
 
-Here `PL_MAT` carries `fixed_composition: true`, so the diffusor drives fetal gases toward the maternal set-point while the maternal pool stays constant.
+## Usage in the scenarios
 
-## Usage in the model
+One instance, `PL_GASEX`, owned by `Placenta`, in every scenario: enabled in the three fetal scenarios, disabled after birth.
 
-- The placenta's `PL_GASEX` is the canonical instance: it connects the fetal capillary to the fixed maternal pool, equilibrating fetal blood gases toward maternal values.
-- This is the reference implementation the other exchangers follow — it already guards `fixed_composition` on every write, which is why the maternal pool stays constant.
-- Gases use **partial pressures** (so they respect the dissociation curves computed by [BloodComposition](./BloodComposition.md)), while solutes use **raw concentrations**.
-- The compartments referenced must be [BloodCapacitance](./BloodCapacitance.md)-family models carrying `to2`/`tco2`/`solutes`/`vol`/`fixed_composition`.
-</content>
+| Scenario | `dif_o2` | `dif_co2` |
+|---|---|---|
+| fetus_term | 0.003 | 0.04 |
+| fetus_30wk | 0.02 | 0.027 |
+| fetus_25wk | 0.012 | 0.016 |
+| postnatal (disabled) | 0.01 | 0.01 |
+
+## References
+
+No literature values; the diffusing capacities are calibrated per fetal scenario (see [fetal_circulation](./fetal_circulation.md)).
 
 ````
 
-### FILE: explain-engine/docs/BloodPump.md
+### FILE: explain-engine/docs/BloodMixing.md
 
 ````markdown
-# BloodPump
+# BloodMixing
 
-A `BloodPump` is a [`BloodCapacitance`](./BloodCapacitance.md) that adds a mechanical pump. It inherits all blood-volume and composition behaviour and overrides `calc_pressure` to generate a pump pressure proportional to RPM, which it applies as an external pressure on its inlet or outlet [Resistor](./Resistor.md) to drive flow — modelling a centrifugal or roller pump.
+`helpers/BloodMixing.js` holds the two functions that move blood composition between compartments: `mix_blood_in` (mixing on inflow, the advection of everything blood carries) and `exchange_blood` (exchange without net flow between two compartments of one continuous pool). Every blood compartment and `Resistor.mix_flow` use them, so the mixing rule exists in one place.
 
-## Inheritance
+## API
+
+| Function | Arguments | Returns | Description |
+|---|---|---|---|
+| `mix_blood_in(target, dvol, comp_from)` | receiving compartment, volume that just arrived (L), source compartment | – | Mixes the source composition into `target`. Call it **after** the volume has been added to `target.vol`. |
+| `exchange_blood(a, b, dv)` | two compartments, volume swapped each way (L) | – | Swaps `dv` of blood both ways, with no net volume change. |
+
+### `mix_blood_in`
+
+With `V` the target volume after the inflow and `f = dvol / V`:
 
 ```
-BaseModelClass
-  └── Capacitance
-        └── BloodCapacitance       (blood volume + composition mixing)
-              └── BloodPump        (adds pump pressure)
+c += (c_from − c) · f
 ```
 
-It inherits the full capacitance cycle, the blood-composition mixing in [`BloodCapacitance.volume_in`](./BloodCapacitance.md), and the `fixed_composition` / empty-compartment guards. It overrides only `calc_pressure`.
+This is exact mass balance: `c_new·V = c_old·(V − dvol) + c_from·dvol`. It is applied to:
+- `to2` and `tco2`;
+- every key of `target.solutes` and `target.drugs` (a key missing, zero or NaN on the source counts as 0);
+- `temp` (blood treated as one fluid, so temperature mixes like a concentration).
 
-## What it models
+It does nothing when:
+- `target.fixed_composition` is set (an infinite reservoir keeps its composition);
+- `target.vol ≤ 0` (avoids NaN on an empty compartment).
 
-A pumped blood chamber. Its own recoil pressure is computed exactly as a `BloodCapacitance`, but in addition it imposes a **pump pressure** on a connected resistor: a flow-dependent head-flow (H-Q) characteristic in centrifugal mode, or an integral flow-source controller in roller mode. The negative external pressure creates the pressure gradient that moves blood through the resistor, i.e. the pump head.
+**Viscosity is not mixed**: `Blood` derives each compartment's viscosity from its own haemoglobin every step.
 
-## Properties
+### `exchange_blood`
 
-### Configuration (unique to BloodPump)
+```
+dv  = min(dv, ½ · min(V_a, V_b))                 (stability clamp)
+c_a += (c_b − c_a) · dv / V_a
+c_b −= (c_b − c_a) · dv / V_b                    (using the pre-exchange concentrations)
+```
 
-| Property | Unit | Description |
+Applied to `to2`, `tco2`, `temp`, every solute and every drug. A key present on only one side is created on the other (counted as 0 there). `c_a·V_a + c_b·V_b` is conserved, so nothing is created or lost. A `fixed_composition` side keeps its composition (its fraction is 0), and then the other side simply relaxes toward it. It does nothing when `dv ≤ 0` or either volume is 0.
+
+## Where it is used
+
+| Caller | Function | When |
 |---|---|---|
-| `pump_rpm` | rpm | Pump speed (rotations per minute) |
-| `pump_mode` | enum | `0` = centrifugal (drives the **inlet** resistor), `1` = roller (drives the **outlet** resistor) |
-| `pump_hq_a` / `pump_hq_b` / `pump_hq_c` | — | Centrifugal head-flow coefficients (see below) |
-| `roller_ml_per_rev` / `roller_kp` / `roller_drive_max` | mL/rev, —, mmHg | Roller flow-source parameters |
-| `inlet` | name | Name of the inlet `BloodResistor` |
-| `outlet` | name | Name of the outlet `BloodResistor` |
-| `pres_cc` | mmHg | External pressure from chest compressions (reset to 0 each step) |
-| `pres_mus` | mmHg | External muscle pressure (reset to 0 each step) |
+| [`BloodCapacitance`](./BloodCapacitance.md) (and so `BloodVessel`), [`BloodTimeVaryingElastance`](./BloodTimeVaryingElastance.md), [`HeartChamber`](./HeartChamber.md) | `mix_blood_in` | in `volume_in`, every time a resistor moves blood into the compartment |
+| [`Resistor`](./Resistor.md#mixing-without-net-flow-mix_flow) with `mix_flow > 0` | `exchange_blood` | every step, with `dv = mix_flow · dt`, when both ends carry blood and the connection is open |
 
-Plus the inherited capacitance configuration (`u_vol`, `el_base`, `el_k`, `pres_ext`, `fixed_composition`, …) and the [factor tiers](./BloodCapacitance.md).
+In the shipped scenarios the only blood `mix_flow` is `RAIVCI_RASVC` (0.01 L/s), between the two halves of the right atrium.
 
-### Computed / dependent
+## Notes
 
-| Property | Unit | Description |
-|---|---|---|
-| `pump_pressure` | mmHg | Pump drive = `−head` (centrifugal H-Q) or `−`roller-controller output |
-| `pres_in` | mmHg | Recoil pressure |
-| `pres` | mmHg | Total pressure incl. external pressures |
+- **Keys must exist on the receiving side.** `mix_blood_in` only mixes the solutes and drugs the target already has; a key that only the source carries is not transported. The seeding models keep the key sets identical across the circulation:
+  - `Blood` seeds the solutes at build (including `lact`);
+  - `Drugs` adds its drug keys and `Glucose` its `glucose` key to every circulating compartment.
 
-### Local references (`_`-prefixed)
-
-`_inlet`, `_outlet` — resolved each step from `model.models[inlet/outlet]`.
-
-## Pump pressure (`calc_pressure`)
-
-`BloodPump` overrides `calc_pressure` (it does not override `calc_model`, so it inherits the elastance/volume steps from Capacitance):
-
-```
-pres_in = el_k_eff·s²·[s > 0] + el_eff·s,   s = vol − u_vol_eff
-pres    = pres_in + pres_ext + pres_cc + pres_mus
-                                                  # then pres_ext, pres_cc, pres_mus reset to 0
-
-# flow input Q = short EMA of the outlet resistor flow (L/min)
-centrifugal (pump_mode 0):  head = hq_a·(rpm/1000)² − hq_b·(rpm/1000)·Q − hq_c·Q²   (clamped ≥ 0)
-                            pump_pressure = −head
-                            inlet.p2_ext = pump_pressure;  outlet.p1_ext = p2_ext = 0
-roller      (pump_mode 1):  _roller_drive += roller_kp·(roller_ml_per_rev·rpm/1000 − Q)   (clamped [0,max])
-                            pump_pressure = −_roller_drive
-                            outlet.p2_ext = pump_pressure;  inlet.p1_ext = p2_ext = 0
-```
-
-This mirrors the live [`Ecls`](./Ecls.md) pump: a flow-dependent head-flow (H-Q) characteristic for
-centrifugal (afterload sensitive) and an integral flow-source controller for roller (afterload
-independent), driving the driven resistor's **downstream** node. The connector writes are
-**null-guarded** (`if (this._inlet)` / `if (this._outlet)`) so an unwired pump does not crash.
-
-## Status
-
-> ⚠️ **Currently unused.** No scenario instantiates a `BloodPump`. The ECLS pump (`ECLS_PUMP`) is a [`BloodVessel`](./BloodVessel.md) driven directly by the [`Ecls`](./Ecls.md) device, which carries the same H-Q pump-pressure logic (kept in sync with this class). The class is registered (exported in `ModelIndex.js`) and UI-exposed, and was made defensively correct — it declares `pres_cc`/`pres_mus`/`inlet`/`outlet` and null-guards the connectors — so it will not crash or produce `NaN` if instantiated, but it is legacy/standby code.
-
-## Pump characteristic (H-Q coefficient fit)
-
-The centrifugal head `head = hq_a·(rpm/1000)² − hq_b·(rpm/1000)·Q − hq_c·Q²` (mmHg, Q in L/min) uses
-coefficients fit to published pump characteristics: `hq_a` from the deadhead (`Q=0`, ∝ rpm²) and `hq_b`
-from the rated flow at max rpm (Euler-slip linear falloff; `hq_c = 0`). The [`Ecls`](./Ecls.md) `pumps`
-library carries these per device:
-
-| Pump | `hq_a` | `hq_b` | `hq_c` | deadhead @ max rpm | rated flow |
-|---|---|---|---|---|---|
-| Abbott PediMag | 21.16 | 5.2 | 15.4 | ~640 mmHg @5500 | ~1.5 L/min |
-| Abbott CentriMag | 23.17 | 0.85 | 0.38 | ~710 mmHg @5500 | 10 L/min |
-| Getinge Rotaflow RF-32 | 28 | 13.0 | 0 | ~700 mmHg @5000 | ~10 L/min |
-| Medtronic Bio-Pump BP-50 | 20 | 28.9 | 0 | ~180 mmHg @3000 | neonatal |
-
-The Rotaflow `hq_a` is the strongest anchor: its deadhead is consistent across two independent points
-(~108 mmHg shut-off at 2000 rpm and ~700 mmHg at 5000 rpm), confirming the rpm² scaling. The remaining
-The CentriMag is fitted to the manufacturer's H-Q curves (CentriMag Circulatory Support System Operation
-Manual PL-0047 Rev 11, Fig. 14, pump only, blood analog 4.02 cP), by least squares over points read off
-all eight rpm curves (2000–5500 rpm). The fit is within 4.8 mmHg RMS. The curves are nearly flat with
-flow (≈ −6 mmHg per L/min at 3000 rpm), so `hq_b`/`hq_c` are small. Before 2026-10-01 they were
-`hq_b = 11.1`, `hq_c = 0`, which made the curve 5–7× too steep. The manual's "maximum pressure head of
-600 mmHg" is a rated limit; the 5500 rpm curve starts at ≈ 710 mmHg.
-
-PediMag (recalibrated 2026-10-12 together with the ECLS circuit; see
-[Ecls › Circuit calibration](./Ecls.md#circuit-calibration)): no H-Q curve is published.
-- **Deadhead.** ≈ 640 mmHg at 5500 rpm (`hq_a` 21.16). The published 540 mmHg maximum outflow
-  pressure (Wang et al 2020) is read as a rated limit, like the CentriMag's 600 against its 710
-  deadhead.
-- **Shape.** The CentriMag fit scaled to the PediMag's head and flow range (`hq_b` 5.2, `hq_c` 15.4).
-- **Operating point.** In the calibrated circuit this gives ≈ 0.56 L/min at 2800 rpm on VA
-  (`term_neonate`, 12/10 Fr), close to the PediVAS point of 0.6 L/min.
-- **History.** The earlier `hq_a` 17.85 / `hq_b` 30.3 reproduced those operating points only because
-  the steep slip term made up for circuit losses that the old circuit lacked.
-
-The remaining Rotaflow / Bio-Pump
-coefficients are anchored to each pump's published deadhead magnitude and rated flow; they are **not**
-digitized from the full manufacturer H-Q figures (which were not accessible), so the mid-curve shape is
-the theoretical Euler-slip (linear) default. Sources: Wang et al 2020 *Artif Organs*
-(Rotaflow/CentriMag/PediMag pediatric ECMO characterisation), the ROTAFLOW/CentriMag adult ECLS
-comparison, and manufacturer rated-flow specs.
-
-## Example definition (JSON)
-
-No scenario contains a `BloodPump`, so the following is **illustrative** (the inherited capacitance fields plus the pump-specific fields):
-
-```json
-{
-  "name": "PUMP",
-  "description": "blood pump",
-  "model_type": "BloodPump",
-  "is_enabled": true,
-  "vol": 0.05,
-  "u_vol": 0.05,
-  "el_base": 5000,
-  "el_k": 0,
-  "fixed_composition": false,
-  "pump_rpm": 3000,
-  "pump_mode": 0,
-  "inlet": "PUMP_IN",
-  "outlet": "PUMP_OUT"
-}
-```
-
-## Usage in the model
-
-- Intended for an extracorporeal pump chamber wired between an inlet and outlet `BloodResistor`.
-- In practice the live ECLS circuit does not use it — see [Ecls](./Ecls.md). Prefer that path for new extracorporeal work unless this class is brought back into active use.
-</content>
+  In term_neonate and fetus_term all 47 circulating blood compartments carry the same 11 solutes and 3 drugs. A new solute or drug must be seeded the same way.
+- **Hot path.** `mix_blood_in` runs about 45 times per step, so it uses plain `for…in` loops and allocates nothing.
+- **Well-mixed compartments.** Both functions assume each compartment is instantly and completely mixed. Streaming inside a compartment is represented by splitting it and choosing `mix_flow`.
+- The gas counterpart for `mix_flow` is [`helpers/GasMixing.js`](../helpers/GasMixing.js) `exchange_gas`. Gas mixing on inflow lives in `GasCapacitance.volume_in`.
 
 ````
 
@@ -2799,135 +2779,103 @@ No scenario contains a `BloodPump`, so the following is **illustrative** (the in
 ````markdown
 # BloodTimeVaryingElastance
 
-A BloodTimeVaryingElastance is a volume compartment with a time-varying elastance (cyclically changing stiffness) that holds blood with tracked composition. It is used for compartments that contract and relax cyclically but are not heart chambers -- for example, a pulsatile vessel segment driven by an external activation signal.
+A `BloodTimeVaryingElastance` is a [`TimeVaryingElastance`](./TimeVaryingElastance.md) that holds blood: a compartment whose stiffness follows the heartbeat and whose blood composition is tracked and mixed like a [`BloodCapacitance`](./BloodCapacitance.md). In the shipped scenarios it is the coronary bed.
+
+## Physiology
+
+The coronary vessels run through the heart muscle. When the ventricles contract, the muscle squeezes the vessels inside it (*intramyocardial compression*). Coronary inflow to the left ventricle is therefore impeded in systole and occurs mostly in diastole, and blood is pushed out of the coronary veins during systole. A tachycardia that shortens diastole, or a high diastolic ventricular pressure, reduces the time and the pressure available for coronary filling.
+
+Explain models this with one compartment whose stiffness rises with ventricular activation. Contraction raises the pressure in the coronary bed, which slows inflow from the aorta and speeds outflow to the right atrium. The same compartment is where the heart muscle takes up its oxygen: `Mob` removes the myocardial O2 consumption from the coronary blood and adds the CO2 it produces, so coronary venous blood is the most desaturated blood in the body.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── TimeVaryingElastance         (volume, time-varying elastance, pressure)
-        └── BloodTimeVaryingElastance  (blood composition tracking)
+  └── TimeVaryingElastance          (el_min/el_max, act_factor, pressure)
+        └── BloodTimeVaryingElastance   (blood composition mixing)
 ```
 
-## Relationship to HeartChamber
-
-Both `BloodTimeVaryingElastance` and `HeartChamber` extend `TimeVaryingElastance`. The difference is that `HeartChamber` adds ANS-mediated modulation of contractility (el_max) and relaxation (el_min) via beta-adrenergic receptor modeling. `BloodTimeVaryingElastance` does not have ANS coupling -- it uses the parent's `calc_elastances()` directly.
-
-## What it models
-
-A compartment whose elastance varies over time between a minimum (`el_min`) and maximum (`el_max`) value, driven by an external activation factor (`act_factor`). This produces pulsatile pressure changes. The compartment also tracks blood composition (gases, solutes, drugs, temperature, viscosity) using the same mixing logic as `BloodCapacitance`.
+All of the calculation (elastances, unstressed volume, pressure) is inherited unchanged from `TimeVaryingElastance`, with the additive factor layers. Unlike its sibling [`HeartChamber`](./HeartChamber.md), it has no ANS, drug or load terms.
 
 ## Properties
 
-### Inherited from TimeVaryingElastance
+Volume, elastance, activation and factor props are inherited: see [TimeVaryingElastance → Properties](./TimeVaryingElastance.md#properties).
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume |
-| `el_min` | mmHg/L | Minimum elastance (during relaxation/diastole) |
-| `el_max` | mmHg/L | Maximum elastance (during contraction/systole) |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient |
-| `act_factor` | 0-1 | Activation factor (set externally, e.g., by Heart model) |
-| `vol` | L | Current volume |
-| `pres` | mmHg | Total pressure |
-| `pres_in` | mmHg | Recoil pressure |
-| `pres_ext` | mmHg | External pressure (non-persistent, resets each step) |
+### Config (set in the definition JSON)
 
-### Blood composition (unique to BloodTimeVaryingElastance)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `temp` | °C | 37.0 | Blood temperature; mixed on inflow, relaxed toward `body_temp` by `Blood`. |
+| `viscosity` | cP | 6.0 | Overwritten by `Blood` from the compartment's haemoglobin every step; not mixed. |
+| `solutes` | object | `{}` | Solute concentrations, seeded from `Blood` when empty. |
+| `drugs` | object | `{}` | Drug concentrations (`Drugs`). |
 
-| Property | Unit | Description |
-|---|---|---|
-| `temp` | degC | Blood temperature |
-| `viscosity` | cP | Blood viscosity |
-| `to2` | mmol/L | Total oxygen concentration |
-| `tco2` | mmol/L | Total carbon dioxide concentration |
-| `ph` | unitless | Blood pH (-1 = not calculated) |
-| `pco2` | mmHg | Partial pressure of CO2 (-1 = not calculated) |
-| `po2` | mmHg | Partial pressure of O2 (-1 = not calculated) |
-| `so2` | unitless | Oxygen saturation (-1 = not calculated) |
-| `hco3` | mmol/L | Bicarbonate concentration (-1 = not calculated) |
-| `be` | mmol/L | Base excess (-1 = not calculated) |
-| `solutes` | object | Dictionary of solute concentrations |
-| `drugs` | object | Dictionary of drug concentrations |
+### Outputs
 
-### Calculated intermediates
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `to2`, `tco2` | mmol/L | 0.0 | Total O2 and CO2 content; mixed on inflow. |
+| `ph`, `pco2`, `po2`, `so2`, `hco3`, `be` | as in [BloodCapacitance](./BloodCapacitance.md#outputs) | -1 | Blood gases, `-1` = not calculated. No model solves them for `COR`, so they stay `-1`. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `el_min_eff` | mmHg/L | Effective minimum elastance this step (after all factors) |
-| `el_max_eff` | mmHg/L | Effective maximum elastance this step |
-| `el_k_eff` | mmHg/L² | Effective non-linear elastance coefficient |
-| `u_vol_eff` | L | Effective unstressed volume |
+### Set by other models
 
-## Three-tier factor system
+The same props `Blood` and `BloodComposition` write onto every blood compartment (`haldane_coeff`, `P50_0`, `viscosity_ref`, `body_temp`, `blood_temp_tc`, `temp_ext_override`, `prev_ph`, `prev_po2`): see [BloodCapacitance → Set by other models](./BloodCapacitance.md#set-by-other-models).
 
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `u_vol_factor`, `el_min_factor`, `el_max_factor`, `el_k_factor` | Transient effects, reset each step |
-| Persistent (`_ps`) | `u_vol_factor_ps`, `el_min_factor_ps`, `el_max_factor_ps`, `el_k_factor_ps` | Ongoing physiological modulation |
-| Scaling (`_scaling_ps`) | `u_vol_factor_scaling_ps`, `el_min_factor_scaling_ps`, `el_max_factor_scaling_ps`, `el_k_factor_scaling_ps` | ModelScaler weight/manual scaling |
+The class has no `blood_pool` or `fixed_composition` prop. Both read as "not set", so the compartment counts as circulating blood and its composition is never frozen.
 
-Each effective value is computed additively:
+## Calculation
+
+`calc_model()` is inherited: `calc_elastances()` → `calc_volumes()` → `calc_pressure()`, with
 
 ```
-el_min_eff = el_min
-  + (el_min_factor - 1) * el_min
-  + (el_min_factor_ps - 1) * el_min
-  + (el_min_factor_scaling_ps - 1) * el_min
+pres_in = p_ed + (p_es − p_ed) · act_factor
 ```
 
-Note: `el_max_eff` is clamped to never fall below `el_min_eff`.
+(see [TimeVaryingElastance → Calculation](./TimeVaryingElastance.md#calculation)).
 
-## Pressure calculation
+The class adds one override, **`volume_in(dvol, comp_from)`**. It adds the volume, then mixes the incoming blood with `mix_blood_in` ([`helpers/BloodMixing.js`](../helpers/BloodMixing.js)), exactly as in [BloodCapacitance](./BloodCapacitance.md#calculation): `to2`, `tco2`, every solute and drug, and `temp`, by the inflow's share of the new volume.
 
-The time-varying elastance produces a pressure that interpolates between end-diastolic and maximum systolic pressure based on the activation factor:
+## Factor system
 
-```
-p_ms = (vol - u_vol_eff) * el_max_eff
-p_ed = el_k_eff * (vol - u_vol_eff)^2 + el_min_eff * (vol - u_vol_eff)
-pres_in = (p_ms - p_ed) * act_factor + p_ed
-```
+Inherited unchanged: `u_vol`, `el_min`, `el_max` and `el_k` carry the three layers, composed **additively** (see [TimeVaryingElastance → Factor system](./TimeVaryingElastance.md#factor-system)). No model writes them for `COR` in the shipped scenarios.
 
-When `act_factor = 0` (diastole), pressure equals `p_ed`. When `act_factor = 1` (peak systole), pressure equals `p_ms`.
+## Inputs and outputs
 
-## Mixing logic (`volume_in`)
+- **Reads:** the upstream compartment on inflow (composition).
+- **Written by:** `Heart` (`act_factor` = the ventricular activation `vaf`, every step); `Mob` (subtracts the myocardial O2 consumption from `to2` and adds CO2 to `tco2` by the respiratory quotient, every step); `Blood` (temperature, viscosity, seed composition); `Drugs`, `Lactate`, `Glucose` (their solutes and drugs); `PERICARDIUM` (`pres_ext`); the connected resistors (volume).
+- **Read by:** `AA_COR` (whose resistance `Heart` raises in systole), `COR_RAIVCI` and `COR_RASVC` (its pressure); `Mob` (its `to2`, `tco2` and volume, plus the `AA_COR` flow and aortic `to2` for O2 delivery); `DataCollector` watchers.
 
-Overrides `volume_in` to perform composition mixing when blood flows in, through the shared `mix_blood_in` ([`helpers/BloodMixing.js`](../helpers/BloodMixing.js)), identical to `BloodCapacitance`:
+## Assumptions and limitations
 
-```
-concentration += ((concentration_from - concentration) * dvol) / vol
-```
-
-Applied to: `to2`, `tco2`, all `solutes`, all `drugs`, `temp`, `viscosity`.
-
-## Calculation cycle
-
-Inherits from `TimeVaryingElastance`:
-
-1. `calc_elastances()` -- compute el_min_eff, el_max_eff, el_k_eff from base values + all factor tiers
-2. `calc_volumes()` -- compute u_vol_eff from base + all factor tiers
-3. `calc_pressure()` -- compute time-varying recoil pressure from activation factor
+- **One compartment for the whole coronary circulation.** Left and right coronary beds, and epicardial versus intramyocardial vessels, aren't separated.
+- **Compression follows the LV activation for the whole bed.** The right-ventricular activation (`rvaf`) doesn't act on it.
+- **Two compression effects.** The bed's own elastance swing (`el_max/el_min` = 3) squeezes blood *out* in systole. Holding inflow back is done by `Heart.cor_r_systolic_factor`, which raises the inflow resistance `AA_COR` by `(1 + 5·vaf)` in systole. With both, 73 % of the coronary inflow arrives in diastole at term (60–62 % in the preterm and fetal scenarios, which have shorter diastoles). This compares with ~75–85 % for an adult left coronary, which a lumped left+right bed should sit below. An intramyocardial-*pressure* variant was tried and dropped: with this bed's compliance it squeezed the bed empty in systole.
+- **Active only since the two-phase build** (`302ed76`). Before that, `Heart` never found `COR` (owned by `Mob`), and `act_factor` stayed 0.
 
 ## Example definition (JSON)
+
+From `term_neonate.json`, `models.Mob.components.COR` (trimmed to the config props):
 
 ```json
 {
   "name": "COR",
-  "description": "coronary circulation",
   "model_type": "BloodTimeVaryingElastance",
   "is_enabled": true,
-  "vol": 0.005,
-  "u_vol": 0.004,
-  "el_min": 5000,
-  "el_max": 15000,
-  "el_k": 0
+  "u_vol": 0.00028,
+  "el_min": 30000,
+  "el_max": 90000,
+  "el_k": 0,
+  "vol": 0.00067
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- Used for compartments that exhibit pulsatile behavior driven by an external activation signal but do not need the ANS-mediated contractility/relaxation modulation of HeartChamber
-- The coronary circulation (COR) is a typical example -- it is compressed during systole by ventricular contraction via the `act_factor` set by the Heart model
+One instance in all 10 scenarios: `COR`, owned by `Mob`, inside the `PERICARDIUM`. It is fed from the ascending aorta by `AA_COR` (implicit flow) and drains into both halves of the right atrium through `COR_RAIVCI` and `COR_RASVC`.
+
+## References
+
+This class introduces no literature-derived values. For the time-varying elastance concept see [TimeVaryingElastance](./TimeVaryingElastance.md#references). The coronary elastances are scenario calibrations.
 
 ````
 
@@ -2936,398 +2884,350 @@ Inherits from `TimeVaryingElastance`:
 ````markdown
 # BloodVessel
 
-A BloodVessel represents a blood vessel segment in the circulatory model. It combines a volume compartment (capacitance) with flow resistance and supports autonomic nervous system (ANS) regulation.
+A `BloodVessel` is a segment of the circulation: an elastic blood compartment ([`BloodCapacitance`](./BloodCapacitance.md)) with its own inflow resistance and autonomic (ANS) control. When the ANS constricts a vessel, its resistance **and** its stiffness change together. That coupling is a defining feature of Explain. Almost the whole circulation is built from BloodVessels.
+
+## Physiology
+
+Each vessel segment does two things at once:
+
+- **It holds blood** at a pressure set by its wall stiffness, like any elastic compartment.
+- **It resists flow** into it. Most of the circulation's resistance sits in the small arteries and arterioles, so those segments set systemic and pulmonary vascular resistance.
+
+The autonomic nervous system adjusts vessel tone through three effects:
+
+- **Resistance.** Sympathetic activity constricts arterioles and raises resistance (and blood pressure); withdrawal dilates them.
+- **Stiffness follows resistance.** A constricted vessel has a narrower, thicker-walled lumen, so it is also stiffer. Explain couples the two with one exponent per vessel type (*α*), so vasoconstriction raises resistance and elastance together.
+- **Venous reservoir.** Sympathetic venoconstriction mainly shrinks the *unstressed volume* of the large capacitance veins, not their stiffness. That shifts blood from the venous reservoir into the circulating (stressed) volume and raises venous return. It is the body's quick "autotransfusion".
+
+Blood viscosity also sets resistance (Poiseuille). Polycythaemia raises resistance in every vessel, and haemodilution lowers it.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Capacitance          (volume, elastance, pressure)
-        └── BloodCapacitance   (blood composition: O2, CO2, solutes, drugs, temperature)
-              └── BloodVessel  (resistance, flow, ANS coupling)
+  └── Capacitance
+        └── BloodCapacitance      (blood composition mixing)
+              └── BloodVessel     (inflow resistors, ANS, α-coupling, viscosity)
 ```
 
-## What it models
-
-A BloodVessel is both a **capacitance** (it holds a volume of blood at a certain pressure) and a **resistance** (blood flows through it with a pressure drop). Each BloodVessel creates one or more internal `Resistor` objects based on its `inputs` list. These resistors handle the actual flow calculations between upstream components and this vessel.
-
-When the ANS changes vascular tone, the vessel's resistance **and** elastance change simultaneously. This coupling is governed by the `alpha` parameter and is a distinguishing feature of the Explain model.
-
-## Initialization
-
-During `init_model()`, the BloodVessel creates a `Resistor` instance for each entry in its `inputs` array. Each resistor is named `{inputName}_{vesselName}` (e.g., `AA_AD1`) and is registered in the model engine. Each step the BloodVessel overwrites their `r_for`/`r_back`/`r_k` with its own effective values (see [Owned input resistors](#owned-input-resistors)).
-
-If a resistor already exists in the model engine (e.g., when loading from a saved state), the existing instance is reused.
-
-## Calculation cycle (`calc_model`)
-
-Each model step executes in this order:
-
-1. **`calc_resistances()`** -- compute effective forward, backward, and non-linear resistances
-2. **`calc_elastances()`** -- compute effective elastance with ANS and resistance-elastance coupling
-3. **Update resistors** -- push the calculated values to all internal `Resistor` objects
-4. **`calc_volumes()`** -- compute effective unstressed volume (inherited from Capacitance)
-5. **`calc_pressure()`** -- compute recoil (`pres_in`) and total pressure (inherited from Capacitance)
-7. **`get_flows()`** -- sum forward and backward flows from all internal resistors
+`BloodVessel` overrides `calc_resistances` and `calc_elastances`, and composes its factor layers **multiplicatively** (unlike the additive base classes). It extends `calc_volumes` with the ANS unstressed-volume effect. Pressure and composition mixing are inherited.
 
 ## Properties
 
-### Base properties (from definition JSON)
+Inherited props: [Capacitance](./Capacitance.md#properties) (`vol`, `u_vol`, `el_base`, `el_k`, their factor layers, `pres`, …) and [BloodCapacitance](./BloodCapacitance.md#properties) (`temp`, `viscosity`, `solutes`, `drugs`, blood gases, `blood_pool`, and the props `Blood` writes, including `viscosity_ref`).
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume -- the volume at which transmural pressure is zero |
-| `el_base` | mmHg/L | Baseline elastance (stiffness). Higher = stiffer vessel |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient. Adds quadratic pressure term at high volumes |
-| `r_for` | mmHg·s/L | Forward flow resistance |
-| `r_back` | mmHg·s/L | Backward flow resistance |
-| `r_k` | mmHg·s²/L² | Non-linear resistance coefficient. Adds flow-dependent resistance |
-| `inputs` | string[] | Names of upstream components (a Resistor is created for each) |
-| `alpha` | 0-1 | Resistance-elastance coupling factor (see ANS section) |
-| `ans_sens` | 0-1 | Sensitivity to ANS activity. 0 = no effect, 1 = full effect |
-| `no_flow` | boolean | If true, all flow is blocked |
-| `no_back_flow` | boolean | If true, backward flow is blocked (valve-like behavior) |
+### Config (set in the definition JSON)
 
-### Dependent properties (calculated each step)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `inputs` | – | `[]` | Upstream compartments. One inflow `Resistor` is created per input, named `<input>_<vessel>`. |
+| `r_for` | mmHg·s/L | 1.0 | Forward resistance of each inflow connector. |
+| `r_back` | mmHg·s/L | 1.0 | Backward resistance. |
+| `r_k` | mmHg·s²/L² | 0.0 | Turbulent coefficient (0 in every shipped vessel). |
+| `no_flow` | boolean | `false` | Closes all inflow connectors. |
+| `no_back_flow` | boolean | `false` | Makes the inflow connectors one-way. |
+| `alpha` | – | 0.0 | Resistance→elastance coupling exponent: `el ∝ (R multiplier)^α`. 0 = no coupling. |
+| `ans_sens` | – | 0.0 | Sensitivity of the resistance to `ans_activity`, 0 (none) to 1 (full). |
+| `u_vol_ans_sens` | – | 0.0 | Sensitivity of the unstressed volume to `ans_activity` (venoconstriction). |
+| `r_factor`, `r_k_factor` | – | 1.0 | Non-persistent factors, reset to 1 every step. |
+| `r_factor_ps`, `r_k_factor_ps` | – | 1.0 | Persistent factors. |
+| `r_factor_scaling_ps`, `r_k_factor_scaling_ps` | – | 1.0 | Persistent scaling factors. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `vol` | L | Current blood volume in the vessel |
-| `pres` | mmHg | Total pressure (recoil + external) |
-| `pres_in` | mmHg | Recoil pressure from elastance |
-| `flow` | L/s | Net flow (forward - backward) |
-| `flow_forward` | L/s | Total forward flow across all input resistors |
-| `flow_backward` | L/s | Total backward flow across all input resistors |
+### Outputs
 
-### Calculated intermediates (available for monitoring)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `flow` | L/s | 0.0 | Net **inflow** through the input connectors (forward − backward). Not the outflow. |
+| `flow_forward` | L/s | 0.0 | Sum of the forward flows of the enabled input connectors. |
+| `flow_backward` | L/s | 0.0 | Sum of the backward flows (positive number). |
+| `r_for_eff`, `r_back_eff` | mmHg·s/L | 1000 | Effective resistances, written into the input connectors. |
+| `r_k_eff` | mmHg·s²/L² | 0 | Effective turbulent coefficient. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `r_for_eff` | mmHg·s/L | Effective forward resistance this step (after all factors) |
-| `r_back_eff` | mmHg·s/L | Effective backward resistance this step |
-| `r_k_eff` | mmHg·s²/L² | Effective non-linear resistance coefficient |
-| `el_eff` | mmHg/L | Effective elastance (from Capacitance) |
-| `u_vol_eff` | L | Effective unstressed volume (from Capacitance) |
+### Set by other models
 
-## Three-tier factor system
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `ans_activity` | – | 1.0 | Autonomic tone, > 1 constriction, < 1 dilation. `Circulation` writes its own `ans_activity` (from the `EF_SVR` efferent) into **every** circulation vessel. Placenta and ECLS vessels keep 1. |
+| `viscosity_ref` | cP | 0.0 | Viscosity at which `r_for`/`r_back` are calibrated, written by `Blood` at build; 0 switches the viscosity effect off. |
+| `p1_ext`, `p2_ext` | mmHg | 0.0 | Extra pressure on the inlet/outlet of the input connectors. Copied to them every step and **not** reset on the vessel, so a value written here acts until the writer sets it back to 0 (e.g. `Ecls` on `ECLS_PUMP`/`ECLS_OXY`). |
 
-Each physical property can be modulated by three independent factor tiers. All factors default to 1.0 (no change).
+## Calculation
 
-**Composition differs by property.** `BloodVessel` **overrides** `calc_resistances()` and `calc_elastances()`, so its resistance (`r_for`/`r_back`/`r_k`) and elastance (`el_base`/`el_k`) tiers compose **multiplicatively** (the product of the three factors, plus the ANS multiplier for `r`/`el`):
+Each step `step_model()` first copies the vessel's `is_enabled` onto its input connectors, so a disabled vessel's connectors stop conducting. Then, when enabled and initialized, `calc_model()` runs:
+
+1. **`calc_resistances()`**
+   ```
+   ans_mult       = 1 + (ans_activity − 1) · ans_sens
+   r_total_factor = r_factor · r_factor_ps · r_factor_scaling_ps · ans_mult
+   visc_mult      = viscosity / viscosity_ref          (1 if viscosity_ref = 0)
+   r_for_eff  = r_for  · r_total_factor · visc_mult
+   r_back_eff = r_back · r_total_factor · visc_mult
+   r_k_eff    = r_k · r_k_factor · r_k_factor_ps · r_k_factor_scaling_ps · ans_mult
+   ```
+   `r_total_factor` is cached for the elastance step; viscosity is deliberately left out of it (thicker blood isn't vasoconstriction, so it doesn't stiffen the wall). The non-persistent factors are reset.
+2. **`calc_elastances()`**
+   ```
+   el_eff   = el_base · el_base_factor · el_base_factor_ps · el_base_factor_scaling_ps · r_total_factor^α
+   el_k_eff = el_k · el_k_factor · el_k_factor_ps · el_k_factor_scaling_ps        (not α-coupled)
+   ```
+   The power is recomputed only when `r_total_factor` or `α` change.
+3. **Update the input connectors**: `r_for`/`r_back`/`r_k` ← the effective values; `no_flow`, `no_back_flow`, `p1_ext`, `p2_ext`, `is_enabled` ← the vessel's.
+4. **`calc_volumes()`**: the inherited additive `u_vol` layers (floored at 0), then the ANS venoconstriction:
+   ```
+   u_vol_eff = u_vol_eff · max(0, 1 − (ans_activity − 1) · u_vol_ans_sens)
+   ```
+5. **`calc_pressure()`** (inherited from [Capacitance](./Capacitance.md#calculation)): with `S = vol − u_vol_eff`, `pres = (S > 0 ? el_k_eff·S² : 0) + el_eff·S + pres_ext`.
+6. **`get_flows()`**: sums the flows of the enabled input connectors into `flow_forward`, `flow_backward` and `flow`.
+
+**Inflow connectors.** `init_model` creates one `Resistor` per name in `inputs`, unless a model with that name already exists (a saved state lists them as top-level entries, so they are reused). The flow itself, the volume transfer and the composition mixing all happen in those connectors; see [Resistor](./Resistor.md#inheritance) for which props the vessel overwrites and which stay the connector's own.
+
+**Step lag.** In a loaded scenario the connectors are top-level entries and step **before** their vessel (the vessels are sub-models of `Circulation`, `Placenta` or `Ecls`). So a connector uses the resistance the vessel wrote one step earlier (0.5 ms).
+
+### Where α comes from
+
+For a thin-walled tube, Poiseuille gives `R ∝ r⁻⁴`, and the volume elastance of the tube scales as `E ∝ r⁻³`. A pure change of radius therefore moves them as `E ∝ R^(3/4)`, so α = 0.75. That is the value used for veins and venules. The scenarios use 0.63 for arterioles and 0.5 for large arteries and central veins, where the thicker or more structural wall stiffens less than the pure-geometry estimate. The lumped "rest of upper/lower body" beds (`RUB`, `RLB`) use 1.
+
+## Factor system
+
+The resistance and elastance layers compose **multiplicatively**:
 
 ```
-value_eff = base * factor * factor_ps * factor_scaling_ps   # r_for, r_back, r_k, el_base, el_k
+value_eff = base · factor · factor_ps · factor_scaling_ps        (r_for, r_back, r_k, el_base, el_k)
 ```
 
-Multiplicative composition lets simultaneous factors compound correctly: `r_factor = 2` with `r_factor_ps = 2` gives a true 4× rise, not the linearised 3× the additive form produces.
+So `r_factor = 2` with `r_factor_ps = 2` gives a true ×4, not the ×3 of the additive rule. `u_vol` keeps the inherited **additive** layers (then the ANS multiplier). See [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
 
-The unstressed volume `u_vol` is **not** overridden — it is computed by the inherited `Capacitance.calc_volumes()`, which is still **additive** (matching the base-class convention):
+**α applies to every resistance layer, not only the ANS.** `r_total_factor` includes `r_factor_ps` and `r_factor_scaling_ps`, so these also stiffen the vessel by `factor^α`:
+- the user's or a drug's SVR change (`Circulation.set_svr_factor_*` on the systemic arterioles);
+- renal autoregulation (`Kidneys` on `KID_ART`);
+- the Calibrator;
+- ModelScaler resistance scaling.
 
-```
-u_vol_eff = u_vol
-  + (u_vol_factor - 1) * u_vol             # tier 1: non-persistent
-  + (u_vol_factor_ps - 1) * u_vol          # tier 2: persistent
-  + (u_vol_factor_scaling_ps - 1) * u_vol  # tier 3: scaling
-```
+Writers in the current code:
 
-### Tier 1: Non-persistent factors (reset every step)
-
-| Factor | Affects |
+| Layer | Writers |
 |---|---|
-| `el_base_factor` | `el_base` |
-| `el_k_factor` | `el_k` |
-| `u_vol_factor` | `u_vol` |
-| `r_factor` | `r_for`, `r_back` |
-| `r_k_factor` | `r_k` |
+| `r_factor_ps` | `Circulation` (`set_svr_factor_art`/`_drug`/`_ven`, `set_pvr_factor_art`/`_ven`: deltas added to the shared accumulator), `Kidneys` (`KID_ART`, afferent autoregulation), the `Calibrator`, the user |
+| `r_factor_scaling_ps`, `el_base_factor_scaling_ps`, `u_vol_factor_scaling_ps` | `ModelScaler`; `Uterus`, `MaternalPlacenta` (their own vessels) |
+| `u_vol_factor_ps`, `el_base_factor_ps` | the user and scenarios |
 
-These are set by other models during a step (e.g., the breathing model applying intrathoracic pressure effects) and automatically reset to 1.0 after use (`r_factor`/`r_k_factor` in `calc_resistances`, `el_base_factor`/`el_k_factor` in `calc_elastances`, `u_vol_factor` in `calc_volumes`).
+Models that need to change **one** inflow without touching the vessel write the input connector's own factors instead, which multiply on top of the vessel's value:
+- `Hormones`: `KID_CAP_KID_VEN.r_factor_ps`, the efferent arteriole;
+- `Brain`: `AA_BR_ART.r_factor_ps` (cerebral autoregulation) and `BR_VEN_VUB.r_factor_ps` (ICP on the outflow).
 
-### Tier 2: Persistent factors (`_ps`)
+The vessel's `r_for_eff` doesn't show these.
 
-| Factor | Affects |
-|---|---|
-| `el_base_factor_ps` | `el_base` |
-| `el_k_factor_ps` | `el_k` |
-| `u_vol_factor_ps` | `u_vol` |
-| `r_factor_ps` | `r_for`, `r_back` |
-| `r_k_factor_ps` | `r_k` |
+## Inputs and outputs
 
-These persist across steps and are used by controllers like the ANS or Heart model to apply ongoing physiological modulation.
+- **Reads:** its own props; `viscosity` and `viscosity_ref` (written by `Blood`); `ans_activity` (written by `Circulation`); the flows of its input connectors.
+- **Writes:** the resistance and gates of its input connectors, every step.
+- **Written by:** `Circulation` (`ans_activity`, SVR/PVR factors), `Blood` (viscosity, temperature, seed composition), `Kidneys`, the `Calibrator`, `ModelScaler`, `Uterus`/`MaternalPlacenta`, `Ecls` (`p1_ext`/`p2_ext`, volumes), `Placenta` (`no_flow` at cord clamping), `THORAX` (`pres_ext` on the intrathoracic vessels), the connected resistors (volume).
+- **Read by:** `Monitor` (pressures, flows), `Brain` and `Kidneys` (their bed's pressures and flows), `Blood` (blood-gas sites `AA`, `AD`, `IVCI`, `SVC`, `PA`), `DataCollector` watchers.
 
-### Tier 3: Scaling factors (`_scaling_ps`)
+## Assumptions and limitations
 
-| Factor | Affects |
-|---|---|
-| `el_base_factor_scaling_ps` | `el_base` |
-| `el_k_factor_scaling_ps` | `el_k` |
-| `u_vol_factor_scaling_ps` | `u_vol` |
-| `r_factor_scaling_ps` | `r_for`, `r_back` |
-| `r_k_factor_scaling_ps` | `r_k` |
-
-These are used exclusively by the `ModelScaler` for weight-based or manual scaling. Having a dedicated tier means scaling does not interfere with physiological factors in tier 2. (Note the `_scaling_ps` suffix — capacitance/resistor/elastance scaling factors all carry it; this differs from the diffusor/exchanger models, whose scaling factors are bare `*_factor_scaling`.)
-
-## ANS and resistance-elastance coupling
-
-The ANS influences both resistance and elastance, but through different pathways:
-
-### Resistance
-
-ANS modulates resistance directly, scaled by sensitivity. The ANS contribution is a sensitivity-weighted multiplier `ans_mult = 1 + (ans_activity - 1) * ans_sens`, composed multiplicatively with the three resistance-factor tiers:
-
-```
-ans_mult       = 1 + (ans_activity - 1) * ans_sens
-r_total_factor = r_factor * r_factor_ps * r_factor_scaling_ps * ans_mult
-
-r_for_eff = r_for * r_total_factor * visc_mult      (visc_mult = viscosity / viscosity_ref)
-r_back_eff = r_back * r_total_factor
-```
-
-`visc_mult` is the blood viscosity relative to the viscosity the scenario was built at (`viscosity_ref`, set by [`Blood`](./Blood.md); 0 = off). It follows the haematocrit (Poiseuille), is not part of `r_total_factor` (viscosity is not vasoconstriction, so it does not drive the α-coupling) and is not applied to `r_k`.
-
-`r_k` carries its own factor stack with the same ANS coupling: `r_k_eff = r_k · r_k_factor · r_k_factor_ps · r_k_factor_scaling_ps · ans_mult`. The combined `r_total_factor` is cached and reused by the elastance step (single source of truth for the α-coupling).
-
-### Elastance (alpha coupling)
-
-When a vessel constricts (resistance increases), its wall also becomes stiffer (elastance increases). The `alpha` parameter controls how strongly resistance changes translate into elastance changes via a power law applied **once** to the *combined* resistance multiplier `r_total_factor` (which already folds in the ANS contribution):
-
-```
-el_passive_mult = el_base_factor * el_base_factor_ps * el_base_factor_scaling_ps
-el_geom_mult    = r_total_factor ^ alpha            # α-coupling to resistance
-
-el_eff = el_base * el_passive_mult * el_geom_mult
-```
-
-`el_k` is **not** α-coupled — the non-linear stiffening term is treated as a structural property of the wall, so it carries only its own passive multipliers:
-
-```
-el_k_eff = el_k * el_k_factor * el_k_factor_ps * el_k_factor_scaling_ps
-```
-
-Typical alpha values:
-- **Large arteries**: 0.5 (moderate coupling)
-- **Arterioles**: 0.63 (stronger coupling)
-- **Veins/venules**: 0.75 (strongest coupling)
-
-An alpha of 0.0 means resistance changes have no effect on elastance.
-
-### Unstressed volume (venous capacitance)
-
-Sympathetic venoconstriction acts mainly on the unstressed volume of the capacitance veins, not on their compliance. It shifts blood from the venous reservoir into the stressed volume, which raises mean filling pressure and venous return (Shoukas & Sagawa, *Circ Res* 1973: carotid-sinus hypotension mobilises unstressed volume with little change in compliance). `u_vol_ans_sens` (default `0.0`, no effect) sets how strongly `ans_activity` moves it:
-
-```
-u_vol_ans_mult = max(0, 1 − (ans_activity − 1) · u_vol_ans_sens)
-u_vol_eff      = (additive u_vol layers, clamped at 0) · u_vol_ans_mult
-```
-
-`ans_activity` comes from `EF_SVR` through `Circulation` (range 0.5–2; > 1 is constriction). For example, `u_vol_ans_sens = 0.3` gives `u_vol ×0.7` at full sympathetic drive and `×1.15` at full withdrawal. It is independent of `ans_sens`, which acts on R (and on E through α). Set it on the systemic capacitance veins; brain and pulmonary veins have little sympathetic venomotor control.
-
-## Owned input resistors
-
-Each step `calc_model` writes the vessel's `r_for_eff`/`r_back_eff`/`r_k_eff` into the **base** `r_for`/`r_back`/`r_k` of every input resistor (plus `no_flow`, `no_back_flow`, `p1_ext`, `p2_ext`, `is_enabled`). Two consequences:
-
-- **The resistor's own factor stack still applies on top.** `Resistor.calc_resistance` multiplies that base by its own `r_factor`/`r_factor_ps`/`r_factor_scaling_ps` (additively). Models that need to change one input without touching the vessel use this layer, and the vessel's `r_for_eff` does **not** show it. In `term_neonate`: `Hormones` writes `KID_CAP_KID_VEN.r_factor_ps` (angiotensin on the efferent arteriole), `Brain` writes `AA_BR_ART.r_factor_ps` (cerebral autoregulation) and `BR_VEN_VUB.r_factor_ps` (ICP on the outflow). `Kidneys` autoregulation acts on the afferent *vessel* instead (`KID_ART.r_factor_ps`). `ModelScaler` never scales an owned resistor (the scaler groups list the vessels), so nothing is scaled twice.
-- **`p1_ext`/`p2_ext` are effectively persistent on a vessel.** The Resistor clears its own `p1_ext`/`p2_ext` after use, but the vessel keeps its copy (nothing resets it) and re-copies it to every input resistor each step. A drive written on the vessel therefore stays applied until the writer zeroes it — e.g. `Ecls` zeroes `ECLS_PUMP`/`ECLS_OXY` `p1_ext`/`p2_ext` on stop and on a pump-mode switch. Writing the resistor's `p1_ext` directly is overwritten by the vessel's value on its next step.
-- **One lag step.** In a loaded scenario the owned resistors are top-level entries, so they step before their vessel and use the values the vessel wrote in the previous step.
-
-`flow`/`flow_forward`/`flow_backward` are summed over the vessel's **input** resistors: `flow` is the net inflow into this vessel, not its outflow.
-
-## Pressure calculation
-
-Pressure is calculated by the inherited `Capacitance.calc_pressure()`:
-
-```
-pres_in = el_k_eff * (vol - u_vol_eff)^2 + el_eff * (vol - u_vol_eff)
-pres    = pres_in + pres_ext
-```
-
-Where `pres_ext` is a non-persistent external pressure (e.g., intrathoracic pressure) that resets to 0 each step.
+- **Inflow resistance only.** A vessel's resistance sits on its inflow connectors; its outflow is the next vessel's inflow. A bed with several outlets has no resistance of its own on each outlet.
+- **One ANS signal for the whole circulation.** Every circulation vessel gets the same `ans_activity`. Regional differences come only from `ans_sens` (e.g. 1 on the systemic and pulmonary arterioles, 0.5 on the aorta and central veins, 0.05 on the pulmonary trunk and veins, 0 on capillaries). There is no separate cerebral, renal or splanchnic sympathetic output.
+- **α-coupling is geometric and instantaneous.** Any resistance change stiffens the vessel by `factor^α`. That fits vasoconstriction, but it also applies to scaling and calibration changes of resistance.
+- **`ans_mult` must stay positive.** `r_total_factor^α` is `NaN` for a negative base. Today's efferent ranges keep `ans_activity` in 0.5–2, but `AnsEfferent` doesn't clamp its firing rate (to be checked with the control loops).
+- **No vessel collapse, inertance or wave propagation** (see [Capacitance](./Capacitance.md#assumptions-and-limitations) and [Resistor](./Resistor.md#assumptions-and-limitations)).
 
 ## Example definition (JSON)
 
+From `term_neonate.json`, `models.Circulation.components.KID_ART` (trimmed to the config props):
+
 ```json
 {
-  "name": "AD1",
-  "description": "descending aorta segment 1",
+  "name": "KID_ART",
   "model_type": "BloodVessel",
   "is_enabled": true,
-  "vol": 0.02725,
-  "u_vol": 0.02625,
-  "el_base": 625,
+  "inputs": ["AD"],
+  "vol": 0.00056,
+  "u_vol": 0.00011,
+  "el_base": 94524.9,
   "el_k": 0,
-  "r_for": 6.2,
-  "r_back": 6.2,
+  "r_for": 10777.7,
+  "r_back": 10539.3,
   "r_k": 0,
-  "inputs": ["AA"],
-  "alpha": 0.5,
-  "ans_sens": 0.0
+  "alpha": 0.63,
+  "ans_sens": 1,
+  "u_vol_ans_sens": 0
 }
 ```
 
-## Usage in the model hierarchy
+## Usage in the scenarios
 
-- **Standalone**: Used for large arteries (AA, AD1, AD2) and veins (IVCI, SVCI) that are directly defined in the model.
-- **Inside Heart (indirectly)**: Heart valves use standalone `Resistor` objects that connect HeartChamber components, not BloodVessels.
+Term_neonate has 39 vessels (the same layout in all 10 scenarios):
+
+| Bed | Vessels | α | `ans_sens` | `u_vol_ans_sens` |
+|---|---|---|---|---|
+| Pulmonary trunk, branches, veins | `PA`, `PAAL`, `PAAR`, `PV` | 0.5 | 0.05 | 0 |
+| Lung arterioles / capillaries / venules | `LL_ART`, `RL_ART` / `LL_CAP`, `RL_CAP` / `LL_VEN`, `RL_VEN` | 0.63 / 0 / 0.75 | 1 / 0 / 0.75 | 0 |
+| Aorta | `AA`, `AAR`, `AD` | 0.5 | 0.5 | 0 |
+| Systemic beds: liver/spleen, kidney, intestine, brain (arteriole / capillary / venule) | `LS_*`, `KID_*`, `INT_*`, `BR_*` | 0.63 / 0 / 0.75 | 1 / 0 / 0.75 | 0.2 on `LS_VEN`, `KID_VEN`, `INT_VEN` |
+| Rest of lower / upper body | `RLB`, `RUB` | 1 | 1 | 0 |
+| Capacitance veins | `VLB`, `VUB`, `IVCI`, `SVC` | 0.5 | 0.5 | 0.2 |
+| Placenta (fetal side) | `PL_UMB_ART`, `PL_FETAL_ART`/`_CAP`/`_VEN`, `PL_UMB_VEN` | 1, 0.63, 0, 0.75, 1 | 0, 1, 0, 0.75, 0 | 0 |
+| ECLS circuit | `ECLS_PUMP`, `ECLS_OXY`, `ECLS_TUBING_OUT` | 0 | 0 | 0 |
+
+The circulation vessels are owned by `Circulation`, the placental ones by `Placenta` (disabled after birth), and the ECLS ones by `Ecls` (disabled unless ECLS runs).
+
+## References
+
+- Shoukas AA, Sagawa K. Control of total systemic vascular capacity by the carotid sinus baroreceptor reflex. *Circ Res* 1973;33(1):22–33. [doi:10.1161/01.res.33.1.22](https://doi.org/10.1161/01.res.33.1.22) (sympathetic control acts mainly on unstressed volume, with little change in compliance).
+
+The resistance, elastance and α values are scenario calibrations (see the `*Reference.md` pages). The α = 0.75 value follows from tube geometry (above).
 
 ````
 
 ### FILE: explain-engine/docs/Brain.md
 
 ````markdown
-# Brain (cerebral autoregulation + ICP)
+# Brain
 
-The `Brain` model is the **neonatal cerebral haemodynamics controller** — it couples cerebral
-blood-flow **autoregulation** with **intracranial pressure (ICP)** through the cerebral perfusion
-pressure `CPP = MAP − ICP`. Like [`Kidneys`](./Kidneys.md) and [`Hormones`](./Hormones.md) it is a
-**controller/process model**: it holds no blood, resolves references to other models lazily, runs on
-an update interval, and **owns its effector channels while enabled** (releasing them once on
-disable). Default config is **neutral** — the baseline CPP/CBF setpoint and the baseline cerebral
-blood volume are **auto-seeded** after a warm-up, so a scenario that ships a `Brain` model behaves
-identically at rest and only diverges when blood pressure changes, autoregulation is impaired, or
-intracranial volume rises.
+`Brain` models neonatal cerebral haemodynamics: **autoregulation** of cerebral blood flow (CBF) and **intracranial pressure** (ICP), linked through the cerebral perfusion pressure CPP = MAP − ICP. Like [Kidneys](./Kidneys.md)' renal autoregulation, it is a controller: it holds no blood, acts on the cerebral bed's resistors, and is neutral at the scenario's baseline. It diverges only when blood pressure changes, autoregulation is impaired, or intracranial volume rises.
 
-## The cerebral bed (pre-wired in the scenarios)
+## Physiology
+
+The brain keeps its blood flow nearly constant over a range of perfusion pressures by constricting or dilating its arterioles (myogenic autoregulation). In the sick or very preterm newborn that range is narrow and easily lost. The circulation then becomes **pressure-passive**: CBF follows blood pressure, so a surge can cause intraventricular haemorrhage and a fall can cause ischaemia.
+
+The skull holds brain, blood and CSF (Monro–Kellie). Added volume (oedema, haemorrhage, a mass) raises ICP along an exponential pressure–volume curve. It is gentler in the newborn, whose fontanelle and sutures are open. Rising ICP compresses the bridging veins and lowers CPP; autoregulation dilates to compensate until its reserve is gone, then CBF falls.
+
+## Inheritance
 
 ```
-AA ──AA_BR_ART──► BR_ART ──► BR_CAP ──► BR_VEN ──BR_VEN_VUB──► VUB
-     (arteriole         (autoregulated bed: summed for CBV)      (venous outflow;
-      effector)          BR_CAP = dominant O2 sink (fvo2~0.45)    ICP raises its R)
+BaseModelClass
+  └── Brain
 ```
 
-`CBF = AA_BR_ART.flow`. `BR_CAP` is the dominant neonatal O2 sink ([`Metabolism`](./Metabolism.md)
-`fvo2` 0.31 in term_neonate, formerly ≈ 0.45), so a fall in CBF shows up as `BR_CAP.to2` collapsing —
-the HIE / ischaemia signature (`brain_to2` read-out).
+## Properties
 
-**The bed's resistance is set on the vessels, not the connectors.** Each `BloodVessel` writes its own
-`r_for_eff` into its input connector every step:
-- `AA_BR_ART` takes `BR_ART`'s value
-- `BR_ART_BR_CAP` takes `BR_CAP`'s
-- `BR_CAP_BR_VEN` takes `BR_VEN`'s
-- `BR_VEN_VUB` is `VUB`'s connector, shared with `RUB_VUB`
+### Config: gating and wiring
 
-To change resting CBF, scale `BR_ART`/`BR_CAP`/`BR_VEN` together. Scaling only `BR_ART` raises the
-autoregulation effector's share of the bed, and with it the loop gain; the controller then
-oscillates. Re-anchor `cbf_setpoint`/`cpp_setpoint`/`cbv0` to the new rest as well.
-
-**term_neonate CBF (calibrated assumption, 2026-10):**
-- 0.10592 L/min (106 mL/min, ~30 mL/kg/min, 15 % of LVO), the neonatal PC-MRA term median (Kooi 2019)
-- previously 144 mL/min (20 % of LVO)
-- see `scripts/_fix_term_brain_mri.mjs` and [TermNeonateReference](./TermNeonateReference.md)
-
-## Autoregulation = closed-loop control of CBF
-
-Autoregulation is modelled as **closed-loop control on FLOW**, not open-loop pressure→resistance
-scaling — because the cerebral bed is several resistors in series and `AA_BR_ART` is only ~44 % of
-the total path resistance, so a fixed pressure-driven scaling of one resistor would not hold CBF. A
-**leaky integrator** adjusts the arteriole resistor's `AA_BR_ART.r_factor_ps` to hold CBF at its
-seeded setpoint (`u` = update interval, `err` = fractional CBF error):
-
-```
-err  = (cbf_smooth − cbf_setpoint) / cbf_setpoint
-d    = autoreg_control_gain·err − autoreg_leak·(_ar_int − 1)     # leaky integral
-_ar_int = clamp(_ar_int + d·u, autoreg_factor_min, autoreg_factor_max)
-applied = clamp(1 + autoregulation_gain·(_ar_int − 1), …)        # blend toward pressure-passive
-autoreg_factor ← lag(autoreg_factor → applied, autoreg_tc)       # anti-oscillation lag
-AA_BR_ART.r_factor_ps = autoreg_factor
-```
-
-Too much flow (`err > 0`) → constrict. The **leak** (`autoreg_leak`) relaxes the integrator toward
-neutral (`1.0`), so at the baseline (`err ≈ 0`) the factor returns to `1.0` — **no windup**, the
-baseline stays collision-free/neutral. Under a sustained insult the error term dominates and the
-correction is held (`control_gain / leak ≈ 5 / 0.05 = 100` → strong autoregulation with a small
-droop). `autoregulation_gain ∈ [0, 1]` blends between **intact (1)** and **pressure-passive (0)**:
-the immature / sick neonatal brain is pressure-passive (set the gain `< 1` or `0` for HIE / extreme
-preterm — the IVH/HIE substrate, where CBF follows pressure: surge → haemorrhage, drop → ischaemia).
-
-> **Why `AA_BR_ART` is the effector.** It is a free-standing `Resistor` that is **not** in
-> [`Circulation`](./Circulation.md)'s ANS/SVR fan-out, so writing its `r_factor_ps` composes
-> cleanly with systemic tone (the brain's ANS/SVR tone lives on `BR_ART` and is left alone) — same
-> no-collision precedent as the Kidneys afferent and the Hormones efferent.
-
-The sensed MAP (`AA.pres`) and CBF are both **smoothed** first-order (`pres_tc`/`cbf_tc ≈ 3 s`),
-because the instantaneous resistor pressures/flows are pulsatile — so `CPP` tracks the **mean**
-arterial pressure, not the instantaneous value. CBF is converted L/s → L/min (`×60`).
-
-## ICP (Monro–Kellie, exponential compliance)
-
-Cerebral blood volume `CBV = BR_ART + BR_CAP + BR_VEN` volume (L → mL). The volume excess above
-baseline drives an exponential pressure-volume curve:
-
-```
-ΔV         = (CBV − CBV0) + edema_volume                  # mL  (CBV0 auto-seeded)
-icp_excess = clamp(icp_e0·(exp(icp_k·ΔV) − 1), 0, icp_excess_max)   # mmHg (floored at 0)
-ICP        = icp_baseline + icp_excess
-CPP        = sensed_map − ICP
-```
-
-`edema_volume` is the settable oedema / mass / haemorrhage lever (mL), set via `set_edema(volume_ml)`.
-The neonatal cranium is **compliant** (open fontanelle / sutures) → a gentler curve than the adult,
-carried by `icp_k`.
-
-> **ICP is applied as a RESISTANCE on the OUTFLOW, not as `pres_ext`.** External pressure on a series
-> of compartments does not change their steady-state through-flow, so ICP instead raises the cerebral
-> venous **outflow** resistor: `BR_VEN_VUB.r_factor_ps = clamp(1 + icp_outflow_gain·icp_excess, 1,
-> icp_outflow_factor_max)`. This models **venous compression / the vascular waterfall** — rising ICP
-> congests the venous outflow → CBF falls (and the closed-loop autoregulation then defends CBF by
-> dilating the inflow, until the reserve is exhausted). The ICP → outflow-R → venous-congestion →
-> CBV → ICP loop is **positive feedback**, so `icp_outflow_gain` is kept low (loop gain < 1).
-
-## Clinical demonstrations it enables
-
-- **Autoregulation intact vs pressure-passive on hypotension** — with `autoregulation_gain = 1`
-  CBF is protected as MAP falls; with the gain low/0 CBF collapses with pressure → IVH/HIE.
-- **Raised ICP / HIE** — `set_edema(…)` (oedema/mass) + lost autoregulation → CPP falls, CBF falls,
-  `brain_to2` collapses → cerebral ischaemia.
-- **Emergent coupling** — autoregulatory **vasodilation raises ICP** (it increases arterial CBV),
-  and rising ICP feeds back onto CBF through the outflow resistance.
-
-## Read-outs
-| Read-out | Unit | Meaning |
+| Property | Default | Description |
 |---|---|---|
-| `cbf` | L/min | cerebral blood flow (smoothed `AA_BR_ART.flow`) |
-| `cpp` | mmHg | cerebral perfusion pressure (`sensed_map − icp`) |
-| `icp` | mmHg | intracranial pressure (`icp_baseline + icp_excess`) |
-| `icp_excess` | mmHg | ICP above baseline (drives the outflow-R) |
-| `cerebral_blood_volume` | mL | CBV (`BR_ART+BR_CAP+BR_VEN`) |
-| `brain_to2` | mmol/L | `BR_CAP.to2` — ischaemia read-out |
-| `autoreg_factor` | — | applied `AA_BR_ART.r_factor_ps` |
-| `sensed_map` | mmHg | smoothed mean arterial pressure |
+| `brain_running` | `true` | Master switch. Off releases the owned channels to 1 once, then idles. |
+| `autoregulation_enabled` | `true` | Autoregulation on/off (off relaxes the factor to 1: pressure-passive). |
+| `icp_enabled` | `true` | ICP coupling on/off. |
+| `map_model` | `"AA"` | Arterial pressure source. |
+| `arteriole_resistor`, `cbf_resistor` | `"AA_BR_ART"` | Autoregulation effector, and the resistor whose flow is CBF. |
+| `cerebral_compartments` | `["BR_ART", "BR_CAP", "BR_VEN"]` | Summed for the cerebral blood volume. |
+| `outflow_resistor` | `"BR_VEN_VUB"` | Cerebral venous outflow (ICP compresses it). |
+| `oxy_model` | `"BR_CAP"` | Brain oxygenation read-out. |
 
-## Configuration
-| Param | Default | Meaning |
+### Config: autoregulation
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `autoregulation_gain` | 0–1 | 1.0 | 1 = intact, 0 = pressure-passive (blend). |
+| `autoreg_control_gain` | 1/s | 5.0 | Integral gain on the fractional CBF error. |
+| `autoreg_leak` | 1/s | 0.05 | Pull of the integrator back to 1, so the baseline stays neutral (gain/leak ≈ 100: strong regulation, small droop). |
+| `cbf_setpoint` | L/min | 0 | Target CBF; ≤ 0 = captured 30 s after build. Stored in every scenario (term 0.106). |
+| `cpp_setpoint` | mmHg | 0 | Baseline CPP (read-out); captured likewise. |
+| `autoreg_tc` | s | 4.0 | Lag on the applied factor. |
+| `autoreg_factor_min`, `autoreg_factor_max` | – | 0.15, 6.0 | Maximal dilation and constriction (the autoregulation limits). |
+| `cbf_tc`, `pres_tc` | s | 3.0, 3.0 | Smoothing of CBF and MAP (averages out the pulse). |
+
+### Config: ICP
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `cbv0` | mL | 0 | Baseline cerebral blood volume; ≤ 0 = captured 30 s after build. Stored in every scenario. |
+| `icp_baseline` | mmHg | 5 | Normal ICP (read-out anchor). |
+| `edema_volume` | mL | 0 | Added intracranial volume: oedema, haemorrhage, mass (`set_edema`). |
+| `icp_e0`, `icp_k` | mmHg, 1/mL | 4.0, 0.18 | Exponential pressure–volume curve (compliant neonatal cranium). |
+| `icp_excess_max` | mmHg | 70 | Clamp on the excess ICP. |
+| `icp_outflow_gain`, `icp_outflow_factor_max` | 1/mmHg, – | 0.03, 8 | Rise of the venous outflow resistance per mmHg of excess ICP, and its clamp. |
+
+### Outputs
+
+| Property | Unit | Description |
 |---|---|---|
-| `brain_running` | `true` | master gate (false → owned channels released to neutral) |
-| `autoregulation_enabled` | `true` | cerebral autoregulation on/off |
-| `icp_enabled` | `true` | intracranial-pressure coupling on/off |
-| `autoregulation_gain` | `1.0` | 1 = intact, 0 = pressure-passive (blend) |
-| `autoreg_control_gain` | `5.0` | CBF-error feedback gain (per fractional error per second) |
-| `autoreg_leak` | `0.05` | 1/s — integrator leak toward neutral (no windup) |
-| `autoreg_factor_min` / `max` | `0.15` / `6.0` | max vasodilation / vasoconstriction limits |
-| `autoreg_tc` | `4.0` s | lag on the applied factor (anti-oscillation) |
-| `cbf_tc` / `pres_tc` | `3.0` / `3.0` s | smoothing of pulsatile CBF / arterial pressure |
-| `cbf_setpoint` / `cpp_setpoint` / `cbv0` | `0` = auto-seed | baseline CBF (L/min) / CPP (mmHg) / cerebral blood volume (mL); a scenario that stores them is neutral from the first step |
-| `icp_baseline` | `5.0` mmHg | normal neonatal ICP (read-out anchor) |
-| `edema_volume` | `0.0` mL | oedema / mass / haemorrhage lever (`set_edema()`) |
-| `icp_e0` | `4.0` mmHg | scale of the exponential P-V curve |
-| `icp_k` | `0.18` 1/mL | intracranial stiffness (neonatal-compliant) |
-| `icp_excess_max` | `70.0` mmHg | clamp on the ICP excess |
-| `icp_outflow_gain` | `0.03` | fractional outflow-R rise per mmHg of ICP excess |
-| `icp_outflow_factor_max` | `8.0` | clamp on the outflow-resistance factor |
+| `cbf` | L/min | Smoothed cerebral blood flow. |
+| `sensed_map` | mmHg | Smoothed arterial pressure. |
+| `cpp` | mmHg | MAP − ICP. |
+| `icp`, `icp_excess` | mmHg | ICP and its excess above baseline. |
+| `cerebral_blood_volume` | mL | CBV. |
+| `autoreg_factor` | – | Applied factor on `AA_BR_ART.r_factor_ps` (saved; the integrator resumes from it on load). |
+| `brain_to2` | mmol/L | `BR_CAP` O2 content (ischaemia read-out). |
 
-Wiring refs (`map_model` `AA`, `arteriole_resistor`/`cbf_resistor` `AA_BR_ART`,
-`cerebral_compartments` `[BR_ART, BR_CAP, BR_VEN]`, `outflow_resistor` `BR_VEN_VUB`, `oxy_model`
-`BR_CAP`) are resolved lazily on the first step. The controller runs on a 15 ms tick
-(`_update_interval`); a baseline (`cpp_setpoint`, `cbf_setpoint`, `cbv0`) that is not stored in the
-scenario (≤ 0) is seeded once after a `_warmup_delay` (30 s). Storing them is preferred: a seed taken
-during the start-up transient leaves the autoregulation slightly off neutral, and it depends on when
-the scenario was loaded. Disabling
-(`brain_running = false`) writes `AA_BR_ART.r_factor_ps` and `BR_VEN_VUB.r_factor_ps` back to `1.0`
-once, restoring neutral cerebral haemodynamics.
+## Calculation
 
-## Related models
-[`Kidneys`](./Kidneys.md) (the autoregulation pattern Brain mirrors) ·
-[`Metabolism`](./Metabolism.md) (cerebral O2 consumption at `BR_CAP`) ·
-[`Circulation`](./Circulation.md) (systemic SVR / `AA` perfusion pressure) ·
-[`Monitor`](./Monitor.md) (read-out surfacing) · [`Hormones`](./Hormones.md) (sibling controller).
+Every 15 ms:
+
+1. **Smooth** MAP and CBF (`AA_BR_ART.flow`); sum CBV.
+2. **ICP:**
+   ```
+   dV = (CBV − cbv0) + edema_volume
+   icp_excess = clamp(icp_e0 · (exp(icp_k · dV) − 1), 0, icp_excess_max)
+   BR_VEN_VUB.r_factor_ps = clamp(1 + icp_outflow_gain · icp_excess, 1, icp_outflow_factor_max)
+   ```
+   CPP = MAP − ICP. ICP acts through the venous outflow resistance, not as an external pressure (external pressure on a series of compartments doesn't change their steady through-flow).
+3. **Baseline:** if not stored, CBF, CPP and CBV are captured 30 s after build.
+4. **Autoregulation** (leaky integral control on flow):
+   ```
+   err = (CBF − cbf_setpoint) / cbf_setpoint
+   int += (autoreg_control_gain · err − autoreg_leak · (int − 1)) · Δt         clamped to the limits
+   applied = 1 + autoregulation_gain · (int − 1)
+   autoreg_factor → applied   (lag autoreg_tc),   AA_BR_ART.r_factor_ps = autoreg_factor
+   ```
+   Within the limits CBF stays near its set-point; at a limit the bed becomes pressure-passive.
+
+## Factor system
+
+It owns `AA_BR_ART.r_factor_ps` (inflow) and `BR_VEN_VUB.r_factor_ps` (outflow). Neither is in Circulation's groups; the brain's ANS and SVR tone acts on the `BR_ART` vessel, so the channels compose.
+
+## Inputs and outputs
+
+- **Reads:** `AA.pres`, `AA_BR_ART.flow`, the cerebral volumes, `BR_CAP.to2`.
+- **Writes:** the two channels above.
+- **Written by:** the user (`set_edema`, `autoregulation_gain`, switches).
+- **Read by:** `DataCollector` watchers and the Monitor (read-outs).
+
+## Assumptions and limitations
+
+- **Behaviour in term_neonate** (2 min after each change, 2026-10-24):
+
+  | Change | MAP | ICP | CPP | CBF (mL/min) | Factor |
+  |---|---|---|---|---|---|
+  | `svr_factor_art` 0.5, intact | 52.6 | 5.1 | 47.5 | 103 → 105 | 1.24 |
+  | same, pressure-passive | 52.8 | 5.3 | 47.5 | 103 → 114 | 1.00 |
+  | oedema 5 mL | 59.0 | 11.2 | 47.8 | 103 → 108 | 0.96 |
+  | oedema 10 mL, pressure-passive | 58.6 | 26.4 | 32.2 | 103 → 99 | 1.00 |
+
+  - Autoregulation holds CBF against a systemic dilation that also dilates the brain's vessels.
+  - **ICP couples weakly to CBF:** an ICP of 26 mmHg lowers CBF only 4 %. The venous outflow is a small part of the cerebral resistance, so the HIE picture (ICP up → CBF and `brain_to2` down) needs large volumes. This is listed for the re-validation.
+- **Stored state predates v1.0 circulation changes** in several scenarios: the autoregulation factor settles away from its stored value in the first ~30 s after load (fetus_term 1.29 → 1.10). Listed for the re-validation re-bake.
+- **One cerebral bed:** no regional flow, no CO2 reactivity (hypercapnia doesn't dilate the cerebral vessels), no venous haemorrhage model.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Brain` (trimmed: wiring and gains are the defaults):
+
+```json
+{
+  "name": "Brain",
+  "model_type": "Brain",
+  "is_enabled": true,
+  "brain_running": true,
+  "autoregulation_enabled": true,
+  "autoregulation_gain": 1,
+  "icp_enabled": true,
+  "cbf_setpoint": 0.1059,
+  "cpp_setpoint": 53.83,
+  "cbv0": 3.784,
+  "edema_volume": 0,
+  "icp_k": 0.18
+}
+```
+
+## Usage in the scenarios
+
+One instance in every scenario, running with intact autoregulation and the baseline stored. `cbf_setpoint` ranges from 0.019 L/min (Bischoff) to 0.355 L/min (fetus_term).
+
+## References
+
+No literature values; the gains, limits and the pressure–volume curve are model choices for teaching.
 
 ````
 
@@ -3336,235 +3236,179 @@ once, restoring neutral cerebral haemodynamics.
 ````markdown
 # Breathing
 
-The Breathing model is the **spontaneous breathing driver**. It decides how much the patient should
-breathe (target minute volume), splits that into a respiratory rate and tidal volume, and turns it into
-a respiratory-muscle pressure that lowers the pleural (`THORAX`) pressure over each breath, which in
-turn drives the lungs. The effort follows the **neural drive**, not the measured tidal volume: the
-lungs, the airway and any device decide how much volume that effort moves. It is the spontaneous
-counterpart to the `Ventilator` device, and the effort partner of [Respiration](./Respiration.md)
-(which sets the mechanics the breath acts against).
+`Breathing` drives spontaneous breathing. It decides how much the patient should breathe (a target minute volume, set by the chemoreflex), splits that into a rate and a tidal volume, and turns it into a respiratory-muscle pressure that lowers the pleural (`THORAX`) pressure each breath. The effort follows the **neural drive**, not the measured tidal volume: the lungs, the airway and any device decide how much volume that effort moves. It is the spontaneous counterpart of the [Ventilator](./Ventilator.md), and the effort partner of [Respiration](./Respiration.md), which sets the mechanics the breath acts against.
+
+## Physiology
+
+The brainstem sets ventilation to keep arterial CO2 (and, weaker, O2) at its set-point: rising pCO2 increases minute ventilation through the chemoreflex. A newborn breathes fast and shallow, about 40/min at 5–6 mL/kg. At a higher drive both rate and depth rise; Mecklenburgh's relation describes the split, with tidal volume rising with rate.
+
+Each breath the diaphragm and intercostal muscles contract during inspiration, lowering the pleural pressure so air flows in, and relax during expiration, which is passive. The same effort moves less air into stiff lungs (RDS) or through a narrow airway, and more on CPAP or pressure support. Patients partly defend their tidal volume against such loads through reflexes and muscle properties, but only partly. The rest is left to the chemoreflex, so a stiff lung shows as faster, shallower breathing and a higher pCO2.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Breathing   (breath-effort generator — no compartment of its own)
-```
-
-Extends `BaseModelClass` directly. It owns no volume/pressure; `calc_model()` runs a breath state
-machine and subtracts its muscle pressure from `THORAX.pres_ext` each step.
-
-## What it models
-
-```
-chemoreflex (ANS) ─► mv_ans_factor ─► target minute volume ─Mecklenburgh─► resp_rate + target Vt
-                                                                                  │
-                                         pmus_max = rmp_gain · load_factor · target Vt
-                                                                                  │
-                    muscle waveform (ramp, then relaxation) ─► THORAX.pres_ext −= pmus ─► lungs
-                                                                                  │
-          measured Vt at the lungs ─► calibration (once) / partial load compensation ◄┘
+  └── Breathing
 ```
 
 ## Properties
 
-### Configuration (set in the model definition)
+### Config (set in the definition JSON)
 
-| Property | Default | Unit | Description |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| `breathing_enabled` | `true` | — | spontaneous breathing on/off (`switch_breathing`) |
-| `minute_volume_ref` | `0.2` | L/kg/min | reference minute volume |
-| `minute_volume_ref_factor` | `1.0` | — | non-persistent multiplier on the reference MV |
-| `minute_volume_ref_scaling_factor` | `1.0` | — | scaling (weight) multiplier on the reference MV |
-| `vt_rr_ratio` | `0.0001212` | — | Mecklenburgh tidal-volume / rate² ratio |
-| `vt_rr_ratio_factor` | `1.0` | — | multiplier on `vt_rr_ratio` |
-| `vt_rr_ratio_scaling_factor` | `1.0` | — | scaling multiplier on `vt_rr_ratio` |
-| `rmp_gain` | calibrated | mmHg/L | muscle pressure per litre of target tidal volume (see *Calibration*) |
-| `rmp_calibrated` | `false` | — | `rmp_gain` holds a calibrated value; written into every scenario by `scripts/_calibrate_breathing.mjs` |
-| `rmp_gain_max` | `100.0` | mmHg | maximum pressure the respiratory muscles can exert (caps `pmus_max`) |
-| `load_compensation` | `0.5` | 0–1 | partial compensation of the effort for loads and support (see *Load compensation*) |
-| `ie_ratio` | `0.3` | — | inspiratory fraction of the breath |
-| `mv_ans_factor` | `1.0` | — | chemoreflex modulation of minute volume, written by `AnsEfferent` `EF_MV` |
-| `ans_activity_factor` | `1.0` | — | global multiplier on minute volume (no engine model writes it; a manual lever) |
-| `thorax` | `["THORAX"]` | — | the container the muscle pressure acts on |
+| `breathing_enabled` | boolean | `true` | Spontaneous breathing on/off (`switch_breathing`); off in the fetal scenarios. |
+| `minute_volume_ref` | L/kg/min | 0.2 | Reference minute volume (term 0.207). |
+| `minute_volume_ref_factor`, `minute_volume_ref_scaling_factor` | – | 1.0 | Persistent multipliers on the reference (no engine model writes them). |
+| `vt_rr_ratio` | L·min/kg | 1.212e-4 | Mecklenburgh ratio: `Vt / RR` per kg (term 1.298e-4). |
+| `vt_rr_ratio_factor`, `vt_rr_ratio_scaling_factor` | – | 1.0 | Multipliers on `vt_rr_ratio`. |
+| `ie_ratio` | – | 0.3 | Inspiratory **fraction** of the breath (Ti/Ttot), not an I:E ratio. Term 0.40, preterm 0.38. |
+| `rmp_gain` | mmHg/L | calibrated | Muscle pressure per litre of target tidal volume. |
+| `rmp_calibrated` | boolean | `false` | `rmp_gain` holds a calibrated value (true in every scenario). |
+| `rmp_gain_max` | mmHg | 100 | Cap on the peak muscle pressure. |
+| `load_compensation` | 0–1 | 0.5 | Partial compensation of the effort for loads and support. |
+| `mv_ans_factor` | – | 1.0 | Chemoreflex modulation of minute volume; written by the `EF_MV` efferent. |
+| `ans_activity_factor` | – | 1.0 | Global multiplier on minute volume; no model writes it (a manual lever). |
+| `thorax` | list | `["THORAX"]` | The container the muscle pressure acts on. |
 
-### Computed / reported (outputs)
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `target_minute_volume` | L/min | demanded minute volume |
-| `resp_rate` | breaths/min | computed rate; latched into the breath timing at each breath start |
-| `resp_rate_measured` | breaths/min | rate inferred from observed breath timing |
-| `target_tidal_volume` | L | demanded tidal volume |
-| `minute_volume` | L/min | achieved MV (`exp_tidal_volume · resp_rate`) |
-| `insp_tidal_volume` | L | lung volume rise over the last inspiration |
-| `exp_tidal_volume` | L | lung volume fall from the breath's peak to its end |
-| `resp_muscle_pressure` | mmHg | current muscle pressure (positive = inspiratory effort) |
-| `pmus_max` | mmHg | peak muscle pressure of the current breath |
-| `load_factor` | — | current effort trim from load compensation |
-| `insp_running` / `exp_running` | — | spontaneous (neural) phase flags; `_insp_running` / `_exp_running` remain as aliases |
-| `ncc_insp` / `ncc_exp` | steps | phase step counters (`ncc_insp === 1` marks the first step of an inspiration) |
+| `target_minute_volume` | L/min | Demanded minute volume. |
+| `resp_rate` | /min | Computed rate (latched into each breath). |
+| `resp_rate_measured` | /min | Rate from the observed breath timing. |
+| `target_tidal_volume` | L | Demanded tidal volume. |
+| `insp_tidal_volume`, `exp_tidal_volume` | L | Lung-volume rise over the last inspiration and fall from its peak; 0 while breathing is off. |
+| `minute_volume` | L/min | `exp_tidal_volume · resp_rate`. |
+| `resp_muscle_pressure` | mmHg | Current muscle pressure (positive = inspiratory effort). |
+| `pmus_max` | mmHg | Peak muscle pressure of the current breath. |
+| `load_factor` | – | Current effort trim from load compensation. |
+| `insp_running`, `exp_running` | boolean | Spontaneous (neural) phase; both false while breathing is off. `_insp_running`/`_exp_running` remain as aliases. |
+| `ncc_insp`, `ncc_exp` | steps | Phase step counters; `ncc_insp === 1` marks the first step of an inspiration. |
 
-## Target minute volume and the rate/volume split
+## Calculation
 
-```
-minute_volume_ref' = minute_volume_ref · minute_volume_ref_factor · minute_volume_ref_scaling_factor · weight
-target_minute_volume = (minute_volume_ref' + (mv_ans_factor − 1)·minute_volume_ref') · ans_activity_factor
-```
-
-The split uses the **Mecklenburgh** relationship `VT / RR = vt_rr_ratio`, i.e. tidal volume scales
-with rate. Substituting into `MV = VT · RR` gives `MV = vt_rr_ratio · RR²`, inverted in
-`vt_rr_controller`:
+### Target minute volume and the rate / volume split
 
 ```
-resp_rate           = sqrt( target_minute_volume / (vt_rr_ratio' · weight) )
-target_tidal_volume = target_minute_volume / resp_rate
+MV_ref               = minute_volume_ref · minute_volume_ref_factor · minute_volume_ref_scaling_factor · weight
+target_minute_volume = (MV_ref + (mv_ans_factor − 1) · MV_ref) · ans_activity_factor
+resp_rate            = √( target_minute_volume / (vt_rr_ratio' · weight) )        Mecklenburgh: MV = ratio · RR²
+target_tidal_volume  = target_minute_volume / resp_rate
 ```
 
-(`vt_rr_ratio'` folds in `vt_rr_ratio_factor` and `vt_rr_ratio_scaling_factor`.) The inversion is
-guarded against a non-positive denominator or target so it cannot produce an `Infinity`/`NaN` rate;
-when breathing is disabled `vt_rr_controller` sets `resp_rate = 0` and returns.
+`vt_rr_ratio'` includes its two factors. The inversion is guarded against a non-positive denominator or target.
 
-**term_neonate (calibrated assumption, 2026-10):**
-- `ie_ratio` 0.40 (it is Ti/Ttot, not I:E): Ti 0.65 s of a 1.63 s cycle in healthy term infants
-  (Schmalisch 2005, dead-space-free flow-through, day 7)
-- `vt_rr_ratio` 1.29795e-4, for RR 40 / Vt 5.3 mL/kg at a minute ventilation of 213 mL/kg/min
-  (Schmalisch: 39.2 ± 8.6 / 5.57 ± 1.06 / 215 ± 52; Hannover day 2: RR 44)
-- `minute_volume_ref` 0.207336 and the chemoreceptor set-points re-anchored, so the chemoreflex is
-  neutral at PaCO₂ 39.7
-- with the linear inspiratory muscle ramp, peak flows are 0.70 / 0.66 L/min/kg (reference
-  0.83 ± 0.20 / 0.64 ± 0.19); infants peak earlier in inspiration
-- see `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md)
+**term_neonate calibration (2026-10):** `ie_ratio` 0.40 (Ti 0.65 s of 1.63 s); `vt_rr_ratio` set for RR 40 / Vt 5.3 mL/kg at 213 mL/kg/min; `minute_volume_ref` 0.207, with the chemoreceptor set-points re-anchored so the chemoreflex is neutral at PaCO2 39.7. With the linear muscle ramp, peak flows are 0.70 / 0.66 L/min/kg (reference 0.83 / 0.64). See `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md).
 
-## Breath phase state machine
+### Breath phases
 
-A breath starts when `_breath_timer` reaches `_breath_interval`. At that moment the timing and the
-target are **latched** for the whole breath, so a chemoreflex change during a breath acts on the next:
+While breathing is on, a breath starts when `_breath_timer` reaches `_breath_interval`. Its timing and target are **latched** for the whole breath, so a chemoreflex change during a breath acts on the next:
 
 ```
-_breath_interval = 60 / resp_rate
-_ti = ie_ratio · _breath_interval        (inspiration)
-_te = _breath_interval − _ti              (expiration)
-target Vt of the breath = target_tidal_volume
+_breath_interval = 60 / resp_rate,   _ti = ie_ratio · _breath_interval,   _te = _breath_interval − _ti
 ```
 
-Inspiration runs until `_breath_timer > _ti`, then expiration until the next breath start. At that
-point the finished breath is closed out (tidal volumes, calibration or load compensation).
+Inspiration runs until `_breath_timer > _ti`, then expiration until the next start, where the finished breath is closed out (tidal volumes, calibration or load compensation).
 
-### Tidal volume at the lungs
+**While breathing is off** there is no breath clock: no phases, tidal and minute volumes 0, rate 0, no muscle pressure. Switching it back on starts a breath at once.
 
-Tidal volumes are measured on the lung compartments (`Respiration.lungs`, normally `ALL` + `ALR`):
-`insp_tidal_volume` is the rise over the inspiration, `exp_tidal_volume` the fall from the breath's
-peak to its end. The measurement does not depend on the airway route: natural airway, ET tube or a
-tube leak all give the volume that actually reached the alveoli.
+**Tidal volumes are measured at the lungs** (`Respiration.lungs`), so they don't depend on the airway route (natural airway, ET tube, leak).
 
-## Respiratory-muscle pressure
+### Muscle pressure
 
 ```
-pmus_max = min( rmp_gain · load_factor · target Vt of the breath , rmp_gain_max )
-pmus(t)  = pmus_max · shape(t)
-THORAX.pres_ext −= pmus(t)
+pmus_max = min( rmp_gain · load_factor · latched target Vt , rmp_gain_max )
+pmus(t)  = pmus_max · shape(t),        THORAX.pres_ext −= pmus(t)
 ```
 
-`shape` is a linear ramp from 0 to 1 over inspiration, then an exponential relaxation over expiration,
-`(e^(−4x) − e^(−4)) / (1 − e^(−4))` with `x` the fraction of expiration elapsed. The pressure acts
-directly on the pleural space; the THORAX resets `pres_ext` every step.
+`shape` ramps linearly from 0 to 1 over inspiration, then relaxes exponentially over expiration, `(e^(−4x) − e^(−4)) / (1 − e^(−4))`, with `x` the fraction of expiration elapsed. The pressure acts on the pleural space; THORAX resets `pres_ext` each step.
 
-Because the effort is a pressure set by the drive, the mechanics shape the breath: stiffer lungs or a
-narrower airway give less volume for the same effort, CPAP or pressure support add volume, and the
-chemoreflex (through `mv_ans_factor`) answers the resulting PaCO2 change with a new rate and target.
+### Calibration
 
-## Calibration
+`rmp_gain` is the effort the patient's own respiratory system needs per litre of tidal volume. It is calibrated once and then frozen:
+- **Starting estimate:** twice the elastance of the lungs and thorax in series, using their effective elastances `el_eff`, so factor layers count.
+- **Per-breath correction** by `(target / exhaled Vt)^0.8`. The gain freezes after 3 consecutive breaths within 2 %, or after 40 breaths.
+- **The shipped scenarios** carry a gain written by `scripts/_calibrate_breathing.mjs`, run on the natural airway with the ventilator off. Re-run it after changing a scenario's lung or thorax mechanics.
+- **Older scenarios** stored `rmp_gain` as an elastance gain; without `rmp_calibrated` the value is discarded and recalibrated.
 
-`rmp_gain` is the effort the patient's own respiratory system needs per litre of tidal volume. It is
-calibrated once and then frozen:
+### Load compensation
 
-- Until `rmp_calibrated` is set, the gain starts from an estimate (twice the elastance of the lungs and
-  thorax in series) and is corrected each breath by `(target / exhaled Vt)^0.8`. It is frozen after
-  three consecutive breaths within 2 %, or after 40 breaths.
-- Every scenario with spontaneous breathing carries a calibrated gain, written by
-  `node scripts/_calibrate_breathing.mjs` (on the natural airway, with the ventilator off). Re-run it
-  after changing a scenario's lung or thorax mechanics. Scenarios with breathing off (fetal, ventilated)
-  calibrate when breathing starts.
-- A scenario saved before this design stored `rmp_gain` as an elastance gain; without
-  `rmp_calibrated` it is discarded and recalibrated.
-
-## Load compensation
-
-Patients partly defend their tidal volume against a load (and give up effort under support) through
-volume-related reflexes and intrinsic muscle properties. `load_compensation` (`lc`, 0–1) models this
-as a proportional trim of the effort, updated each breath and pulled back towards 1:
+A proportional trim of the effort, updated each breath and pulled back toward 1:
 
 ```
-load_factor += 0.2 · [ (target / Vt − 1) · lc − (load_factor − 1) · (1 − lc) ]
-steady state:  load_factor − 1 = lc / (1 − lc) · (target / Vt − 1)
+load_factor += 0.2 · [ (target / Vt − 1) · lc − (load_factor − 1) · (1 − lc) ]       lc = load_compensation (≤ 0.95)
+steady state:  load_factor − 1 = lc / (1 − lc) · (target / Vt − 1),     clamped 0.25–4
 ```
 
-`lc = 0` is a pure pressure generator, `lc → 1` defends the target tidal volume (the behaviour of the
-previous design). The default `0.5` halves the tidal-volume deficit of a load. `load_factor` is
-clamped to 0.25–4.
+`lc = 0` is a pure pressure generator; `lc → 1` defends the target tidal volume. The default 0.5 halves the tidal-volume deficit of a load.
+
+## Factor system
+
+None of the engine's factor layers. Its own multipliers (`*_factor`, `*_scaling_factor`, `mv_ans_factor`, `ans_activity_factor`) multiply the minute volume or the Vt/RR ratio and are never reset.
+
+## Inputs and outputs
+
+- **Reads:** the lungs' volumes; the lungs' and thorax's `el_eff` (initial estimate); `model.weight`.
+- **Writes:** `THORAX.pres_ext`.
+- **Written by:**
+  - the `EF_MV` efferent of the chemoreflex (`mv_ans_factor`);
+  - [Apnea](./Apnea.md) and Resuscitation (`breathing_enabled` through `switch_breathing`);
+  - the Calibrator and scenario scripts (`minute_volume_ref`, `vt_rr_ratio`).
+- **Read by:**
+  - [Ventilator](./Ventilator.md): it arms its patient trigger on `ncc_insp === 1`, disarms on `!insp_running`, and classes spontaneous breaths by `insp_running`;
+  - Monitor (counts a breath on `ncc_insp === 1` while breathing is on);
+  - `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **The rate follows only the drive.** No vagal rate response to stiff lungs, no Hering–Breuer shortening of inspiration (parked).
+- **Central vs obstructive apnoea.** A central apnoea switches breathing off; an obstructive one keeps the drive and closes `MOUTH_DS` (see [Apnea](./Apnea.md)).
+- **One muscle-pressure shape** (linear ramp); infants reach peak flow earlier in inspiration, so peak inspiratory flow is ~15 % low at term.
+- **`resp_rate_measured` has a start-up transient** over the first breaths; the settled value is correct.
+- **Verification:** `npm run validate:resp` (see [TESTING](./TESTING.md)) checks the spontaneous steady state, the chemoreflex, resistive and elastic loads, CPAP and pressure support against clinical ranges. The known failures are the missing vagal and Hering–Breuer reflexes, plus listed ventilator and preterm calibration items.
 
 ## Example definition (JSON)
 
-From `term_neonate.json`:
+From `term_neonate.json`, `models.Breathing` (trimmed to the config props):
 
 ```json
 {
   "name": "Breathing",
-  "description": "spontaneous breathing model",
   "model_type": "Breathing",
   "is_enabled": true,
   "breathing_enabled": true,
-  "minute_volume_ref": 0.2,
-  "minute_volume_ref_factor": 1.0,
-  "minute_volume_ref_scaling_factor": 1.0,
-  "vt_rr_ratio": 0.00012,
-  "vt_rr_ratio_factor": 1.0,
-  "vt_rr_ratio_scaling_factor": 1.0,
-  "rmp_gain_max": 100.0,
-  "rmp_gain": 276.44,
+  "minute_volume_ref": 0.20729,
+  "minute_volume_ref_factor": 1,
+  "minute_volume_ref_scaling_factor": 1,
+  "vt_rr_ratio": 0.00012979,
+  "vt_rr_ratio_factor": 1,
+  "vt_rr_ratio_scaling_factor": 1,
+  "ie_ratio": 0.4,
+  "rmp_gain": 334.48,
   "rmp_calibrated": true,
+  "rmp_gain_max": 100,
   "load_compensation": 0.5,
-  "ie_ratio": 0.3,
-  "mv_ans_factor": 1.0,
-  "ans_activity_factor": 1.0
+  "mv_ans_factor": 0.9978,
+  "ans_activity_factor": 1
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- The **ANS** chemoreflex (`CR_PCO2` → `EF_MV`) writes `mv_ans_factor`; only PaCO2 drives breathing in
-  the shipped scenarios.
-- The **Ventilator** arms its patient trigger on `ncc_insp === 1` and disarms on `!insp_running`;
-  the **Monitor** counts a spontaneous breath on `ncc_insp === 1`.
-- When `breathing_enabled` is false, `resp_rate`, the counters, `target_tidal_volume` and the muscle
-  pressure are zeroed, but the phase machine keeps running, so the lung tidal volumes are still
-  measured (e.g. ventilator-driven breaths).
+One instance in every scenario.
 
-## Apnea coupling
+| Scenario | Breathing | `minute_volume_ref` | `vt_rr_ratio` | `ie_ratio` | `rmp_gain` |
+|---|---|---|---|---|---|
+| term_neonate | on | 0.207 | 1.30e-4 | 0.40 | 334 |
+| preterm_30wk / 28wk / 25wk | on | 0.285 / 0.30 / 0.30 | 7.9e-5 / 7.8e-5 / 7.1e-5 | 0.38 | 790 / 1263 / 2371 |
+| bischoff no-PDA / L→R / bidir | on | 0.335 / 0.31 / 0.31 | 7.9e-5 / 7.3e-5 / 7.3e-5 | 0.38 | 1943 / 2084 / 2190 |
+| fetal ×3 | off | (term values) | | 0.40 | 334 |
 
-`breathing_enabled` (via `switch_breathing`) is the lever the [Apnea](./Apnea.md) controller uses to
-model a **central** apnea: switching it off removes the muscle pressure. An **obstructive** apnea leaves
-the drive on but occludes `MOUTH_DS` (`no_flow = true`): the effort continues against a closed airway,
-and the rising PaCO2 strengthens the recovery breaths through the chemoreflex. The `Resuscitation`
-device switches breathing off during CPR.
+## References
 
-## Verification
-
-`npm run validate:resp` (see [TESTING](./TESTING.md)) checks the spontaneous steady state, the
-chemoreflex, resistive and elastic loads, CPAP and pressure support against clinical ranges. The
-redesign moved the suite from 52 pass / 13 known failures to all checks passing except the listed
-known failures (no vagal rate response to stiff lungs, no Hering–Breuer reflex under pressure
-support, and the ventilator and preterm calibration items).
-
-## Notes & caveats
-
-- **Rate and mechanics.** The rate follows the minute-volume demand (Mecklenburgh) and therefore the
-  chemoreflex; there is no vagal rate response to stiff lungs and no Hering–Breuer shortening of
-  inspiration.
-- **`resp_rate_measured` has a startup transient.** `_rr_factor` starts at 0, so the
-  `_rr_counter > 4·_rr_factor` branch fires repeatedly until it settles after the first breaths (same
-  pattern as the `Heart` measured-rate logic). The settled value is correct.
+The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, peak flows) is referenced in [TermNeonateReference](./TermNeonateReference.md) (Schmalisch 2005; Hannover 2018).
 
 ````
 
@@ -3592,7 +3436,7 @@ In the worker, `ModelEngine.tune_model(payload)` performs a live, in-place calib
 - **`DEFAULT_TOL`** (exported) — per-target convergence tolerances on the measured value:
   `map: 3`, `pp: 2`, `cvp: 1.5`, `pap_m: 3`, `pap_s: 4`, `hr: 6`, `co: 0.03`, `spo2: 2`, `po2: 6`, `pco2: 4`, `ph: 0.03`, `be: 1.5`, `blood_volume: 0.02`. Callers may override per target via `tolOverrides`.
 - **`LIVE_TARGETS`** (exported) — the canonical list of live-tunable target names, for validation / UI / docs: `["map", "sys", "dia", "co", "hr", "pap_m", "pap_s", "po2", "spo2", "pco2", "be", "ph", "blood_volume"]`. `sys` and `dia` work only as a pair: `buildLiveControllers` turns them into a pulse-pressure target (`pp = sys − dia`) and, unless `map` is given, `map = dia + pp/3`, as the builder does. One alone is ignored.
-- **`ARTERIAL_EL_MAX`** (`6.0`) and **`DIF_O2_FLOOR`** (`0.1`) (exported) — shared with the builder: the total arterial elastance multiplier (size scaling × pulse-pressure lever) the levers may reach, and the oxygen lever's diffusion floor. The limit used to be 2.0, set by explicit integration of the near-merged aortic compartments; **`enableImplicitAorta(model)`** (exported) switches `AA_AAR` and `AAR_AD` to backward-Euler flow (`Resistor.implicit`, see [Resistor](./Resistor.md)), after which term and 0.72 kg patients are stable to at least ×8.
+- **`ARTERIAL_EL_MAX`** (`6.0`) and **`DIF_O2_FLOOR`** (`0.1`) (exported) — shared with the builder: the total arterial elastance multiplier (size scaling × pulse-pressure lever) the levers may reach, and the oxygen lever's diffusion floor. The limit used to be 2.0, set by explicit integration of the near-merged aortic compartments; **`enableImplicitAorta(model)`** (exported) switches the **`AORTIC_RESISTORS`** (exported: `AA_AAR` and `AAR_AD`) to backward-Euler flow (`Resistor.implicit`, see [Resistor](./Resistor.md)), after which term and 0.72 kg patients are stable to at least ×8.
 - **`liveWarm(targets)`** (exported) — seconds between live-tune iterations: 35 when `spo2`/`po2` is a target (oxygen settles slowly; with 15 s an SpO2 tune was measured mid-fall and ended 2–3 points under target), else 15.
 - **`LIVE_READ`** (module-private) — a map from measure key to a reader that pulls the value off the running `model` (e.g. `map` ← `Monitor.minmax.abp_pre_pres_mean`, `sys`/`dia`/`pp` ← `Monitor.minmax.abp_pre_pres_max`/`_min`/their difference, `pap_s` ← `pap_pres_max`, `lvo` ← `Monitor.flows.lvo`, `po2`/`pco2`/`ph`/`be` ← the `AA` compartment, `total_blood_volume` ← `Circulation`). Used by `measureWindow`.
 - **`READ_KEY`** (module-private) — maps a canonical target name to the measure-dict key it reads when they differ: `co → lvo`, `spo2 → spo2_pre`, `blood_volume → total_blood_volume`.
@@ -3612,15 +3456,15 @@ Each controller couples one **lever** (a model property it writes via `set`) to 
 
 **`signGuard`** (opt-in; on in the offline builder and the live tuner): a secant slope whose sign contradicts the controller's `sign` is rejected in favour of the proportional step. All controllers move at once, so part of a vital's change between two samples comes from its neighbours' levers; the secant then attributes it to its own lever and can read a physically impossible slope. Seen in a 7-target preterm build: with the new respiratory-rate lever moving pCO2, the oxygen controller walked alveolar diffusion to its *maximum* while SpO2 sat above target (with the guard it ends at its minimum, as expected on FiO2 0.4).
 
-The live levers built by `buildLiveControllers` deliberately use the persistent **`*_factor_ps`** layer or direct setters — **not `ModelScaler` groups** — so they compose with whatever scaling a loaded patient already baked in (e.g. a preterm's SVR/PVR scaling), instead of overwriting the `*_factor_scaling_ps` layer absolutely the way `ModelScaler` does (see [ModelScaler](./ModelScaler.md) and the factor/`_eff` pattern in [ARCHITECTURE](./ARCHITECTURE.md)):
+The live levers built by `buildLiveControllers` deliberately use the persistent **`*_factor_ps`** layer or direct setters — **not `ModelScaler` groups** — so they compose with a loaded patient's calibration and with the user's own changes, instead of overwriting the `*_factor_scaling_ps` layer absolutely the way `ModelScaler` does (see [ModelScaler](./ModelScaler.md) and the factor/`_eff` pattern in [ARCHITECTURE](./ARCHITECTURE.md)):
 
 | Target | Lever | Notes |
 |---|---|---|
-| `map` | `r_factor_ps` on every resistor in `scaler_config.blood_systemic.resistance` (delta-accumulating), plus `BR_MAP.set_value` = target | systemic resistance; ↑ raises MAP. Deliberately **not** `Circulation.svr_factor_art`: the Hormones model (RAAS) overwrites that knob every step, so a write to it does not stick. The baroreflex set-point is moved to the target so the ANS defends the new operating point. |
+| `map` | `r_factor_ps` on every resistor in `scaler_config.blood_systemic.resistance` (delta-accumulating), plus `BR_MAP.set_value` = target | systemic resistance; ↑ raises MAP. A delta on the same `r_factor_ps` Circulation's channels (user SVR, Drugs, Hormones) add to, over the whole systemic set rather than only Circulation's arterioles (which alone have weak MAP authority). The baroreflex set-point is moved to the target so the ANS defends the new operating point. |
 | `co` | `LV.el_max_factor_ps` and `RV.el_max_factor_ps` | ventricular contractility; reads `lvo` |
 | `hr` | `Heart.heart_rate_ref` | HR reference setpoint |
 | `po2` / `spo2` | `GASEX_LL/RL.dif_o2_factor_ps`, below `DIF_O2_FLOOR` `Shunts.ips_res` | the builder's continuous oxygen lever: alveolar O2 diffusion down to ×0.1, then the intrapulmonary shunt opens in proportion, to a tenth of its value at the start of the tune; one controller, reads `po2` or `spo2_pre` |
-| `sys` + `dia` (→ `pp`, `map`) | `AA`, `AAR`, `AD` `el_base_factor_ps` | large-artery stiffness, as in the builder. It multiplies a built patient's size stiffening (`el_base_factor_scaling_ps`), so its upper bound is `0.95 · ARTERIAL_EL_MAX / scaling`; the live tuner first calls `enableImplicitAorta` on the running model (a loaded scenario may predate it), because a live tune cannot discard a failed run. MAP is tuned by its own lever, which then leaves the large arteries' resistance alone: stability goes roughly with elastance / resistance, and lowering their resistance while stiffening them blew up a term neonate (×0.68 resistance, ×1.63 stiffness) although each alone was stable |
+| `sys` + `dia` (→ `pp`, `map`) | `AA`, `AAR`, `AD` `el_base_factor_ps` | large-artery stiffness, as in the builder. Its upper bound is `0.95 · ARTERIAL_EL_MAX / scaling`, where `scaling` is any size stiffening still in `el_base_factor_scaling_ps`. The shipped scenarios have it baked into `el_base` (v1.0, see [ModelScaler](./ModelScaler.md)), so the bound is ×5.7 on top of the loaded stiffness; preterm_25wk is stable there (ABP 76/14 with the implicit aorta); the live tuner first calls `enableImplicitAorta` on the running model (a loaded scenario may predate it), because a live tune cannot discard a failed run. MAP is tuned by its own lever, which then leaves the large arteries' resistance alone: stability goes roughly with elastance / resistance, and lowering their resistance while stiffening them blew up a term neonate (×0.68 resistance, ×1.63 stiffness) although each alone was stable |
 | `pap_m` / `pap_s` | pulmonary bed (`scaler_config.blood_pulmonary.resistance`) on `r_factor_ps`, `IPSL`/`IPSR` on `r_factor_scaling_ps` | pulmonary resistance, moving the intrapulmonary shunt with the bed as the builder does, so the shunt's share of pulmonary flow stays put. The lever multiplies each resistor's effective resistance relative to the start of the tune, applied as a delta (BloodVessel multiplies its layers, Resistor adds them); IPSL/IPSR use the scaling layer because Surfactant owns their `r_factor_ps`. `pap_m` wins when both are given |
 | `pco2` | `Breathing.minute_volume_ref` (× multiplier) | spontaneous ventilatory drive; `sign: -1` (↓ drive raises pCO2) |
 | `be` / `ph` | `Blood.set_solute("uma", …)` | Stewart unmeasured anions; `sign: -1` (↑ uma lowers BE/pH) |
@@ -3661,7 +3505,7 @@ The factor is capped at ×2.5 (0.57 kg), the edge of the pulse-wave-velocity dat
 - **`fo_mm`** (structural): the measured opening of the foramen ovale / atrial septum, in mm (0 = closed). Sets `Shunts.diameter_fo`, which sizes the FO resistors (`LA_RAIVCI`, `LA_RASVC`) by Poiseuille; `diameter_fo_max` is widened when the opening is larger (accepted up to 15 mm). The baseline's flap-valve asymmetry is kept: left-to-right flow meets `fo_lr_factor` × the right-to-left resistance (25 in `term_neonate`), so a 3 mm PFO in a term baby carries about 50 mL/min left-to-right; with no asymmetry it would be about 190. Direction and size are outcomes (`build_report.measured.q_fo`, L/s, + = left-to-right). Refused on a fetal baseline, where the gestational-age seed sizes the foramen.
 - **`ef`** (iterated): LV ejection fraction in %, as `Heart.lv_ef` (stroke volume / end-diastolic volume of the last beat). Lever: `LV.el_max_factor_ps` (LV contractility only, since an echo EF is left-ventricular), bounds 0.3–3, tolerance 5 %-points. This is the lever `co` uses on both ventricles, and `co` keeps it when both are given (`ef` is then listed under `superseded_targets` and only reported): output is the input that separates flow from resistance. Contractility moves EF far more than output (on `term_neonate`, ×0.6–1.6 gives EF 47–70 % but LVO only 179–207 mL/kg/min), so a CO fitted on this lever can leave EF well away from the echo value. The normal-range tables have no EF row, so it is reported without a flag.
 
-**The pulmonary-resistance lever moves the intrapulmonary shunt with the bed (builder only).** `pulmonary_resistances` scales the `blood_pulmonary.resistance` group, which does not include the intrapulmonary shunt resistors (`IPSL`/`IPSR`). On its own, raising pulmonary pressure therefore also raised the fraction of pulmonary flow bypassing ventilated alveoli: on a 1.08 kg / 28 wk case, from 33 % to 46 % at systolic PAP 36, SpO2 92.6 → 85.7. That is not the physiology. Pulmonary hypertension desaturates through the duct and foramen, and the shunt vessels constrict with the rest of the bed (see [Shunts](./Shunts.md#what-the-intrapulmonary-shunt-stands-for)). So the builder's PAP lever also sets `r_factor_scaling_ps` on `IPSL`/`IPSR`, **relative to its starting value** (`f / f0`, with `f0` the seed's or `pathophysiology.pvr_scale`'s PVR). The seed's `ips_res` was calibrated with the seed PVR on the bed only, so that operating point does not move. On the same case at systolic PAP 36 the shunt fraction now stays at 33.4 %, SpO2 drops only to 91.7, and the ductal left-to-right flow falls from 55 to 27 mL/min. Builds without a PAP target, and the structural-only seed PVR, are unchanged. The live scaler's `pulmonary_resistances` group is unchanged too.
+**The pulmonary-resistance lever moves the intrapulmonary shunt with the bed (builder only).** `pulmonary_resistances` scales the `blood_pulmonary.resistance` group, which does not include the intrapulmonary shunt resistors (`IPSL`/`IPSR`). On its own, raising pulmonary pressure therefore also raised the fraction of pulmonary flow bypassing ventilated alveoli: on a 1.08 kg / 28 wk case, from 33 % to 46 % at systolic PAP 36, SpO2 92.6 → 85.7. That is not the physiology. Pulmonary hypertension desaturates through the duct and foramen, and the shunt vessels constrict with the rest of the bed (see [Shunts](./Shunts.md#physiology)). So the builder's PAP lever also sets `r_factor_scaling_ps` on `IPSL`/`IPSR`, **relative to its starting value** (`f / f0`, with `f0` the seed's or `pathophysiology.pvr_scale`'s PVR). The seed's `ips_res` was calibrated with the seed PVR on the bed only, so that operating point does not move. On the same case at systolic PAP 36 the shunt fraction now stays at 33.4 %, SpO2 drops only to 91.7, and the ductal left-to-right flow falls from 55 to 27 mL/min. Builds without a PAP target, and the structural-only seed PVR, are unchanged. The live scaler's `pulmonary_resistances` group is unchanged too.
 
 Before calibrating it applies the **structural** targets: `weight`, `gestational_age` (a seed bundle),
 `height`, `age`, `hb`/`hb_gdl`, `temp`, `pda`/`pda_mm`, `fo_mm` and **`fio2`**. A spec with only structural targets (or none) is still built: there is nothing to iterate, so the patient is settled for `settle_seconds + final_seconds`, measured and emitted with an empty `targets` list and a note saying nothing was calibrated.
@@ -3698,6 +3542,8 @@ the human-readable one):
 which is different from "needs more iterations". The scenario's `provenance` is set to
 `"calibrator-fitted"` (it used to inherit the baseline's).
 
+**Check on the baked preterm_25wk** (v1.0): `POST "calibrate"` with `{targets: {map: 42, hr: 150}}` converges in one iteration (MAP 40.5, HR 153, both within tolerance).
+
 ## Notes / caveats
 
 - **`blood_volume` is special.** Its controller overrides `step` to proportionally rescale `vol`/`u_vol` on every blood-bearing compartment (those with a numeric `vol` and a non-empty `solutes` map), excluding `ECLS*` and `URINE`. It has `gain: 0` and a no-op `set` because it does not move a single lever.
@@ -3713,153 +3559,143 @@ which is different from "needs more iterations". The scenario's `provenance` is 
 ````markdown
 # Capacitance
 
-A `Capacitance` is the base **volume compartment** of the engine: it holds a volume and produces a
-pressure from its elastance. It is the canonical implementation of the factor / effective-value
-pattern for elastance-based elements. `BloodCapacitance`, `GasCapacitance` and (indirectly)
-`BloodVessel` build on it.
+A `Capacitance` is the basic elastic compartment of the engine: it holds a volume and turns the volume above its unstressed volume into a pressure. Every blood and gas compartment is built on it. It is also the reference implementation of the additive [factor pattern](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
+
+## Physiology
+
+A blood vessel, a heart chamber at rest, or an air space in the lung each behave like an elastic bag:
+
+- **Unstressed volume.** Up to a certain volume the wall is slack, and filling it costs no pressure. In veins this is most of the blood they hold; it is the reserve the body mobilises by venoconstriction.
+- **Elastance.** Above the unstressed volume, every extra millilitre raises the pressure. The stiffer the wall, the higher the *elastance* (mmHg per litre). Elastance is the inverse of *compliance*.
+- **Stiffening.** Many walls get stiffer as they are stretched further (arteries at high pressure, a full pericardium). An optional non-linear term models this.
+
+Blood or gas moves between compartments only through separate connectors (`Resistor`s). A Capacitance on its own just stores volume and reports a pressure.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Capacitance              (volume → elastance → pressure)
-        ├── BloodCapacitance       (+ blood composition mixing)
-        │     └── BloodVessel          (+ resistance, flow, ANS coupling)
-        └── GasCapacitance         (+ gas composition, atmospheric/external pressures)
+  └── Capacitance
+        ├── BloodCapacitance      (+ blood composition mixing)
+        │     └── BloodVessel     (+ own resistance, ANS; composes its factors multiplicatively)
+        └── GasCapacitance        (+ gas composition, atmospheric pressure, humidity, heat)
 ```
 
-See [BaseModelClass.md](./BaseModelClass.md) for the lifecycle contract and shared fields, and
-[BloodCapacitance.md](./BloodCapacitance.md) for the blood-tracking subclass.
-
-## What it models
-
-A passive elastic compartment. Volume flows in and out (driven by external [`Resistor`](./Resistor.md)
-models that reference it via `comp_from`/`comp_to`), and the compartment converts the volume above its
-unstressed volume into a recoil pressure through its elastance. It has no built-in resistance or flow
-of its own.
+`Container` and `TimeVaryingElastance` repeat the same elastance code but extend `BaseModelClass` directly.
 
 ## Properties
 
-### Config / independent (set in the definition JSON)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume (volume at which recoil pressure is zero) |
-| `el_base` | mmHg/L | Baseline (linear) elastance |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient (quadratic stiffening term) |
-| `pres_ext` | mmHg | External pressure applied this step (non-persistent; cleared each step) |
-| `fixed_composition` | bool | When true, `volume_in`/`volume_out` do not change `vol` (infinite reservoir) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `u_vol` | L | 0.0 | Unstressed volume: the pressure from the wall is zero at this volume. |
+| `el_base` | mmHg/L | 0.0 | Linear elastance (1 / compliance). |
+| `el_k` | mmHg/L² | 0.0 | Non-linear elastance; adds `el_k·(vol − u_vol)²` above the unstressed volume only. 0 in most compartments. |
+| `fixed_composition` | boolean | `false` | `true` makes the compartment an infinite reservoir: `volume_in`/`volume_out` don't change `vol` (and the subclasses don't mix its composition). |
+| `vol` | L | 0.0 | Volume. Set in the definition as the starting volume, then changed by the connected resistors. |
+| `u_vol_factor`, `el_base_factor`, `el_k_factor` | – | 1.0 | Non-persistent factors, reset to 1 every step. |
+| `u_vol_factor_ps`, `el_base_factor_ps`, `el_k_factor_ps` | – | 1.0 | Persistent factors. |
+| `u_vol_factor_scaling_ps`, `el_base_factor_scaling_ps`, `el_k_factor_scaling_ps` | – | 1.0 | Persistent scaling factors. |
 
-Factor inputs (all default `1.0`) — see [Factor system](#factor-system):
-`u_vol_factor`, `el_base_factor`, `el_k_factor` (non-persistent);
-`u_vol_factor_ps`, `el_base_factor_ps`, `el_k_factor_ps` (persistent);
-`u_vol_factor_scaling_ps`, `el_base_factor_scaling_ps`, `el_k_factor_scaling_ps` (scaling).
+### Outputs
 
-### Computed / dependent (engine outputs)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pres_in` | mmHg | 0.0 | Recoil pressure of the wall. |
+| `pres` | mmHg | 0.0 | Total pressure: `pres_in + pres_ext`. This is what the resistors read. |
+| `el_eff`, `el_k_eff` | mmHg/L, mmHg/L² | 0.0 | Effective elastances after the factor layers. |
+| `u_vol_eff` | L | 0.0 | Effective unstressed volume after the factor layers, floored at 0. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `vol` | L | Current volume |
-| `pres` | mmHg | Total pressure (`pres_in + pres_ext`) |
-| `pres_in` | mmHg | Internal recoil pressure of the elastance |
-| `el_eff` | mmHg/L | Effective elastance after the factor layers |
-| `u_vol_eff` | L | Effective unstressed volume after the factor layers |
-| `el_k_eff` | mmHg/L² | Effective non-linear coefficient after the factor layers |
+### Set by other models
 
-## Calculation cycle (`calc_model`)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pres_ext` | mmHg | 0.0 | External pressure for this step, reset to 0 after use. Written by a [`Container`](./Container.md) (thorax, pericardium) on its members, and by `Resuscitation` on its targets. A saved state carries the last step's value, which acts once on the first step. |
 
-Each step runs, in order: `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
+## Calculation
 
-### `calc_elastances`
+`calc_model()` runs `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
 
-```
-el_eff   = el_base + (el_base_factor − 1)·el_base + (el_base_factor_ps − 1)·el_base + (el_base_factor_scaling_ps − 1)·el_base
-el_k_eff = el_k    + (el_k_factor − 1)·el_k       + (el_k_factor_ps − 1)·el_k       + (el_k_factor_scaling_ps − 1)·el_k
-```
+1. **`calc_elastances`**
+   ```
+   el_eff   = el_base · (1 + (el_base_factor − 1) + (el_base_factor_ps − 1) + (el_base_factor_scaling_ps − 1))
+   el_k_eff = el_k    · (1 + (el_k_factor − 1)    + (el_k_factor_ps − 1)    + (el_k_factor_scaling_ps − 1))
+   ```
+   then `el_base_factor` and `el_k_factor` are reset to 1.
+2. **`calc_volumes`**
+   ```
+   u_vol_eff = max(0, u_vol · (1 + (u_vol_factor − 1) + (u_vol_factor_ps − 1) + (u_vol_factor_scaling_ps − 1)))
+   ```
+   then `u_vol_factor` is reset to 1. The floor exists because the layers add: two writers lowering them at once (Surfactant derecruitment and atelectasis on the same lung) could otherwise give a negative unstressed volume.
+3. **`calc_pressure`**, with `S = vol − u_vol_eff`:
+   ```
+   pres_in = (S > 0 ? el_k_eff · S² : 0) + el_eff · S
+   pres    = pres_in + pres_ext
+   pres_ext = 0
+   ```
+   The non-linear term acts only above the unstressed volume. `S²` is also positive below it, where it would push against the linear term and bend the curve back up. For example, the term_neonate aorta (`el_k` 1.5·10⁶) emptied 6 mL below `u_vol` would read about +13 mmHg instead of −41 mmHg. Both terms are 0 and flat at `S = 0`, so the curve is smooth there.
 
-Then resets the non-persistent factors `el_base_factor` and `el_k_factor` to `1.0`.
+**Volume transfer.** The connected resistors call these after computing a flow:
 
-### `calc_volumes`
-
-```
-u_vol_eff = u_vol + (u_vol_factor − 1)·u_vol + (u_vol_factor_ps − 1)·u_vol + (u_vol_factor_scaling_ps − 1)·u_vol
-```
-
-It is floored at 0. The layers add, so several writers lowering them at once (Surfactant derecruitment
-plus atelectasis) could otherwise produce a negative unstressed volume. Then resets the non-persistent factor `u_vol_factor` to `1.0`.
-
-### `calc_pressure`
-
-```
-s       = vol − u_vol_eff
-pres_in = el_k_eff · s² · [s > 0] + el_eff · s
-pres    = pres_in + pres_ext                 (total)
-pres_ext := 0                                (external pressure is non-persistent)
-```
-
-The `el_k_eff` term adds non-linear stiffening and acts **only above the unstressed volume** (`s > 0`).
-`s²` is positive on both sides of `u_vol`, so without the guard it would raise pressure *below* the
-unstressed volume, against the linear term, and far enough below it bends the P-V curve back up (an
-emptied aorta with the term_neonate `el_k` would read +17 mmHg at 6 mL below `u_vol`). Below `u_vol`
-the relation is linear. `el_k` is in mmHg/L² and is `0` for most compartments. `pres_ext` is an external pressure (e.g. from a [`Container`](./Container.md)
-or chest compression) applied this step and then cleared.
-
-## Volume flow
-
-- **`volume_in(dvol)`** — adds `dvol` to `vol` (skipped when `fixed_composition`). Subclasses extend
-  this to mix in the incoming composition.
-- **`volume_out(dvol)`** — removes `dvol` from `vol` (skipped when `fixed_composition`); if the volume
-  would go negative it is clamped to `0` and the **un-removed** amount is returned, so a `Resistor`
-  never pulls volume that isn't there. A `fixed_composition` compartment therefore supplies volume
-  without depleting (an infinite reservoir).
+- **`volume_in(dvol)`** adds `dvol` to `vol`, unless `fixed_composition`. Blood and gas subclasses extend it to mix the incoming composition.
+- **`volume_out(dvol)`** removes `dvol` from `vol`, unless `fixed_composition`. If that would make `vol` negative, `vol` is set to 0 and the amount that could not be removed is returned. The resistor then delivers only what was really available, so volume is conserved and never created from an empty compartment.
 
 ## Factor system
 
-Core physics parameters (`el_base`, `u_vol`, `el_k`) are **never used raw**. Each has three multiplier
-layers that combine **additively against the base** into an `*_eff` value:
+`u_vol`, `el_base` and `el_k` each carry three layers, composed **additively** against the base (see [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern)). Who writes them in the current code:
 
-| Layer | Persistence | Set by |
-|---|---|---|
-| `<p>_factor` | reset to `1.0` every step | transient interventions |
-| `<p>_factor_ps` | persistent | user / scenario / regulator models (ANS, MOB, Circulation…) |
-| `<p>_factor_scaling_ps` | persistent | `ModelScaler` (weight/manual scaling) |
+| Layer | Writers |
+|---|---|
+| `_factor` (reset every step) | `Surfactant` (lung `u_vol`/`el_base`); `BloodVessel` and `HeartChamber` internally |
+| `_factor_ps` | `Respiration` (`set_el_lung_factor`, thorax elastance, lung `u_vol`); `Heart` (pericardium); the `Calibrator`; the user and scenarios via `setPropValue` |
+| `_factor_scaling_ps` | `ModelScaler`; `Uterus` (uterine vessel `u_vol`, pregnancy) |
 
-```
-p_eff = p + (factor − 1)·p + (factor_ps − 1)·p + (factor_scaling_ps − 1)·p
-```
+`BloodVessel` overrides this composition and multiplies its layers (plus the ANS terms); `HeartChamber` adds drug, load and ANS terms. Check those pages before relying on the additive rule for them.
 
-A factor of `1.0` means "no effect"; simultaneous factors add their deltas. `calc_elastances` /
-`calc_volumes` reset only the non-persistent `*_factor` layer each step. When you add a tunable
-parameter, follow this convention so it composes with interventions and scaling.
+## Inputs and outputs
+
+- **Reads:** nothing from other models; only its own props and `pres_ext`.
+- **Written by:**
+  - the connected `Resistor`s (`volume_in`/`volume_out`);
+  - `Container`s and `Resuscitation` (`pres_ext`);
+  - the factor writers above.
+- **Read by:** every `Resistor` connected to it (`pres`), `Container`s (`vol`), `Breathing`, `Monitor`, `DataCollector` watchers, and the subclasses.
+
+## Assumptions and limitations
+
+- **Linear below the unstressed volume.** Below `u_vol` the pressure goes negative along the same linear elastance. Real veins collapse there instead, with a small negative pressure and a rising resistance. The model has no collapse behaviour.
+- **Lumped compartment.** One pressure per compartment: no wave propagation, no spatial gradients.
+- **Explicit volume update.** Pressure is computed from the volume at the start of the step. Very stiff compartments joined by very low resistances can make the explicit step unstable; `Resistor.implicit` handles this for the aorta (see [Resistor](./Resistor.md)).
+- **No visco-elasticity.** The wall responds instantly; there is no stress relaxation or hysteresis.
 
 ## Example definition (JSON)
 
-Plain `Capacitance` is rarely instantiated directly in scenarios (the blood/gas subclasses are used);
-a definition block carries the config fields below (factor fields default to `1.0` and are usually
-omitted):
+No scenario uses a plain `Capacitance`; every compartment is a subclass. These are the props this class contributes, from `term_neonate.json`, `models.PV` (a `BloodVessel`, trimmed to the Capacitance props):
 
 ```json
 {
-  "name": "EXAMPLE_COMP",
-  "description": "passive elastic compartment",
-  "model_type": "Capacitance",
-  "is_enabled": true,
-  "vol": 0.04,
-  "u_vol": 0.038,
-  "el_base": 3100,
+  "name": "PV",
+  "model_type": "BloodVessel",
+  "vol": 0.01035,
+  "u_vol": 0.00815,
+  "el_base": 4507.3,
   "el_k": 0,
   "fixed_composition": false
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- The foundational elastance element; almost every volume-holding compartment is a `Capacitance`
-  subclass.
-- Use it (or a subclass) for any compartment that is a pure compliance with no built-in flow —
-  flow is provided by separate [`Resistor`](./Resistor.md) models that reference it.
-- `fixed_composition` turns it into an infinite reservoir (outside air, maternal blood,
-  ventilator/ECLS gas sources).
+Through its subclasses it is every compartment that holds blood or gas: in term_neonate 39 `BloodVessel`s, 10 `GasCapacitance`s and 3 `BloodCapacitance`s. Six of these are `fixed_composition` reservoirs:
+- `MOUTH` (room air);
+- `VENT_GASIN` and `VENT_GASOUT` (ventilator supply and exhaust);
+- `ECLS_GAS_SOURCE` and `ECLS_GAS_OUT` (sweep gas);
+- `PL_MAT` (maternal blood).
+
+## References
+
+No literature-derived values in this class: it is the standard lumped-compliance (Windkessel) element. The elastance and unstressed-volume values are scenario parameters, documented with the scenarios ([`TermNeonateReference`](./TermNeonateReference.md) and the other `*Reference.md` pages).
 
 ````
 
@@ -4076,157 +3912,115 @@ The ring-buffer indices and frame layout are owned by [RealtimeChannels](./Realt
 ````markdown
 # Circulation
 
-`Circulation` is **not a physical compartment** — it is a high-level coordinator that groups the
-circulatory models by anatomical class and applies whole-tree adjustments to them. It does two jobs:
-it propagates **autonomic vascular tone** and **resistance-factor targets** onto the vessels, and it
-tallies the **blood-volume distribution** across the systemic, pulmonary and cardiac compartments for
-reporting. It holds no volume, pressure or flow of its own — it only reads from and writes onto the
-vessels and chambers named in its lists.
+`Circulation` is the coordinator of the blood vessels. It holds no blood itself. It groups the vessels by anatomical class, passes the autonomic vascular tone and the system-wide resistance settings (SVR, PVR) on to them, and reports how the blood volume is distributed. It also owns the circulation's vessels and connectors as sub-models.
+
+## Physiology
+
+Blood pressure and organ flow are set largely by the tone of the small arteries and arterioles, and venous return by the tone of the veins. Several things change that tone at once:
+- **Sympathetic nervous system:** the baroreflex constricts the vessels when pressure falls.
+- **Hormones:** angiotensin II and vasopressin constrict them.
+- **Drugs:** e.g. noradrenaline through α1 receptors.
+- **The clinician:** a vasodilator or vasopressor, or pulmonary vasodilators such as inhaled NO.
+
+Circulation applies each of these to the right vessel class: the systemic or pulmonary arterioles for resistance (SVR, PVR), and the venules for venous resistance. It also reports where the blood is (systemic, pulmonary, heart), the way a clinician thinks of blood volume distribution.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Circulation   (group coordinator — no physics of its own)
+  └── Circulation
 ```
-
-Unlike `Capacitance`/`Resistor` descendants, `Circulation` extends `BaseModelClass` directly. It has
-no `el_base`/`r_for`/`vol`; `calc_model()` instead iterates over named members and writes onto their
-factor layers. It is the systemic/pulmonary counterpart to `Respiration` (which coordinates the
-respiratory tree the same way).
-
-## What it models
-
-It groups every blood-carrying model and exposes a small set of system-wide levers:
-
-- **Autonomic tone** — `ans_activity` is copied onto every vessel's own `ans_activity`, which drives
-  the α-coupled vasoreactivity computed inside each `BloodVessel`.
-- **Resistance tone** — `svr_factor_art`/`svr_factor_ven` and `pvr_factor_art`/`pvr_factor_ven` set
-  the systemic and pulmonary arteriolar/venular resistance; `svr_factor_drug` is an independent
-  channel owned by the Drugs PK/PD model that composes additively with `svr_factor_art`.
-- **Volume bookkeeping** — `calc_blood_volumes()` sums compartment volumes into systemic / pulmonary /
-  heart totals and percentages.
-
-Group membership is **name-based**: a vessel only receives tone or is counted if its name appears in
-the appropriate list, so the lists must be kept in sync with the circulation topology.
 
 ## Properties
 
-### Configuration (set in the model definition)
+### Config: groups (names of models)
 
 | Property | Default | Description |
 |---|---|---|
-| `heart_chambers` | `[]` | names of all heart chambers (LA/RA/LV/RV streams) |
-| `coronaries` | `[]` | names of coronary compartments (counted into the systemic total) |
-| `systemic_arteries` | `[]` | systemic artery names |
-| `systemic_arterioles` | `[]` | systemic arteriole names (the SVR tone site) |
-| `systemic_capillaries` | `[]` | systemic capillary names |
-| `systemic_venules` | `[]` | systemic venule names (the venous tone site) |
-| `systemic_veins` | `[]` | systemic vein names |
-| `pulmonary_arteries` | `[]` | pulmonary artery names |
-| `pulmonary_arterioles` | `[]` | pulmonary arteriole names (the PVR tone site) |
-| `pulmonary_capillaries` | `[]` | pulmonary capillary names |
-| `pulmonary_venules` | `[]` | pulmonary venule names |
-| `pulmonary_veins` | `[]` | pulmonary vein names |
-| `ans_activity` | `1.0` | autonomic tone propagated to all vessels (1.0 = no effect) |
-| `svr_factor_art` | `1.0` | systemic **arteriolar** resistance target |
-| `svr_factor_ven` | `1.0` | systemic **venular** resistance target |
-| `svr_factor_drug` | `1.0` | independent systemic-arteriolar channel owned by the Drugs model |
-| `pvr_factor_art` | `1.0` | pulmonary **arteriolar** resistance target |
-| `pvr_factor_ven` | `1.0` | pulmonary **venular** resistance target |
+| `heart_chambers` | `[]` | Heart chambers, for the volume report. |
+| `coronaries` | `[]` | Coronary bed, counted in the systemic volume. |
+| `systemic_arteries`, `systemic_arterioles`, `systemic_capillaries`, `systemic_venules`, `systemic_veins` | `[]` | Systemic vessels by class. The arterioles are the SVR site, the venules the venous resistance site. |
+| `pulmonary_arteries`, `pulmonary_arterioles`, `pulmonary_capillaries`, `pulmonary_venules`, `pulmonary_veins` | `[]` | Pulmonary vessels by class. The arterioles are the PVR site. |
 
-### Computed / reported (outputs)
+### Config: resistance channels
+
+Each channel is a multiplier around 1, applied to its vessel group. A change is added as a delta to the vessels' `r_factor_ps` (see [Calculation](#calculation)).
+
+| Property | Default | Vessels | Owner |
+|---|---|---|---|
+| `svr_factor_art` | 1.0 | systemic arterioles | the user / scenario |
+| `svr_factor_ven` | 1.0 | systemic venules | the user / scenario |
+| `pvr_factor_art` | 1.0 | pulmonary arterioles | the user / scenario |
+| `pvr_factor_ven` | 1.0 | pulmonary venules | the user / scenario |
+| `svr_factor_drug` | 1.0 | systemic arterioles | `Drugs` (α1 vasoconstriction) |
+| `svr_factor_hormones_art` | 1.0 | systemic arterioles | `Hormones` (angiotensin II, ADH) |
+| `svr_factor_hormones_ven` | 1.0 | systemic venules | `Hormones` (angiotensin II) |
+
+### Set by other models
+
+| Property | Default | Written by |
+|---|---|---|
+| `ans_activity` | 1.0 | The `EF_SVR` efferent (baroreflex/chemoreflex vascular tone); passed to every vessel in the groups. |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `total_blood_volume` | L | systemic + pulmonary + heart volume |
-| `syst_blood_volume` | L | systemic vessels + coronaries |
-| `pulm_blood_volume` | L | pulmonary vessels |
-| `heart_blood_volume` | L | heart chambers |
-| `syst_blood_volume_perc` | % | systemic share of total (0 when total = 0) |
-| `pulm_blood_volume_perc` | % | pulmonary share of total |
-| `heart_blood_volume_perc` | % | heart share of total |
+| `total_blood_volume` | L | Systemic + pulmonary + heart volume (every 1 s). |
+| `syst_blood_volume`, `pulm_blood_volume`, `heart_blood_volume` | L | Volumes per part; systemic includes the coronaries. Disabled vessels (placenta, ECLS) are not counted. |
+| `syst_blood_volume_perc`, `pulm_blood_volume_perc`, `heart_blood_volume_perc` | % | Shares of the total (0 while the total is 0). |
 
-### Local (internal)
+### Internal state (public names, saved with the state)
 
-`_bloodvessel_list`, `_systemic_bloodvessel_list`, `_pulmonary_bloodvessel_list` are flattened name
-lists built in `init_model`. `prev_*` shadow each target so a change can be detected and applied as a
-delta. `_update_interval` (0.015 s) / `_update_interval_slow` (1.0 s) throttle the two loops.
+| Property | Description |
+|---|---|
+| `prev_ans_activity`, `prev_svr_factor_art`, `prev_svr_factor_ven`, `prev_svr_factor_drug`, `prev_svr_factor_hormones_art`, `prev_svr_factor_hormones_ven`, `prev_pvr_factor_art`, `prev_pvr_factor_ven` | The values last applied; a difference triggers the update. `prev_ans_activity` starts at 0, so the first update always pushes `ans_activity`. |
 
-> Definition files may also carry stale `svr_factor`/`pvr_factor`/`prev_svr_factor`/`prev_pvr_factor`
-> fields left over from an earlier single-factor scheme. The **current** source reads only the
-> `*_art`/`*_ven` (and `*_drug`) factors above; the bare `svr_factor`/`pvr_factor` keys are ignored.
+## Calculation
 
-## Calculation cycle (`calc_model`)
+`calc_model()` runs two throttled loops.
 
-Two throttled loops:
+**Every 15 ms**, only for inputs that changed since the last tick:
+- `ans_activity` → written onto every vessel in the groups (each `BloodVessel` applies it through its `ans_sens`, see [BloodVessel](./BloodVessel.md)).
+- Each resistance channel → its change is added to the persistent factor of every vessel in its group:
+  ```
+  delta = new_value − prev_value
+  r_factor_ps += delta        (each vessel of the group, clamped at 0)
+  ```
+  The user, Drugs and Hormones channels all add into the same `r_factor_ps`, together with anything else that writes it (scenario tuning, the `Calibrator`). Because they add, simultaneous channels combine additively: SVR ×2 plus a drug ×2 gives ×3, not ×4. The vessel's other layers (scaling, ANS, viscosity) then multiply on top.
 
-- **Fast (every 0.015 s)** — apply tone changes *only when an input changed* (each guarded by a
-  `prev_*` comparison so the work is skipped when nothing moved):
-  - `ans_activity` → written onto every vessel's `ans_activity`.
-  - `svr_factor_art` / `svr_factor_ven` → `set_svr_factor_art` / `set_svr_factor_ven`.
-  - `svr_factor_drug` → `set_svr_factor_drug`.
-  - `pvr_factor_art` / `pvr_factor_ven` → `set_pvr_factor_art` / `set_pvr_factor_ven`.
-- **Slow (every 1.0 s)** — `calc_blood_volumes()` tallies the volume distribution (throttled for
-  performance, so `*_blood_volume*` lag fast transients by up to a second).
+**Every 1 s:** `calc_blood_volumes()` sums the enabled vessels and chambers into the volume outputs.
 
-## Vascular tone: the `set_*_factor` methods
+## Factor system
 
-Resistance tone is applied through each vessel's **persistent** resistance factor `r_factor_ps` — the
-layer that survives steps and accumulates contributions from several models (Circulation, ANS, Drugs,
-Hormones). Because it is cumulative, Circulation applies the **delta** since the last call, not the
-absolute value:
+None of its own; it writes `BloodVessel.r_factor_ps` (see [BloodVessel → Factor system](./BloodVessel.md#factor-system)). Through the α-coupling, every resistance channel also stiffens the vessels it acts on.
 
-```
-delta = new_factor − prev_factor
-for each vessel in the group:  r_factor_ps += delta   (clamped at 0)
-this.<factor> := new_factor
-```
+## Inputs and outputs
 
-The delta is computed **once** so every vessel in the group receives the same change, and
-`r_factor_ps` is clamped at 0 (a negative resistance factor is non-physical). The clamp makes the
-setters non-reversible past it: a delta that hits 0 is partly lost, so stepping a factor down past
-the floor and back does not restore the vessel. The lists must hold **vessel** names only (a
-resistor name is skipped silently), and every arteriole-type bed belongs in `systemic_arterioles`:
-`RUB`/`RLB` (the lumped upper/lower-body beds) carry 36 % of systemic organ flow in `term_neonate`.
-The five methods differ
-only in which list they drive:
+- **Reads:** the vessels' and chambers' volumes (volume report).
+- **Writes:** `ans_activity` and `r_factor_ps` of the vessels in its groups.
+- **Written by:**
+  - `EF_SVR` (`ans_activity`);
+  - `Drugs` (`svr_factor_drug`), `Hormones` (`svr_factor_hormones_*`);
+  - the user and scenarios (`svr_factor_art/_ven`, `pvr_factor_art/_ven`).
 
-| Method | Vessel list | Role |
-|---|---|---|
-| `set_svr_factor_art` | `systemic_arterioles` | systemic arteriolar resistance |
-| `set_svr_factor_drug` | `systemic_arterioles` | independent drug channel (composes additively with art) |
-| `set_svr_factor_ven` | `systemic_venules` | systemic venular resistance |
-| `set_pvr_factor_art` | `pulmonary_arterioles` | pulmonary arteriolar resistance |
-| `set_pvr_factor_ven` | `pulmonary_venules` | pulmonary venular resistance |
+  The UI's SVR and PVR common tasks use `ModelScaler`'s resistance groups instead (the scaling layer).
+- **Read by:** `Monitor` and `DataCollector` watchers (volume report).
 
-> Resistance tone is applied at the **arteriolar and venular** levels only — the dominant resistance
-> sites — not on the large arteries/veins or capillaries. `ans_activity`, by contrast, is broadcast to
-> *every* vessel in `_bloodvessel_list`.
+## Assumptions and limitations
 
-## Blood-volume tally (`calc_blood_volumes`)
-
-Sums `vol` over **enabled** members of each group:
-
-```
-syst_blood_volume  = Σ systemic vessels + Σ coronaries
-pulm_blood_volume  = Σ pulmonary vessels
-heart_blood_volume = Σ heart chambers
-total_blood_volume = syst + pulm + heart
-*_perc = 100 · part / total          (0 when total = 0)
-```
-
-Coronary volume is counted into the **systemic** total. Disabled models and missing names are skipped,
-and the percentages are guarded against a zero total (NaN avoidance before the circulation fills).
+- **One autonomic signal for all vessels.** Regional differences come only from each vessel's `ans_sens`.
+- **Channels add.** See [Calculation](#calculation). The clamp at 0 makes a channel irreversible past it: a delta that hits 0 is partly lost.
+- **Membership is by name.** Only vessel names belong in the groups (a resistor name is skipped). `RUB`/`RLB` (the lumped upper and lower body, 36 % of systemic organ flow at term) belong in `systemic_arterioles`.
+- **Renal autoregulation acts on the inflow connector.** `Kidneys` adjusts `AD_KID_ART` (the renal arteriole's inflow resistor), so KID_ART receives the systemic channels like the other arterioles and autoregulation counters them on top. Before this, an absolute write to KID_ART erased every SVR change there.
 
 ## Example definition (JSON)
 
-From `term_neonate.json` (lists trimmed for brevity):
+From `term_neonate.json`, `models.Circulation` (trimmed; `components` holds the vessels and connectors):
 
 ```json
 {
   "name": "Circulation",
-  "description": "high level circulation model",
   "model_type": "Circulation",
   "is_enabled": true,
   "heart_chambers": ["LA", "RAIVCI", "RASVC", "RV", "LV"],
@@ -4241,29 +4035,20 @@ From `term_neonate.json` (lists trimmed for brevity):
   "pulmonary_capillaries": ["LL_CAP", "RL_CAP"],
   "pulmonary_venules": ["LL_VEN", "RL_VEN"],
   "pulmonary_veins": ["PV"],
-  "ans_activity": 1.0,
-  "svr_factor_art": 1.0,
-  "svr_factor_ven": 1.0,
-  "svr_factor_drug": 1.0,
-  "pvr_factor_art": 1.0,
-  "pvr_factor_ven": 1.0
+  "svr_factor_art": 1,
+  "svr_factor_ven": 1,
+  "pvr_factor_art": 1,
+  "pvr_factor_ven": 1
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- The **ANS** effector writes `Circulation.ans_activity`; Circulation fans it out to every
-  `BloodVessel` so the per-vessel α-coupled vasoreactivity uses one shared activity level.
-- The **Hormones** (RAAS/ADH) and **Drugs** models adjust `svr_factor_art` / `svr_factor_drug` /
-  `pvr_factor_*` to raise or lower regional resistance; Circulation translates each target into a
-  shared delta on the relevant `r_factor_ps`.
-- `scaleModel`/`ModelScaler` does **not** go through Circulation — it writes the `*_scaling_ps` layer
-  on each vessel directly. Circulation only ever touches `r_factor_ps`.
-- The `*_blood_volume*` outputs feed monitoring/diagnostics (volume distribution between systemic,
-  pulmonary and cardiac compartments).
+One instance in every scenario. Its `components` are the 31 circulation vessels and 3 free resistors (`PV_LA`, `IVCI_RAIVCI`, `SVC_RASVC`); the vessels' own inflow connectors are created by the vessels. At rest the term blood volume is 286 mL: 81 % systemic, 11 % pulmonary, 8 % in the heart. The placenta (`Placenta`) and ECLS (`Ecls`) vessels belong to their own owners and are not in the groups.
 
-See also [Respiration](./Respiration.md) (the respiratory-tree counterpart) and
-[BloodVessel](./BloodVessel.md) (the per-vessel resistance/ANS coupling that Circulation drives).
+## References
+
+No literature-derived values: the groups and channels are model structure.
 
 ````
 
@@ -4272,160 +4057,147 @@ See also [Respiration](./Respiration.md) (the respiratory-tree counterpart) and
 ````markdown
 # Container
 
-A `Container` is an enclosing compartment that **wraps other compartments** and squeezes them with its
-own recoil pressure — the model of the thorax and the pericardium. Its volume is the sum of what it
-contains, and its pressure is transmitted to those contents. It reuses the elastance machinery of
-[`Capacitance`](./Capacitance.md) but holds no flow of its own.
+A `Container` is an elastic compartment that encloses other compartments. Its volume is the sum of what it contains, and its pressure is added to the outside pressure of every compartment inside it. The model uses it for the thorax and the pericardium.
+
+## Physiology
+
+The heart and lungs don't sit in open space. The lungs, the great vessels and the heart sit inside the chest (the *thorax*), and the heart sits inside its own sac (the *pericardium*). The pressure in these spaces acts on everything inside:
+
+- **Thorax.** When the breathing muscles contract, the pressure in the chest falls below atmospheric. That suction expands the lungs and draws blood into the intrathoracic veins and the right heart. Chest compressions and positive-pressure ventilation raise the same pressure.
+- **Pericardium.** At normal filling the pericardium is slack and doesn't squeeze the heart. Once the heart (or fluid in the sac) fills it beyond its reserve, the sac becomes very stiff very quickly (a J-shaped pressure–volume curve). It then limits filling of all four chambers together. That is the mechanism of **cardiac tamponade** and pericardial constraint.
+
+Containers nest: the pericardium sits inside the thorax, so a fall in chest pressure reaches the heart chambers through both.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Container          (sum contained volume → elastance → broadcast pressure)
+  └── Container
 ```
 
-`Container` extends `BaseModelClass` directly (it does not derive from `Capacitance`), but implements
-the same `el_base`/`u_vol`/`el_k` factor pattern and the same `calc_pressure` recoil formula, with one
-difference: the non-linear term only acts on a **stretched** container,
-
-```
-S      = vol − u_vol_eff
-pres_in = (S > 0 ? el_k_eff · S² : 0) + el_eff · S
-```
-
-because `S²` is also positive below the unstressed volume, where it would push the wrong way: a
-slack pericardium must not squeeze an under-filled heart. That is what gives the pericardium its
-J-shaped curve: slack up to a reserve volume (`u_vol`), then a steep `el_k` wall (pericardial
-constraint, tamponade via `Heart.pc_extra_volume`). Note that `el_k` is in mmHg/L², so with
-volumes of millilitres it needs values of ~10⁵ to matter. See [BaseModelClass.md](./BaseModelClass.md)
-for the lifecycle contract.
-
-## What it models
-
-```
-THORAX (Container) ── contains ──► PERICARDIUM (Container) ── contains ──► LV, RV, LA, RA, COR
-        ── also contains ──► lungs (ALL, ALR), great vessels, …
-```
-
-`THORAX` holds the lungs, heart and intrathoracic vessels; `PERICARDIUM` (inside the thorax) holds the
-heart chambers. Containers nest, so pressure propagates inward (thorax → pericardium → chambers). A
-container's own volume is derived from its members, so it does not store fluid itself and is never a
-flow endpoint.
+`Container` extends `BaseModelClass` directly, not `Capacitance`. It repeats the `u_vol`/`el_base`/`el_k` elastance machinery and factor layers, but it holds no fluid, so nothing flows into or out of it.
 
 ## Properties
 
-### Config / independent (set in the definition JSON)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume of the container |
-| `el_base` | mmHg/L | Baseline (linear) elastance |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient (acts only above `u_vol`) |
-| `pres_ext` | mmHg | External pressure applied this step (non-persistent; cleared each step) |
-| `vol_extra` | L | Additional fixed volume added to the contained sum |
-| `contained_components` | string[] | Names of the models this container encloses |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `u_vol` | L | 0.0 | Unstressed volume: below it the container exerts no recoil. For the pericardium this is the reserve volume. |
+| `el_base` | mmHg/L | 0.0 | Linear elastance. |
+| `el_k` | mmHg/L² | 0.0 | Non-linear elastance; acts only above `u_vol`. Volumes are in litres, so 10 mL of stretch is 0.01 L and `el_k` = 10⁵ gives 10 mmHg. |
+| `vol_extra` | L | 0.0 | Volume added to the contained sum, e.g. pericardial fluid (written by `Heart` from `pc_extra_volume`). |
+| `contained_components` | string[] | `[]` | Names of the enclosed models. |
+| `u_vol_factor`, `el_base_factor`, `el_k_factor` | – | 1.0 | Non-persistent factors, reset to 1 every step. |
+| `u_vol_factor_ps`, `el_base_factor_ps`, `el_k_factor_ps` | – | 1.0 | Persistent factors. |
+| `u_vol_factor_scaling_ps`, `el_base_factor_scaling_ps`, `el_k_factor_scaling_ps` | – | 1.0 | Persistent scaling factors (`ModelScaler`). |
 
-Factor inputs (all default `1.0`) — see [Factor system](#factor-system):
-`u_vol_factor`, `el_base_factor`, `el_k_factor` (non-persistent);
-`u_vol_factor_ps`, `el_base_factor_ps`, `el_k_factor_ps` (persistent);
-`u_vol_factor_scaling_ps`, `el_base_factor_scaling_ps`, `el_k_factor_scaling_ps` (scaling).
+### Outputs
 
-### Computed / dependent (engine outputs)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `vol` | L | 0.0 | `vol_extra` + the volumes of the enabled contained models. |
+| `pres_in` | mmHg | 0.0 | Recoil pressure of the container wall. |
+| `pres` | mmHg | 0.0 | `pres_in + pres_ext`: the pressure passed to the contents. |
+| `el_eff`, `el_k_eff`, `u_vol_eff` | as above | 0.0 | Effective values after the factor layers. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `vol` | L | Container volume (`vol_extra + Σ contained.vol`) |
-| `pres` | mmHg | Total pressure (`pres_in + pres_ext`) |
-| `pres_in` | mmHg | Internal recoil pressure |
-| `el_eff` | mmHg/L | Effective elastance after the factor layers |
-| `u_vol_eff` | L | Effective unstressed volume after the factor layers |
-| `el_k_eff` | mmHg/L² | Effective non-linear coefficient after the factor layers |
+### Set by other models
 
-## Calculation cycle (`calc_model`)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pres_ext` | mmHg | 0.0 | External pressure for this step, reset to 0 after use. Written by: `Breathing` (muscle pressure, subtracted from THORAX), `Resuscitation` (chest compressions, added to THORAX), the THORAX on the PERICARDIUM (its own `pres`). |
 
-Each step: `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
+## Calculation
 
-### `calc_elastances`
+`calc_model()` runs `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
 
-Composes `el_eff` and `el_k_eff` from the base values and the three factor layers (identical to
-[`Capacitance`](./Capacitance.md)), then resets the non-persistent `el_base_factor` / `el_k_factor`
-to `1.0`.
+1. **`calc_elastances`**: `el_eff` and `el_k_eff` from the base value and the three factor layers, composed additively (see [Factor system](#factor-system)). Then the non-persistent factors are reset.
+2. **`calc_volumes`**:
 
-### `calc_volumes`
+   ```
+   vol       = vol_extra + Σ vol of the contained models that exist and are enabled
+   u_vol_eff = u_vol · (additive factor layers)
+   ```
 
-```
-vol = vol_extra + Σ contained.vol          (over members that exist and are enabled)
-u_vol_eff = u_vol + (u_vol_factor − 1)·u_vol + (u_vol_factor_ps − 1)·u_vol + (u_vol_factor_scaling_ps − 1)·u_vol
-```
+3. **`calc_pressure`**, with `S = vol − u_vol_eff`:
 
-Then resets the non-persistent `u_vol_factor` to `1.0`. Members are looked up by name in
-`model.models`; missing or disabled members are skipped.
+   ```
+   pres_in = (S > 0 ? el_k_eff · S² : 0) + el_eff · S
+   pres    = pres_in + pres_ext
+   for every contained model that exists and is enabled:  model.pres_ext += pres
+   pres_ext = 0
+   ```
 
-### `calc_pressure`
+   The non-linear term only acts on a stretched container, because `S²` is also positive below `u_vol`, where it would push the wrong way: a slack pericardium must not squeeze an under-filled heart. The contained models add their `pres_ext` to their own pressure and reset it in their own `calc_pressure`, so the contributions don't accumulate.
 
-```
-pres_in = el_k_eff · (vol − u_vol_eff)² + el_eff · (vol − u_vol_eff)
-pres    = pres_in + pres_ext
-for each contained component (existing & enabled):  component.pres_ext += pres
-pres_ext := 0
-```
+**Step order and lag.** Each model steps once per step, in insertion order (see [BaseModelClass](./BaseModelClass.md#composite-models-components)). In the shipped scenarios the order is: `Breathing` → heart chambers → `PERICARDIUM` → lungs and vessels → `THORAX`. So:
+- the lungs and intrathoracic vessels feel the thorax pressure **one step** late;
+- the heart chambers feel it **two steps** late (through the pericardium);
+- the chambers feel the pericardial pressure one step late.
 
-The container's full pressure is **added** to every contained component's `pres_ext`, which those
-components read in their own `calc_pressure`. Because contents reset `pres_ext` each step, the
-contributions compose without accumulating.
+At the 0.5 ms step size this is 0.5–1 ms, negligible against a 400 ms heartbeat.
 
 ## Factor system
 
-`el_base`, `u_vol`, `el_k` are **never used raw**. Each combines three multiplier layers **additively
-against the base** into an `*_eff` value:
-
-| Layer | Persistence | Set by |
-|---|---|---|
-| `<p>_factor` | reset to `1.0` every step | transient interventions |
-| `<p>_factor_ps` | persistent | user / scenario / regulator models (e.g. `Breathing`) |
-| `<p>_factor_scaling_ps` | persistent | `ModelScaler` (weight/manual scaling) |
+`u_vol`, `el_base` and `el_k` carry the three layers (`_factor`, `_factor_ps`, `_factor_scaling_ps`) and compose **additively**, as in [`Capacitance`](./Capacitance.md):
 
 ```
 p_eff = p + (factor − 1)·p + (factor_ps − 1)·p + (factor_scaling_ps − 1)·p
 ```
 
-Same pattern as [`Capacitance`](./Capacitance.md).
+The only model that writes a factor is `Heart`: its `pc_el_factor` (pericardial stiffness) moves `PERICARDIUM.el_base_factor_ps` and `el_k_factor_ps` together. See [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
 
-## Notes
+## Inputs and outputs
 
-- **Membership is name-based and enable-aware.** Volume is summed and pressure transmitted only for
-  members that resolve to a model and are `is_enabled`; missing or disabled members are skipped (so a
-  disabled chamber neither adds phantom volume nor accumulates an unbounded `pres_ext`).
-- **Sub-unstressed operation matters.** The thorax runs *below* its unstressed volume (`vol < u_vol`),
-  so a higher elastance makes `pres_in` more negative — this is how `Breathing`'s muscle effort
-  (which raises `THORAX.el_base_factor`) produces inspiratory suction.
-- The order of stepping sets whether a content sees this step's container pressure or last step's (at
-  most one step of lag) — inherent to sequential stepping, stable at the default step size.
+- **Reads:** `vol` and `is_enabled` of each contained model.
+- **Writes:** `pres_ext` of each contained model, every step.
+- **Written by:**
+  - `Breathing` and `Resuscitation` (THORAX `pres_ext`);
+  - `Heart` (PERICARDIUM `vol_extra` from `pc_extra_volume`, and the stiffness factors from `pc_el_factor`);
+  - `ModelScaler` (scaling factors).
+- **Read by:** `Breathing` (THORAX elastance, to size the respiratory effort), `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **Uniform pressure.** The whole container has one pressure. Regional differences (e.g. pleural pressure gradients from apex to base) aren't modelled.
+- **Membership is by name.** Missing or disabled members are skipped for both the volume and the pressure. Skipping disabled members also stops a disabled compartment, which never resets its `pres_ext`, from accumulating pressure.
+- **Pericardium calibration** (`scripts/_fix_pericardium.mjs`):
+  - `u_vol` is 1.15 × the maximal (end-diastolic) heart volume at rest, so the pericardium is slack at rest (term: 30.7 mL in it against 35.2 mL).
+  - `el_k` gives +10 mmHg at 10 mL beyond that reserve (10⁵ mmHg/L²).
+  - `el_base` is 0.
+  - So `pc_el_factor` has no effect at rest and only acts once the pericardium is stretched (e.g. by `pc_extra_volume`).
+- **The pericardial wall scales with the heart.** `el_k` = 10⁵ mmHg/L² × (35.2 mL / reserve)² (`scripts/_scale_pericardium.mjs`), so every scenario gets the same pressure for the same fractional stretch beyond its reserve: from 10⁵ at term to 2.6·10⁶ at 25 weeks. An effusion of 50 % of the reserve lowers LVO by 10 % at term and 6–7 % at 25–28 weeks.
+- **The thorax elastance** (`el_base` 50 mmHg/L term, 150 at 25 weeks) represents the chest wall. Its `u_vol` and `el_base` are scenario-calibrated values.
 
 ## Example definition (JSON)
 
+From `term_neonate.json`, `models.Heart.components.PERICARDIUM` (trimmed to the config props):
+
 ```json
 {
-  "name": "UPPER_BODY",
-  "description": "passive container grouping cephalic vessels for tilt",
+  "name": "PERICARDIUM",
   "model_type": "Container",
   "is_enabled": true,
-  "u_vol": 0,
+  "u_vol": 0.03525,
   "el_base": 0,
-  "el_k": 0,
-  "pres_ext": 0,
+  "el_k": 100000,
   "vol_extra": 0,
-  "contained_components": ["BR_ART", "BR_CAP", "BR_VEN", "RUB", "VUB", "THORAX"]
+  "contained_components": ["RAIVCI", "RASVC", "RV", "LA", "LV", "COR"]
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- `THORAX` and `PERICARDIUM` are the canonical containers (created inside the respiration/heart
-  composite models); they transmit intrathoracic/pericardial pressure to the lungs, great vessels and
-  heart chambers.
-- `Breathing` drives `THORAX.el_base_factor` to generate the inspiratory pressure swing.
-- Also used as passive grouping containers (e.g. `UPPER_BODY`) for postural/tilt experiments.
+All 10 shipped scenarios have the same two containers:
+
+| Instance | Owner | Contains | Role |
+|---|---|---|---|
+| `THORAX` | `Respiration` | `ALL`, `ALR` (lungs), `PERICARDIUM`, `AA`, `AAR`, `PA`, `PAAL`, `PAAR`, `PV`, `IVCI`, `SVC`, lung arteries/capillaries/veins (`LL_*`, `RL_*`) | Chest wall and pleural pressure; target of the breathing muscles and of chest compressions. |
+| `PERICARDIUM` | `Heart` | `RAIVCI`, `RASVC`, `RV`, `LA`, `LV`, `COR` | Pericardial constraint and tamponade. |
+
+## References
+
+No literature-derived values in this class. The pericardial reserve and wall stiffness are calibration choices documented in `scripts/_fix_pericardium.mjs`.
 
 ````
 
@@ -4501,6 +4273,8 @@ The two ECG entries (`ncc_atrial`, `ncc_ventricular`) are constructed in the con
 | `clean_up_slow()` | Same for the slow watchlist. |
 | `set_sample_interval(v=0.005)` / `set_sample_interval_slow(v=1.0)` | Change a sampling period. |
 | `set_channels(writer, on_registry)` | Attach the realtime typed transport, set `legacy_mode = false`, build the initial chart slot index. |
+| `_exists(item)` *(private)* | True while the item's model is still the instance in `model.models` (used by `clean_up`). |
+| `_add_ecg_watches()` *(private)* | Adds the two `Heart.ncc_*` watches when the model has a `Heart`. |
 | `_find_model_prop(prop)` *(private)* | Resolves a dot-path against `model.models` (see below). Returns a descriptor or `null`. |
 | `_rebuild_chart_index()` *(private)* | Re-derives `chart_slots`, bumps `registry_version`, reallocates the ring, re-fires the registry callback. No-op without an attached writer. |
 
@@ -4520,11 +4294,13 @@ This is the read side of the model contract; the write side (deferred mutation o
 
 ## Notes / caveats
 
-- **ECG counters are always watched.** The constructor pushes `Heart.ncc_atrial` and `Heart.ncc_ventricular` onto `watch_list` regardless of any user watchlist, and `clear_watchlist()` re-adds them. ECG reconstruction therefore always has its source data even when the client subscribed to nothing. These two entries resolve `model.models["Heart"]` at construction time, so the build must have a `Heart` component.
+- **ECG counters are always watched.** The constructor pushes `Heart.ncc_atrial` and `Heart.ncc_ventricular` onto `watch_list` regardless of any user watchlist, and `clear_watchlist()` re-adds them. ECG reconstruction therefore always has its source data even when the client subscribed to nothing. These two entries resolve `model.models["Heart"]` at construction time; a build without a `Heart` simply has no ECG watches (it used to fail in `collect_data`).
 - **`get_model_data*` is destructive.** It returns the buffer and immediately resets it to `[]`. Call it once per drain; a second call returns nothing until more is collected.
 - **`clean_up()` drops only watches whose model is gone.** It runs after every `calculate()` and removes entries whose model is no longer the instance in `model.models` (e.g. after a rebuild), re-firing the chart-index rebuild in typed mode when it drops something. A merely **disabled** model keeps its watch: while it is off the typed path writes `0`, the object paths omit its key and the slow path skips it, so a model switched back on (ventilator, ECLS) is charted again, and the forced `Heart.ncc_*` watches can never be dropped.
 - **Two divergent collection paths.** With a `ChannelWriter` attached and `rt_active` true, the fast stream is packed into a Float64 ring (no per-sample object allocation). Offline `calculate()` and legacy mode keep using `collected_data`, so `get_model_data()` still returns rows. Slow data always uses the object buffer.
 - **`_channels` / `_on_chart_registry` are non-enumerable** on purpose: `get_model_state` posts the whole model graph (which reaches the collector through every component's `_model_engine` back-reference), and these function-bearing fields must not be structure-cloned.
+- **The first sample comes one interval in:** the counters start at 0, so a 1 s calculation from build yields ~199 fast rows and the first slow row only after the next step.
+- **Buffers grow until drained.** `calculate()` drains them at its end and posts them as `data` / `data_slow` messages; a caller that steps the engine without draining keeps every row.
 - **Time is rounded** to 4 decimals (`Math.round(model_clock * 10000) / 10000`) before being stored.
 
 ````
@@ -4532,155 +4308,146 @@ This is the read side of the model contract; the write side (deferred mutation o
 ### FILE: explain-engine/docs/Drugs.md
 
 ````markdown
-# Drugs (pharmacology PK/PD)
+# Drugs
 
-The `Drugs` model is the **pharmacology PK/PD controller** — a process/controller model in the same
-family as [`Hormones`](./Hormones.md) and `Ans`. It holds **no blood of its own**, resolves
-references to other models **lazily** (the blood compartments are built by [`Circulation`](./Circulation.md)
-after this model inits), runs each step, and **owns its effector channels while enabled** (releasing
-them once to neutral on disable, gated by `drugs_running`). Default config is **neutral**: with no
-drug present every concentration is `0`, so every `*_drug_factor` reads `1.0` (no effect) and a
-scenario that ships a `Drugs` model behaves identically until a dose is given.
+`Drugs` is the pharmacology controller (PK/PD).
+- **Dosing:** IV boluses and weight-based infusions add drug to a central vein.
+- **Transport:** the drug spreads with the blood through every compartment's `drugs` dictionary.
+- **Elimination:** a whole-body term everywhere plus organ clearance in the kidney, liver and gut capillaries.
+- **Effects:** each drug acts on heart rate, contractility, relaxation, vascular resistance and ductal patency through sigmoid Emax curves, summed over the drugs.
 
-The novelty versus `Hormones` is that the "signal" being controlled is an actual **drug mass that
-rides the blood circuit** — `Drugs` does not transport anything itself; it seeds a drug key into
-every blood compartment's `drugs{}` dict and lets the engine's existing `volume_in` mixing advect it,
-exactly as Na/K solutes propagate (see [`BloodCapacitance`](./BloodCapacitance.md)).
+It holds no blood. With no drug present it does nothing and its effects sit at 1.
 
-## Per-drug causal loop
+## Physiology
+
+An IV drug mixes into the central venous blood, reaches the heart and arterial tree within seconds, and is cleared by metabolism, mostly in the liver, kidney and the vessel walls. The plasma concentration settles where the infusion rate equals clearance; its half-life sets how fast it rises and falls.
+
+The effect follows the concentration at the receptor along a sigmoid dose–response curve (Emax, EC50, Hill slope):
+- **Adrenaline:** β1 (heart rate, contractility, faster relaxation) at low doses, plus α1 vasoconstriction at higher ones.
+- **Noradrenaline:** mainly α1 vasoconstriction.
+- **Prostaglandin E1:** keeps the ductus arteriosus open in duct-dependent heart disease. It is cleared largely in one pass through the lungs, hence the continuous infusion.
+
+## Inheritance
 
 ```
-SOURCE (dosing)          TRANSPORT (free)            SINK (clearance)            BIOPHASE         EFFECT (summed)
-injection_site.drugs{}   volume_in mixing carries    diffuse global term on      optional ke0     sigmoid Emax/Hill per drug
-  bolus    C += dose/vol the seeded drug key around  EVERY compartment  +        effect-comp lag  SUMMED onto shared channels:
-  infusion C += rate·wt  the whole circuit, by       organ-localized intrinsic   dCe/dt =         Heart.hr_drug_factor   (β1 chrono)
-           /60·dt/vol     incoming-volume fraction    clearance at named sites    ke0·(C−Ce)       chamber.el_max_drug_factor (β1 ino)
-  (mcg → ng/mL)          (drugs ride blood, free)    (KID_CAP/LS_CAP, perf.-scl.) → hysteresis    Circulation.svr_factor_drug (α1)
-                                                                                                   Pda.diameter_drug_factor (PGE1)
+BaseModelClass
+  └── Drugs
 ```
 
-- **SOURCE** — dosing injects drug mass into the `injection_site` compartment's `drugs{}` dict
-  (default `IVCI`, a central vein). A **bolus** adds `dose / vol` (dose in mcg, vol in L → ng/mL); a
-  weight-based **infusion** adds `(rate · weight / 60) · dt / vol` each step (rate in mcg/kg/min).
-- **TRANSPORT** — handled entirely by the engine. `Drugs` only **seeds** the drug key (value `0.0`)
-  into every blood-carrying compartment once (`_seed_drugs`, lazily on first step); the existing
-  `volume_in` mixing then advects it for free, like solutes. Blood model types that participate:
-  `BloodVessel`, `HeartChamber`, `BloodCapacitance`, `BloodTimeVaryingElastance`, `BloodPump` —
-  except compartments flagged `blood_pool: false` (the `URINE` collection compartment, set by
-  `Kidneys`), which are not blood and are neither seeded, cleared nor scanned.
-- **SINK** — elimination is a **diffuse first-order** term (`clearance.global`, 1/s, e.g. COMT/MAO/
-  uptake) decaying the drug on **every** compartment, **plus** organ-localized **intrinsic clearance**
-  (`clearance.sites`, 1/s) at named clearing compartments (e.g. `KID_CAP` renal, `LS_CAP` hepatic).
-  Because those organs are continuously perfused, the localized term behaves as a **well-stirred
-  organ model**: whole-body clearance scales with organ blood flow — if perfusion falls the drug
-  lingers, exactly like real renal/hepatic clearance. Clearance is physiology, not a controller: it
-  **runs even when `drugs_running` is false**, so a stopped controller does not freeze drug in the
-  blood. A `fixed_composition` compartment (an infinite reservoir) is skipped by the global term — its
-  concentration is held. Concentrations that fall below `1e-6` ng/mL are zeroed so the model can go
-  idle.
-- **BIOPHASE** — an optional effect compartment per drug, `dCe/dt = ke0·(C_site − Ce)`. With
-  `ke0 > 0` the PD map is driven by the lagged biophase concentration `Ce`, giving onset/offset
-  **hysteresis** (effect peak trails plasma peak). `ke0 = 0` (default) → PD uses the effect-site conc
-  directly.
-- **EFFECT** — each drug contributes an independent sigmoid `effect = emax·c^n / (ec50^n + c^n)`
-  (`_emax`), and contributions are **summed across all enabled drugs** onto the shared
-  `*_drug_factor` channels, so drugs **compose additively** rather than overwrite. `_emax` returns
-  `0` for any effect a drug leaves undefined (`emax` undefined), so drugs compose without every drug
-  defining every channel.
+## Properties
 
-The effect-site concentration is read from the `effect_site` compartment (default `AA`, a systemic
-artery). Concentration unit convention throughout: **mcg/L ≡ ng/mL** (dose in mcg, blood volumes in L).
+### Config (set in the definition JSON)
 
-## Effector channels (owned, default-neutral)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `drugs_running` | boolean | `true` | Effect switch (off releases the effects once; clearance keeps running). |
+| `injection_site` | – | `"IVCI"` | Compartment receiving boluses and infusions. |
+| `effect_site` | – | `"AA"` | Compartment whose concentration drives the effects. |
+| `heart_name`, `circulation_name` | – | `"Heart"`, `"Circulation"` | Effect targets. |
+| `drug_defs` | {drug: definition} | 3 drugs | Per-drug PK/PD (below). Built-in drugs a scenario lacks, and parameters a stored definition predates, are filled in from the code at build. |
+| `infusions` | {drug: mcg/kg/min} | `{}` | Running infusions (saved with the state). |
 
-| Channel | Target | Pharmacology |
+**A drug definition:**
+- `enabled`;
+- `clearance.global`: 1/s, on every compartment;
+- `clearance.sites`: {compartment: 1/s}, organ clearance;
+- `ke0`: 1/s, effect-compartment rate; 0 = none;
+- per effect `x` (`hr`, `cont`, `lus`, `svr`, `pda`): `x_emax` (maximal fractional change), `x_ec50` (ng/mL) and `x_hill`.
+
+| Drug | Clearance global / sites (1/s) | HR | Inotropy | Lusitropy | SVR | Duct |
+|---|---|---|---|---|---|---|
+| adrenaline | 0.022 / KID 0.6, LS 0.9, INT 0.4 | +0.6 @ 20 | +0.8 @ 25 | −0.25 @ 25 | +0.5 @ 40 | – |
+| noradrenaline | 0.018 / KID 0.6, LS 1.0, INT 0.4 | +0.1 @ 30 | +0.35 @ 30 | −0.12 @ 30 | +0.9 @ 25 | – |
+| pge1 | 0.08 / – | – | – | – | – | +1.5 @ 0.02 |
+
+(emax @ EC50 in ng/mL; Hill 1.5 for the cardiac effects, 2 for SVR, 1 for the duct.)
+
+### Outputs
+
+| Property | Unit | Description |
 |---|---|---|
-| `hr_drug_factor` | [`Heart`](./Heart.md)`.hr_drug_factor` | β1 chronotropy (heart rate) |
-| `cont_drug_factor` | each chamber's `el_max_drug_factor` (via the Heart inotropy path, mirroring Mob) | β1 inotropy (contractility) |
-| `svr_drug_factor` | [`Circulation`](./Circulation.md)`.svr_factor_drug` | α1 systemic vasoconstriction |
-| `pda_drug_factor` | [`Pda`](./Pda.md)`.diameter_drug_factor` | ductal patency (PGE1) |
+| `concentrations` | {drug: ng/mL} | Effect-site concentration. |
+| `biophase` | {drug: ng/mL} | The concentration driving the effect (the effect compartment when `ke0` > 0). |
+| `conc_inj`, `conc_eff` | ng/mL | Adrenaline at the injection and effect sites (convenience read-outs). |
+| `hr_drug_factor`, `cont_drug_factor`, `lus_drug_factor`, `svr_drug_factor`, `pda_drug_factor` | – | Summed effects (1 = none). |
 
-Inotropy is fanned to every heart chamber through the `Heart`'s resolved chamber refs
-(`_lv`/`_rv`/`_la`/`_raivci`/`_rasvc`/`_ra`), exactly as `Mob` writes `el_max_mob_factor`. The SVR
-channel is independent of the ANS and Hormones channels (`svr_factor_art/_ven`), so they compose.
+## Calculation
 
-## Drugs currently defined (`drug_defs`)
+Each step (ng/mL = mcg/L throughout):
+1. **Idle check.** With no infusion and no drug in the blood, nothing is computed (the blood is re-scanned every 1 s, since drug can also arrive another way).
+2. **Infusions:** `rate · weight / 60 · dt` mcg into the injection site.
+3. **Elimination** (also while `drugs_running` is off): every compartment loses `clearance.global · c · dt`; the clearing organs lose their site rate as well. That organ clearance depends on how much drug the perfusion brings, so it falls with organ blood flow. Values below 1e-6 ng/mL are zeroed.
+4. **Effects** (while running), per enabled drug, from the effect-site concentration (lagged by `ke0` when set):
+   ```
+   effect = emax · cⁿ / (EC50ⁿ + cⁿ),     factor = 1 + Σ over drugs
+   ```
+   - `Heart.hr_drug_factor`;
+   - each chamber's `el_max_drug_factor` (inotropy) and `el_min_drug_factor` (lusitropy; < 1 = faster relaxation);
+   - `Circulation.svr_factor_drug` (its own SVR channel, see [Circulation](./Circulation.md));
+   - `Pda.diameter_drug_factor`.
 
-| Drug | PK (`clearance`) | PD effects |
-|---|---|---|
-| `adrenaline` | global 0.022 + sites KID_CAP 0.6 / LS_CAP 0.9 / INT_CAP 0.4 | HR (ec50 20, emax 0.6), cont (ec50 25, emax 0.8), SVR (ec50 40, emax 0.5) |
-| `noradrenaline` | global 0.018 + sites KID_CAP 0.6 / LS_CAP 1.0 / INT_CAP 0.4 | predominantly α1 SVR (ec50 25, emax 0.9), modest cont (emax 0.35), minimal HR (emax 0.1) |
-| `pge1` | global 0.08, no sites | **ductal patency only** — `pda_ec50 0.02`, `pda_emax 1.5`, `pda_hill 1.0` |
+**Dosing API:**
+- `administer_bolus(drug, dose_mcg)`: adds `dose / volume` to the injection site;
+- `set_infusion(drug, rate)`: mcg/kg/min, 0 stops it;
+- `set_drug_param(drug, "path", value)`: e.g. `"hr_emax"`, `"clearance.global"`.
 
-**PGE1 (prostaglandin E1 / alprostadil)** is the duct-dependent-CHD agent: its **only** effect is
-ductal patency through the channel `Pda.diameter_drug_factor`. Its very low `pda_ec50` (0.02 ng/mL)
-reflects a **potent + heavily cleared** drug — extensive pulmonary first-pass metabolism (~80% per
-lung pass, hence the high `global` clearance, short half-life, and need for continuous infusion)
-yields a low effect-site conc (~0.01–0.05 ng/mL at a clinical 0.01–0.05 mcg/kg/min infusion) that
-sits on the sigmoid's rising limb. `pda_emax 1.5` allows up to a ~2.5× patency factor at saturation
-(capped at the anatomic maximum inside [`Pda`](./Pda.md)). It defines no HR/inotropy/SVR params — and
-because `_emax` is undefined-safe, drugs **compose without every drug defining every channel**
-(PGE1 has only `pda_*`; the catecholamines only `hr_*`/`cont_*`/`svr_*`).
+## Factor system
 
-### The `init_model` merge
+It owns the drug channels above: `hr_drug_factor`, `el_max_drug_factor`, `el_min_drug_factor`, `svr_factor_drug` and `diameter_drug_factor`. Effects of several drugs add.
 
-`init_model` captures the constructor's full built-in `drug_defs`, lets `super.init_model(args)`
-overwrite it with whatever a scenario baked, then merges:
+## Inputs and outputs
 
-```js
-this.drug_defs = { ...default_defs, ...this.drug_defs };
+- **Reads:** the compartments' `drugs`; `model.weight`.
+- **Writes:** the compartments' `drugs` (seeded with every drug key, dosing, clearance); the channels above.
+- **Written by:** the user and bot (dosing, parameters).
+- **Read by:** Heart, the chambers, Circulation, Pda (the channels); `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **The catecholamines are too weak at clinical doses.** Measured in term_neonate, adrenaline for 5 min:
+
+  | Rate | Arterial concentration | HR | MAP |
+  |---|---|---|---|
+  | 0.1 mcg/kg/min | 0.89 ng/mL | 120 → 121 | unchanged |
+  | 0.5 mcg/kg/min | 4.5 ng/mL | 120 → 125 | 59.5 → 60.1 |
+
+  The EC50s (20–40 ng/mL) sit far above these concentrations, and the arterial half-life after stopping is 20 s (adrenaline ~2 min). Both are listed for the re-validation, to recalibrate against neonatal dose–response data.
+- **PGE1 cannot reopen a closed duct** (see [Pda](./Pda.md)); its systemic vasodilation and apnoea are not modelled.
+- **No receptor down-regulation, no tachyphylaxis;** effects add without interaction.
+- **Effect at the arterial concentration** by default (no biophase lag unless `ke0` is set).
+- **Drugs live in the blood only** (no tissue distribution volume).
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Drugs` (trimmed to one drug):
+
+```json
+{
+  "name": "Drugs",
+  "model_type": "Drugs",
+  "is_enabled": true,
+  "drugs_running": true,
+  "injection_site": "IVCI",
+  "effect_site": "AA",
+  "drug_defs": {
+    "pge1": {
+      "enabled": true,
+      "clearance": { "global": 0.08, "sites": {} },
+      "ke0": 0,
+      "pda_ec50": 0.02, "pda_emax": 1.5, "pda_hill": 1
+    }
+  },
+  "infusions": {}
+}
 ```
 
-Scenario tuning wins for drugs it defines, but any **newly-added built-in drug** the baked state
-predates (e.g. `pge1`, added after older scenarios were serialized) is still present — so new drugs
-become available in **old scenarios without re-baking the JSON**.
+## Usage in the scenarios
 
-## Dosing API
+One instance in every scenario with adrenaline, noradrenaline and PGE1 defined and no infusion running.
 
-Callable via `callModelFunction` / the `TaskScheduler` (see the engine docs):
+## References
 
-| Method | Effect |
-|---|---|
-| `administer_bolus(drug, dose_mcg)` | instantaneous IV bolus — adds `dose_mcg / vol` to the injection-site `drugs{}` |
-| `set_infusion(drug, rate_mcg_kg_min)` | start/stop a weight-based continuous infusion; `rate 0` stops it |
-| `set_drug_param(drug, param, value)` | set a PK/PD constant via a **dotted path** into the per-drug def (e.g. `"hr_emax"`, `"ke0"`, `"clearance.global"`) — the nested dict is unreachable by the flat `setPropValue` path |
-
-## Read-outs
-
-| Read-out | Meaning |
-|---|---|
-| `concentrations` | `{ drug: effect-site conc (ng/mL) }` |
-| `biophase` | `{ drug: effect-compartment conc Ce (ng/mL) }` (= site conc when `ke0 = 0`) |
-| `conc_inj` / `conc_eff` | adrenaline injection-site / effect-site conc (convenience) |
-| `hr_drug_factor` / `cont_drug_factor` / `svr_drug_factor` / `pda_drug_factor` | applied (summed) effector factors (1.0 = no effect) |
-| `infusions` | active continuous infusions `{ drug: rate_mcg_kg_min }` |
-
-## Idle fast path
-
-With no infusion running and no drug present in the blood, `calc_model` does no per-step work: it
-releases the owned channels once (if they were active), then only **re-scans** the blood every
-`_scan_interval` (1 s) for any defined drug (a drug can also arrive through a fluid or a direct write,
-not only through the dosing API). When the scan finds drug, or an infusion starts, the full path
-(source, clearance, effect) resumes; it drops back to idle once clearance has taken every
-concentration below the floor.
-
-## Notes / scope
-
-- While enabled, `Drugs` **owns** the four `*_drug_factor` channels (`Heart.hr_drug_factor`, each
-  chamber's `el_max_drug_factor`, `Circulation.svr_factor_drug`, `Pda.diameter_drug_factor`) — manual
-  edits are overwritten each step. The clean "off" switch is `drugs_running = false`, which releases
-  all owned channels back to `1.0` exactly once.
-- **Known limitation — PK calibration is parked.** Adrenaline's global clearance (0.022 /s) gives a
-  plasma half-life of ~30 s (ln 2 / 0.022 ≈ 31 s), against ~2–3 min clinically. PGE1's pulmonary
-  first-pass metabolism is modelled as a **global** rate (0.08 /s on every compartment), not as an
-  extraction across the lung. Retuning the clearances is a separate calibration project, to be done
-  together with the EC50s (which were set against the current fast clearance).
-- Adding a drug = a new `drug_defs` entry; it is seeded, transported, cleared and aggregated
-  automatically. Surfacing per-drug params + dosing methods to the UI registry is the next milestone.
-
-## See also
-[`Heart`](./Heart.md) · [`Circulation`](./Circulation.md) · [`Pda`](./Pda.md) ·
-[`Hormones`](./Hormones.md) · [`BloodCapacitance`](./BloodCapacitance.md)
+No literature values yet; the PK/PD constants are to be recalibrated in the re-validation.
 
 ````
 
@@ -4695,6 +4462,14 @@ It is a **coordinator** — it owns the circuit sub-models (drainage cannula, in
 oxygenator, outflow tubing, return cannula, plus a sweep-gas side) and, each update tick, drives their
 resistances, enabled/clamped states, pump pressure and gas-exchange constants, then reads back
 smoothed pressures, flow and blood gases.
+
+## Physiology
+
+Extracorporeal life support (ECLS, ECMO) takes over gas exchange, and in the veno-arterial form also the circulation, while the lungs or heart recover. Neonatal indications include severe persistent pulmonary hypertension, meconium aspiration, congenital diaphragmatic hernia and cardiac failure.
+- **Veno-arterial (VA):** blood is drained from the right atrium or a large vein, pumped through a membrane oxygenator and returned to the aorta (the carotid in neonates). It supports heart and lungs.
+- **Veno-venous (VV):** blood is drained and returned to the right atrium, typically through one double-lumen cannula. It supports only the lungs; recirculation of returned blood into the drainage limb limits its efficiency.
+
+Circuit flow is limited by venous drainage (cannula size, the patient's volume) as much as by the pump. Oxygenation depends on blood flow; CO2 removal depends on the sweep-gas flow.
 
 ## Inheritance
 
@@ -4796,10 +4571,12 @@ Sub-model references (`_ecls_drainage`, `_ecls_pump`, …, `_ecls_gasex`) are re
 | `oxy_o2_cap` / `oxy_co2_cap` | mmol/s | Active O₂/CO₂ membrane transfer ceilings, pushed onto `ECLS_GASEX` |
 | `oxy_surface_area` / `oxy_rated_flow` | m², L/min | Selected oxygenator's surface area / rated blood flow (informational) |
 | `oxygenators` | dict | Oxygenator device library (surface area, rated flow, `o2_cap`/`co2_cap`, prime and blood-side pressure drop `dp_a` per device) |
-| `drainage_cannula_diameter` / `_length` | m | Drainage cannula geometry (copied from the selected library entry) |
-| `return_cannula_diameter` / `_length` | m | Return cannula geometry (copied from the selected library entry) |
-| `tubing_in_diameter`/`_length`, `tubing_out_diameter`/`_length` | m | Tubing geometry; sets the tubing resistances (Poiseuille, blood) |
-| `cannula_sizes_single`, `cannula_size_double` | Fr | Legacy size lists, not used by the engine |
+| `drainage_cannula_diameter`, `drainage_cannula_length` | m | Drainage cannula geometry (copied from the selected library entry) |
+| `return_cannula_diameter`, `return_cannula_length` | m | Return cannula geometry (copied from the selected library entry) |
+| `tubing_in_diameter`, `tubing_in_length`, `tubing_out_diameter`, `tubing_out_length` | m | Tubing geometry; sets the tubing resistances (Poiseuille, blood) and volumes |
+| `pump_max_rpm` | rpm | Maximum speed of the selected pump (informational, from the pump library) |
+| `pressure_avg_window`, `flow_avg_window` | samples | Window of the pressure and flow moving averages (default 400, ≈6 s at the 0.015 s update) |
+| `prev_fio2`, `prev_fico2` | – | Last applied sweep-gas FiO2 / FiCO2; a change rebuilds the gas-source composition |
 | `return_cannulas`, `drainage_cannulas` | dict | VA cannula libraries (inner diameter, length, water-chart fit `dp_a`/`dp_b` per device) |
 | `dl_cannulas` | dict | Double-lumen (VV) cannula library: per device a `drainage` and a `return` lumen fit (`dp_a`/`dp_b`) |
 
@@ -4824,8 +4601,8 @@ Sub-model references (`_ecls_drainage`, `_ecls_pump`, …, `_ecls_gasex`) are re
 
 ### Internal (`_`-prefixed) and moving averages
 
-`prev_fio2` / `prev_fico2` / `_prev_gas_temp` / `_prev_gas_humidity` detect sweep-gas changes so the
-gas-source composition is only rebuilt when one of them changes. `_stopped` makes the stop work
+`prev_fio2` / `prev_fico2` (above) with `_prev_gas_temp` / `_prev_gas_humidity` detect sweep-gas
+changes, so the gas-source composition is only rebuilt when one of them changes. `_stopped` makes the stop work
 edge-triggered (see below). `_update_interval` (0.015 s) and `_update_counter` gate the main
 control block; `_blood_comp_interval` (1.0 s) and `_blood_comp_counter` gate the blood-gas read-outs.
 `pressure_avg_window` / `flow_avg_window` (default 400 samples, ≈6 s at the 0.015 s update rate)
@@ -5045,9 +4822,26 @@ The other H-Q coefficients are **fit to published pump characteristics** (`head 
 hq_b·(rpm/1000)·Q`, with `hq_c = 0`): the deadhead (`Q=0`) scaled as rpm² fixes `hq_a`, and the rated
 flow at max rpm fixes the Euler-slip falloff `hq_b`. For the Rotaflow the deadhead is fixed by two
 independent data points (~108 mmHg shut-off at 2000 rpm and ~700 mmHg at 5000 rpm → `hq_a ≈ 28`); the
-others are anchored to their deadhead magnitude and rated flow (see [BloodPump](./BloodPump.md) for the
-coefficient table and sources). The linear `N·Q` falloff keeps a finite slope at low flow, so raising
-afterload reduces flow across the operating range. Note the **circuit** (cannula size, venous return)
+others are anchored to their deadhead magnitude and rated flow. The linear `N·Q` falloff keeps a finite
+slope at low flow, so raising afterload reduces flow across the operating range.
+
+| Pump | `hq_a` | `hq_b` | `hq_c` | deadhead @ max rpm | rated flow |
+|---|---|---|---|---|---|
+| Abbott PediMag | 21.16 | 5.2 | 15.4 | ~640 mmHg @5500 | ~1.5 L/min |
+| Abbott CentriMag | 23.17 | 0.85 | 0.38 | ~710 mmHg @5500 | 10 L/min |
+| Getinge Rotaflow RF-32 | 28 | 13.0 | 0 | ~700 mmHg @5000 | ~10 L/min |
+| Medtronic Bio-Pump BP-50 | 20 | 28.9 | 0 | ~180 mmHg @3000 | neonatal |
+
+The CentriMag is fitted to the manufacturer's H-Q curves (CentriMag Circulatory Support System
+Operation Manual PL-0047 Rev 11, Fig. 14, pump only, blood analog 4.02 cP), by least squares over points
+read off all eight rpm curves (2000–5500 rpm), within 4.8 mmHg RMS. The curves are nearly flat with flow
+(≈ −6 mmHg per L/min at 3000 rpm), so `hq_b`/`hq_c` are small. The manual's "maximum pressure head of
+600 mmHg" is a rated limit; the 5500 rpm curve starts at ≈ 710 mmHg. The Rotaflow and Bio-Pump
+coefficients are anchored to each pump's published deadhead and rated flow; they are **not** digitized
+from the full manufacturer H-Q figures (which were not accessible), so their mid-curve shape is the
+theoretical Euler-slip (linear) default. Sources: Wang et al 2020 *Artif Organs* (Rotaflow / CentriMag /
+PediMag paediatric ECMO characterisation), the ROTAFLOW/CentriMag adult ECLS comparison, and the
+manufacturers' rated-flow specifications. Note the **circuit** (cannula size, venous return)
 sets the achievable flow ceiling, so a small patient stays preload-limited (e.g. ~0.5 L/min for a term
 neonate) regardless of pump rating — afterload changes then move flow little until the preload limit is
 relieved.
@@ -5133,6 +4927,13 @@ Device-level fields from `term_neonate.json` (the full block nests eleven `ECLS_
 model's `is_enabled`: with `is_enabled: false`, `calc_model` never runs, so nothing manages the
 sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
 
+## Inputs and outputs
+
+- **Reads:** its circuit compartments (pressures, flows, compositions via [`calc_blood_composition`](./BloodComposition.md)); the drainage and return site compartments.
+- **Writes:** its circuit components: cannula and tubing resistances, the pump's `p1_ext`/`p2_ext`, enabled and clamp states, the oxygenator exchanger (`dif_o2`, `dif_co2`, `o2_cap`, `co2_cap`), the sweep-gas source composition and valves; `ECLS_OXY` temperature control (heater-cooler).
+- **Written by:** the user and bot (cannulation, pump, sweep gas, heater-cooler); the app's ECLS panel.
+- **Read by:** the app's ECLS panel and diagram, `DataCollector` watchers.
+
 ## Usage in the model
 
 - Used to model VA/VV ECMO support of a patient. For VA, set `drainage_site`/`return_site` to the
@@ -5146,7 +4947,10 @@ sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
   compartments, so circuit O₂/CO₂ propagate back into the patient via the standard
   [BloodCapacitance](./BloodCapacitance.md) mixing.
 
-## Notes & caveats
+## Assumptions and limitations
+
+- **No recirculation model beyond the anatomy:** in VV the returned blood re-enters the drainage only as far as the mixing in the right atrium carries it; there is no separate recirculation fraction.
+- **No circuit thrombosis, haemolysis, air or heparin effects.**
 
 - **Stopping the circuit disables it.** The off-branch sets `is_enabled = false` on all sub-models
   (both sweep-gas valves included), so a stopped ECLS no longer conducts passive flow, and releases the
@@ -5157,16 +4961,15 @@ sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
   [`Thermoregulation`](./Thermoregulation.md) (which resumes warming `ECLS_OXY` toward core).
 - **References are resolved lazily** each tick while running; a missing sub-model skips the tick rather
   than dereferencing undefined.
-- **Pump logic is mirrored in `BloodPump`.** The H-Q head + roller flow-source model in this device is
-  mirrored in [`BloodPump.calc_pressure`](./BloodPump.md) (kept consistent, though no scenario uses that
-  standby class); `ECLS_PUMP` is a [`BloodVessel`](./BloodVessel.md) driven externally rather than a
-  `BloodPump`.
+- **The pump is a `BloodVessel` driven by this device.** `ECLS_PUMP` is a [`BloodVessel`](./BloodVessel.md);
+  the H-Q head and the roller flow source are applied by `Ecls` through its `p1_ext`/`p2_ext`. (A standby
+  `BloodPump` class that mirrored this logic was removed in the v1.0 documentation pass.)
 - **Flow is preload/afterload limited by the *circuit*, not the pump rating.** The H-Q curve sets the
   head; the cannula sizes and venous return set the achievable flow. A term neonate stays ~0.5 L/min
   even at high rpm (correct); increasing `pump_rpm` past the preload limit just raises head, not flow.
 - **`flow` and `flow_avg` are in L/min** (`ECLS_RETURN.flow × 60`).
 
-## Changelog
+## History
 
 ### Crescent RA double-lumen cannulas (2026-10-12)
 
@@ -5302,7 +5105,7 @@ day (commits span 21:00–23:29), so this one date covers every change below. Co
   characteristic** (`head = hq_a·(rpm/1000)² − hq_b·(rpm/1000)·Q`), a **roller flow-source** controller,
   and a **pump device library** (PediMag, CentriMag, Rotaflow RF-32, Bio-Pump BP-50, generic roller).
 - H-Q coefficients **fit to published characteristics** — `hq_a` from the rpm²-scaled deadhead
-  (Rotaflow anchored by two independent points), `hq_b` from rated flow. See [BloodPump](./BloodPump.md).
+  (Rotaflow anchored by two independent points), `hq_b` from rated flow. See [Pump device library](#pump-device-library).
 
 ### Oxygenator gas transfer (`494bb15`, `9602a13`, `bd22b0a`)
 
@@ -5326,6 +5129,10 @@ day (commits span 21:00–23:29), so this one date covers every change below. Co
 - **Centralized** the catalogue in the constructor and removed the per-scenario embedded copies, so
   every scenario sees the full catalogue and any cannula can be selected in any scenario
   (behaviour-neutral: all scenarios resolve to their shipped resistances).
+
+## References
+
+The cannula, pump and oxygenator libraries are calibrated to the manufacturers' pressure-drop, head–flow and transfer charts (Bio-Medicus, Avalon Elite, Crescent, CentriMag, PediMag, Quadrox-i, Nautilus); see [Circuit calibration](#circuit-calibration).
 
 ````
 
@@ -6063,148 +5870,122 @@ minutes 8–10. The oxygenation ordering holds: UV 89 > IVC ~76 > AA ~70 > DAo/U
 ````markdown
 # Fluids
 
-The `Fluids` model administers **intravenous fluids** — boluses and infusions — into a blood
-compartment over a set time. It is a small scheduler: a call queues a fluid, and each update step it
-drips a fraction of that fluid's volume (with its solute composition) into the target compartment via
-the compartment's `volume_in`. It holds no volume itself; it pushes volume and composition onto an
-existing blood compartment.
+`Fluids` gives fluids into the blood: timed **boluses and infusions** of named fluids (saline, Ringer's lactate, packed red cells, albumin, dextrose), and a continuous **maintenance** intake that replaces what the kidneys excrete. Each fluid is a composition (solutes in mmol/L, albumin in g/L, no O2 or CO2) mixed into a blood compartment through its normal `volume_in`, so everything it carries spreads with the circulation.
+
+## Physiology
+
+Fluid therapy changes the blood in three ways:
+- **volume:** preload, cardiac output, blood pressure;
+- **dilution:** haemoglobin, albumin and everything the fluid lacks;
+- **composition:**
+  - normal saline (154 mmol/L Na and Cl) lowers the strong ion difference and causes a hyperchloraemic acidosis;
+  - Ringer's lactate is "balanced" (its lactate is metabolised to bicarbonate);
+  - packed red cells raise haemoglobin;
+  - 20 % albumin raises the oncotic pressure;
+  - dextrose provides glucose.
+
+A newborn's maintenance intake (feeds or IV fluid) replaces urine, insensible losses and growth.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Fluids   (IV fluid/infusion scheduler)
+  └── Fluids
 ```
-
-Fluids extends `BaseModelClass` directly. It owns no compartment and declares no `components`; it
-mutates the blood compartments named as infusion sites through their `volume_in` method (see
-[`BloodCapacitance`](./BloodCapacitance.md)).
-
-## What it models
-
-A queue of in-progress infusions. Each queued fluid carries a target site, a per-step volume
-increment, a remaining time, and a solute composition drawn from the `fluids` library. Every update
-interval the scheduler delivers each fluid's increment and advances its timer, removing fluids whose
-time has elapsed.
 
 ## Properties
 
-### Configuration (independent)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `fluids_temp` | °C | Temperature stamped on every administered fluid (default 37.0) |
-| `fluids` | object | Library `{ fluidType: { solute: concentration, … } }` of available fluids |
-| `default_volume` | mL | Default bolus volume offered to the UI |
-| `maintenance_rate` | mL/kg/h | Continuous maintenance intake (default `0` = off) |
-| `maintenance_fluid` | — | Key in `fluids` giving its composition (default `"maintenance"`; missing = water) |
-| `maintenance_site` | — | Compartment receiving it (default `IVCI`) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `fluids` | {name: {solute: value}} | `{}` | The fluid library (see the table below). |
+| `fluids_temp` | °C | 37 | Temperature of given fluids. |
+| `maintenance_rate` | mL/kg/h | 0 | Continuous maintenance intake. term 1.35, preterm and fetal 3. |
+| `maintenance_fluid` | – | `"maintenance"` | Its composition (a key in `fluids`; missing = water). |
+| `maintenance_site` | – | `"IVCI"` | Compartment receiving it. |
 
-### Local / internal (`_`-prefixed)
+### State (saved with the state)
 
-| Property | Unit | Description |
-|---|---|---|
-| `_update_interval` | s | Processing cadence (`0.015`) |
-| `_update_counter` | s | Accumulates `_t` toward `_update_interval` |
-| `_running_fluid_list` | array | Queue of in-progress fluid objects |
-| `_default_time` | s | Vestigial default infusion time (unused) |
-| `_default_type` | string | Vestigial default fluid type (unused) |
+| Property | Description |
+|---|---|
+| `running_fluids` | Boluses and infusions in progress: `{vol, time_left, delta, site, to2, tco2, temp, solutes, drugs}` each. A state saved mid-bolus finishes it after reload. |
 
-Fluids publishes no dependent read-out properties.
+### The fluid library (every scenario)
 
-## Administering a fluid — `add_volume(volume, in_time, fluid_in, site)`
+| Fluid | Composition |
+|---|---|
+| `normal_saline` | Na 154, Cl 154 |
+| `ringers_lactate` | Na 130, Cl 109, K 4, Ca 1.4, lactate 28 |
+| `packed_cells` | Hb 12 mmol/L (~19 g/dL), Na 140, K 4.5, Cl 105, glucose 25: a fresh unit with a plasma-equivalent base |
+| `albumin_20%` | albumin 200 g/L, Na 130, Cl 42, unmeasured anions 32 (the caprylate and tryptophan stabilisers) |
+| `d5`, `d10` | glucose 278, 555 |
+| `maintenance` | per scenario: the resting urine composition (term Na 69, K 20.6, Cl 64, …), so intake balances output |
 
-| Argument | Default | Meaning |
-|---|---|---|
-| `volume` | — | volume to give, in **mL** |
-| `in_time` | 10 | duration over which to give it, in **seconds** |
-| `fluid_in` | `"normal_saline"` | fluid type — key into the `fluids` dictionary for the solute mix |
-| `site` | `"VLB"` | name of the target blood compartment |
+## Calculation
 
-It builds a fluid object and pushes it onto the running list:
+**`add_volume(volume, in_time = 10, fluid_in = "normal_saline", site = "VLB")`** (mL, s) queues a fluid: `delta = volume / (in_time / 0.015)` per update, with the fluid's composition copied from the library (an unknown name gives pure water).
 
-```
-vol       = volume / 1000                                  (mL → L)
-time_left = in_time                                        (s)
-delta     = (volume/1000) / (in_time / _update_interval)   (L delivered per processing step)
-solutes   = { ...fluids[fluid_in] }                        (composition of the chosen fluid)
-to2 = tco2 = 0,  temp = fluids_temp,  drugs = {}
-```
+**Every 15 ms:**
+1. Finished entries are dropped. For each running entry, `site.volume_in(delta, fluid)` mixes the increment in, then `time_left` counts down. A missing site is skipped.
+2. **Maintenance:** `maintenance_rate · weight / 1000 · Δt / 3600` L of the maintenance fluid into `maintenance_site`.
 
-`delta` is sized so the full volume is delivered across the `in_time / _update_interval` processing
-steps. An unknown `fluid_in` yields empty solutes (`{...undefined}` → `{}`), i.e. a solute-free
-fluid, rather than an error.
+**Effects** (term_neonate, 20 mL/kg over 10 min, read 1 min later):
 
-## Processing — `process_fluid_list` (every `_update_interval`, 0.015 s)
+| Fluid | Hb (mmol/L) | Albumin (g/L) | Na | Lactate | BE | MAP |
+|---|---|---|---|---|---|---|
+| before | 10.0 | 25 | 138 | 1.5 | −2.4 | 58 |
+| normal saline | 8.0 | 20 | 141 | 1.3 | **−7.1** | 62 |
+| Ringer's lactate | 8.0 | 20 | 137 | **4.2** | −4.3 | 61 |
+| 20 % albumin, 5 mL/kg | 9.4 | **35** | 138 | 1.5 | −3.7 | 59 |
+| packed cells, 15 mL/kg | 10.3 | 21 | 139 | 1.4 | +0.2 | 66 |
 
-`calc_model` accumulates `_t` into `_update_counter`; once it exceeds `_update_interval` the counter
-resets and `process_fluid_list` runs:
+## Factor system
 
-1. **Drop finished fluids** — `removeByProperty` filters out any with `time_left ≤ 0`.
-2. **For each remaining fluid:**
-   - Deliver this step's increment: `models[site]?.volume_in(delta, fluid)` — the compartment adds
-     `delta` litres and mixes in the fluid's composition (solutes, temperature, viscosity) by volume
-     fraction. (See [`BloodCapacitance`](./BloodCapacitance.md)'s `volume_in` mixing logic.)
-   - Decrement `vol` by `delta` and advance the timer (`time_left -= _update_interval`); when it
-     reaches 0, zero the delta so no further volume is added before the fluid is removed next cycle.
+None.
 
-The delivery happens **before** the timer/zeroing, so the final increment is actually administered.
+## Inputs and outputs
 
-## Maintenance intake — `process_maintenance`
+- **Reads:** the fluid library; `model.weight`.
+- **Writes:** the target compartment, through `volume_in` (volume and composition).
+- **Written by:** the user and bot (`add_volume`, rates); the scenario generators (maintenance rate and composition).
+- **Read by:** `DataCollector` watchers.
 
-Every update the maintenance fluid flows continuously into `maintenance_site`:
-`dvol = maintenance_rate · weight / 1000 · elapsed / 3600` litres, mixed in with `volume_in` like a
-bolus (no O2/CO2, `fluids_temp`). It stands for enteral feeding / maintenance IV fluid and replaces
-what the kidneys excrete, so blood volume and composition hold at rest. A scenario that sets it to its
-resting urine flow and urine composition is steady by construction; the kidneys then decide whether
-the patient gains or loses volume when perturbed.
+## Assumptions and limitations
 
-## Notes & caveats
-
-- **Full dose is delivered.** The increment is applied before the timer is zeroed; an earlier ordering
-  zeroed the last `delta` before delivering it, losing one step's worth — negligible for a long
-  infusion but significant for a short bolus (a one-step bolus delivered nothing).
-- **Missing target site is skipped** (optional-chaining guard) rather than throwing.
-- **Composition is gas-free.** Administered fluid carries `to2 = tco2 = 0` and no haemoglobin, so a
-  large bolus dilutes the compartment's oxygen/CO₂ content and its Hb; [`Blood`](./Blood.md) derives
-  viscosity from the Hb, so the blood thins too — the intended haemodilution effect.
-- **Vestigial fields.** `fluid.vol` is decremented but not used as a stop condition (delivery is
-  timer-driven); `_default_time` / `_default_type` are unused.
+- **Everything stays in the blood.** There is no interstitial compartment, so all of a crystalloid bolus stays intravascular, where in vivo most leaves within minutes. Dilution and its acid–base effect are therefore stronger than in vivo, and albumin draws no fluid in.
+- **Gas-free fluids:** a bolus dilutes O2 and CO2 content and haemoglobin (and so viscosity), as intended.
+- **Packed cells are a fresh unit:** no storage lesion (high K, low pH, lactate), no citrate effect on calcium.
+- **Ringer's lactate's lactate is cleared by [Lactate](./Lactate.md)** toward its baseline (half-life ~6 min), standing in for hepatic metabolism; no bicarbonate is generated beyond what the lower lactate implies.
+- **Timing:** boluses run on the 15 ms update; the last increment can overshoot by a fraction of a step (< 0.1 %).
 
 ## Example definition (JSON)
 
-From `term_neonate.json`:
+From `term_neonate.json`, `models.Fluids` (trimmed to two fluids):
 
 ```json
 {
   "name": "Fluids",
-  "description": "fluids model",
-  "is_enabled": true,
   "model_type": "Fluids",
-  "components": {},
+  "is_enabled": true,
   "fluids_temp": 37,
   "fluids": {
-    "normal_saline":  { "na": 154, "cl": 154 },
-    "ringers_lactate":{ "na": 130, "cl": 109, "ca": 1.4, "k": 4 },
-    "packed_cells":   { "hemoglobin": 12 },
-    "albumin_20%":    { "albumin": 20 },
-    "d5":             { "glucose": 278 },
-    "d10":            { "glucose": 555 }
+    "normal_saline": { "na": 154, "cl": 154 },
+    "ringers_lactate": { "na": 130, "cl": 109, "ca": 1.4, "k": 4, "lact": 28 }
   },
-  "default_volume": 10
+  "maintenance_rate": 1.352,
+  "maintenance_fluid": "maintenance",
+  "maintenance_site": "IVCI"
 }
 ```
 
-(The adult `adult_female.json` scenario ships the same library with `default_volume: 250`.)
+## Usage in the scenarios
 
-## Usage in the model
+One instance in every scenario with the library above; maintenance 1.35 mL/kg/h (term, fetus_term) or 3 mL/kg/h (preterm, Bischoff, fetal 25/30 wk), each matching its resting urine output.
 
-- One Fluids instance per scenario; the UI exposes `add_volume` (via the model-interface registry) so
-  the user can give boluses/infusions interactively, and scenario events can schedule infusions.
-- Targets any blood compartment by name; the default site `VLB` is the lower-body venous pool.
-- Solute keys in the `fluids` library must match the solute names tracked on the target compartment
-  (`na`, `cl`, `ca`, `k`, `hemoglobin`, `albumin`, `glucose`, …) so they mix correctly through
-  [`BloodCapacitance`](./BloodCapacitance.md)'s composition mixing.
+## References
+
+Standard product compositions. 20 % albumin's anions are an estimate from its charge at 200 g/L plus the stabilisers.
 
 ````
 
@@ -6213,155 +5994,104 @@ From `term_neonate.json`:
 ````markdown
 # Gas
 
-The `Gas` model is a **manager** for the gas-containing compartments — the gas-phase analogue of
-[`Blood`](./Blood.md). It is not itself a compartment: it seeds atmospheric pressure, temperature,
-humidity and the initial gas composition onto every [`GasCapacitance`](./GasCapacitance.md) at build,
-and exposes setters to change those at runtime. Its `calc_model` is empty; the per-compartment
-chemistry is done by `GasCapacitance` and the gas-exchange/diffusion elements.
+`Gas` manages the gas side of the model, the counterpart of [Blood](./Blood.md); it is not a compartment. At build it gives every gas compartment the atmospheric pressure, temperature, humidity and starting composition. At runtime it provides the setters for FiO2, ambient temperature and humidity, and altitude, and it couples the airway's temperature to the body's.
+
+## Physiology
+
+The air a baby breathes is cool and dry: about 20 °C and 50 % humidity in a room, 21 % O2. On its way in, the nose and airways warm it to body temperature and saturate it with water vapour, so alveolar gas is 37 °C and 100 % humid, with a water vapour pressure of ~47 mmHg that dilutes the other gases. Conditioning the gas costs the body heat and water, a real loss in a small preterm infant (which is why gases are heated and humidified on a ventilator).
+
+The partial pressure of inspired O2 is FiO2 × (barometric pressure − water vapour pressure). At altitude, a lower barometric pressure lowers it at the same FiO2.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Gas   (gas-system manager — atmospheric pressure, temperature, humidity, initial composition)
+  └── Gas
 ```
-
-## What it models
-
-Global gas-phase boundary conditions. At build it walks `model.models`, collects every model whose
-`model_type` is in `gas_containing_modeltypes` (default `["GasCapacitance"]`), and pushes the shared
-`pres_atm`/`temp`/`target_temp` onto each. It then overrides individual compartments with any
-per-site `temp_settings` / `humidity_settings`, and bootstraps each freshly-constructed compartment's
-gas composition from the global `fio2` via the standalone
-[`calc_gas_composition`](./GasComposition.md). At runtime its setters re-apply these boundary
-conditions (atmospheric pressure, temperature, humidity, FiO₂) to chosen sites.
 
 ## Properties
 
-### Config
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `pres_atm` | mmHg | Atmospheric pressure (default 760), propagated to every gas compartment |
-| `fio2` | fraction | Inspired O₂ fraction (default 0.21) used to bootstrap compositions |
-| `temp` | °C | Global gas temperature (default 20) applied as both `temp` and `target_temp` |
-| `humidity` | fraction | Global gas humidity 0–1 (default 0.5) |
-| `temp_settings` | object | Map `compartment_name → temperature (°C)` overriding the global temp per site |
-| `humidity_settings` | object | Map `compartment_name → humidity (fraction)` overriding the global humidity per site |
-| `gas_containing_modeltypes` | list | Model types treated as gas compartments (default `["GasCapacitance"]`) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pres_atm` | mmHg | 760 | Atmospheric pressure, given to every gas compartment. |
+| `fio2` | – | 0.21 | Dry O2 fraction applied to fresh compartments and the sources at build. Afterwards: the last value given to `set_fio2`. Scenarios 0.21–0.30. |
+| `temp` | °C | 20 | Temperature given to every gas compartment at build, before `temp_settings`. |
+| `humidity` | – | 0.5 | Default relative humidity. |
+| `temp_settings` | {name: °C} | `{}` | Per-compartment temperature. Scenarios: MOUTH 20, DS 32, ALL 37, ALR 37. |
+| `humidity_settings` | {name: fraction} | `{}` | Per-compartment humidity. Scenarios: MOUTH 0.5, DS/ALL/ALR 1. |
+| `thermoregulation_name` | – | `"Thermoregulation"` | Model whose `setpoint_temp` anchors the airway offsets. |
+| `gas_containing_modeltypes` | list | `["GasCapacitance"]` | Model types treated as gas compartments. |
 
-### Local / computed
+## Calculation
 
-| Property | Description |
+`calc_model` does nothing; the gas physics run in [GasCapacitance](./GasCapacitance.md) and [GasComposition](./GasComposition.md). All the work is at build and in the methods.
+
+**Build (`init_model`):**
+1. Every gas compartment gets `pres_atm`, and `temp` and `target_temp` from `temp`; then `temp_settings` and `humidity_settings` are applied by name.
+2. A compartment with no gas at all is filled by [`calc_gas_composition`](./GasComposition.md) from `fio2`, its temperature and humidity. A loaded state keeps its own composition.
+3. A compartment whose water vapour exceeds saturation at its final temperature is rebuilt (e.g. an idle ventilator circuit bootstrapped warmer by its device).
+4. The fixed-composition sources named in the settings (MOUTH) are rebuilt from `fio2`, temperature and humidity, so the scenario's settings reach them.
+5. For each body-warmed compartment (the non-fixed members of `temp_settings`: DS, ALL, ALR), its offset from the body set-point is stored: DS −5 °C, alveoli 0.
+
+## Methods
+
+| Method | Effect |
 |---|---|
-| `_gas_components` | Array of resolved gas-compartment instances, populated in `init_model` |
+| `set_fio2(fio2, sites = ["OUT", "MOUTH"])` | Rebuilds each named site's composition at `fio2`; stores `fio2`. Absent sites are skipped (no scenario has `OUT`). Room-air FiO2 is set on MOUTH. |
+| `set_temperature(t, sites = ["OUT", "MOUTH"])` | Adds the sites to `temp_settings` and re-applies all of them (`temp`, `target_temp`). Fixed sources are rebuilt with their **own** dry FiO2 (their water content follows the new temperature). |
+| `set_humidity(h, sites = ["OUT", "MOUTH"])` | Same for humidity. Airway compartments relax to the new humidity on their own; fixed sources are rebuilt with their own FiO2. |
+| `set_atmospheric_pressure(p)` | `pres_atm` on every gas compartment. In term_neonate, 760 → 600 mmHg lowers mouth pO2 from 158 to 125 mmHg, alveolar pO2 105 → 76 and post-ductal pO2 73 → 57 mmHg (SO2 96.7 → 94.7 %) within 2 min. |
+| `set_body_temperature(core)` | Called by Thermoregulation: `target_temp` of each body-warmed compartment = core + its stored offset, so fever and hypothermia reach the alveoli (and the dead space stays 5 °C below). Neutral at rest. |
+| `drain_respiratory_heat()` | Called by Thermoregulation: returns and clears the heat (J, sensible + latent) the body-warmed compartments gave to the gas since the last call. |
 
-`Gas` carries no factor parameters of its own.
+## Factor system
 
-## Bootstrap (`init_model`)
+None.
 
-1. Apply the `args` (config) onto the instance.
-2. Rebuild `_gas_components`: for every model whose `model_type` is in `gas_containing_modeltypes`,
-   push it and set `model.pres_atm = pres_atm`, `model.temp = temp`, `model.target_temp = temp`.
-3. For each entry in `temp_settings`, set that compartment's `temp` **and** `target_temp`.
-4. For each entry in `humidity_settings`, set that compartment's `humidity`.
-5. **Bootstrap composition only for freshly-constructed compartments** — those whose
-   `co2 + cco2 + cn2 + ch2o + cother === 0` — by calling
-   `calc_gas_composition(model, fio2, model.temp, model.humidity)`. Guarding on the raw
-   concentrations (rather than the derived `ctotal`) preserves a restored/loaded saved state even if
-   `ctotal` was not serialized.
-6. **Reconcile water vapour with the final temperature.** A device (`Ventilator`, `Ecls`) may have
-   bootstrapped its own gas lines in its `init_model`, which runs *before* this one, at a different
-   temperature than step 2/3 ends up applying — leaving a water content that is supersaturated for
-   the final temperature. Normally `add_watervapour` would condense that out, but a compartment
-   belonging to a switched-off device is never stepped (`step_model` gates on `is_enabled`), so it
-   would report a physically impossible relative humidity forever. Any compartment found
-   supersaturated here therefore has its composition rebuilt at its final temperature. In practice
-   this is only ever an idle ventilator circuit holding fresh gas.
-7. **Apply `temp_settings`/`humidity_settings` to the fixed-composition gas sources they name.**
-   Step 5 only fires on a compartment holding no gas at all, and every reseeded scenario bakes
-   concentrations into its JSON — so on those, steps 3 and 4 reach `temp` and `humidity` but never
-   the composition derived from them. A normal compartment self-heals (`add_watervapour` relaxes
-   `ph2o` toward `humidity · P_sat(temp)` on its own), but a `fixed_composition` one never does,
-   because `add_watervapour` returns immediately there. Without this pass `MOUTH` stays frozen at
-   its baked-in water content forever and **editing `humidity_settings` in a scenario JSON is a
-   silent no-op**; step 6 does not cover it either, since an under-humidified compartment is not
-   supersaturated. Scoped to members of `temp_settings`/`humidity_settings` so device gas lines are
-   left alone — `Ventilator`/`Ecls` circuits are `fixed_composition` too, but are not in those dicts
-   and are bootstrapped by their owning device. Rebuilding from `fio2` is safe on a source, which by
-   definition has no accumulated CO₂ worth preserving; that is why non-fixed members are skipped.
+## Inputs and outputs
 
-`calc_model` is intentionally empty.
+- **Reads:** `Thermoregulation.setpoint_temp` (build); the body-warmed compartments' heat accumulators.
+- **Writes:** every gas compartment's `pres_atm`, `temp`, `target_temp`, `humidity`, and composition through `calc_gas_composition`.
+- **Written by:** the user and bot (FiO2, temperature, humidity, altitude); Thermoregulation (`set_body_temperature`, `drain_respiratory_heat`).
+- **Read by:** Thermoregulation (respiratory heat loss).
 
-## Setters (runtime)
+## Assumptions and limitations
 
-- **`set_atmospheric_pressure(new_pres_atm)`** — set `pres_atm` and propagate it to every compartment
-  in `_gas_components`.
-- **`set_temperature(new_temp, sites = ["OUT", "MOUTH"])`** — record `temp_settings[site]` for each
-  site (`parseFloat`), then apply `temp` **and** `target_temp` to all recorded sites. Sites absent
-  from the scenario are skipped: the defaults name compartments not every scenario defines (a
-  neonatal airway has no `OUT`), and a site once recorded stays in `temp_settings` for every later
-  call. Saturation pressure is a function of temperature, so — as in `set_humidity` — a
-  `fixed_composition` site additionally gets its composition recomputed, or it would keep the `ph2o`
-  of the temperature it was built at.
-- **`set_humidity(new_humidity, sites = ["OUT", "MOUTH"])`** — record `humidity_settings[site]`
-  (`parseFloat`) and apply `humidity` to all recorded sites. Since `humidity` is a live evaporation
-  target that [`GasCapacitance`](./GasCapacitance.md) reads every step, a normal compartment relaxes
-  to the new value on its own. A `fixed_composition` compartment is never touched by
-  `add_watervapour`, so those — and *only* those — additionally get their composition recomputed.
-  Recomputing an airway compartment here would rebuild it from `fio2` and discard its accumulated
-  CO₂.
-- **`set_fio2(new_fio2, sites = ["OUT", "MOUTH"])`** — set `fio2` (`parseFloat`, to avoid string
-  concatenation corrupting the `1 − (fio2 + fico2)` fraction math), then re-derive each site's
-  composition via the standalone [`calc_gas_composition`](./GasComposition.md) at that site's current
-  `temp`/`humidity`. A site the scenario does not have is skipped (no current scenario has `OUT`, so
-  the default call updates `MOUTH` only).
-- **`set_body_temperature(core_temp)`** — push the body core temperature onto the body-warmed airway
-  compartments, the gas counterpart to `Blood.set_temperature`. Called each update by
-  [`Thermoregulation`](./Thermoregulation.md). Each such compartment's `target_temp` is set to
-  `core_temp + delta`, where `delta` is the compartment's build-time offset from the set-point
-  (captured in `init_model` for the **non-`fixed_composition`** members of `temp_settings` — `DS`,
-  `ALL`, `ALR`; `MOUTH` is excluded as the environment-warmed inspired-air source). At rest
-  (`core == set-point`) the targets equal their build values, so the coupling is neutral; a febrile
-  or hypothermic patient conditions inspired gas toward the actual core instead of a hard 37 °C.
+- **Membership by `model_type` string**, as in Blood: a custom gas compartment type must be added to `gas_containing_modeltypes`.
+- **Rebuilding a source discards its history.** `calc_gas_composition` writes a fresh composition (ambient CO2 0.04 %); this is why only fixed sources are rebuilt by the setters, never airway compartments.
+- **The setters' sites accumulate.** A site passed to `set_temperature` or `set_humidity` stays in the settings and is re-applied on every later call.
+- **Devices own their gas lines.** Ventilator and ECLS gas compartments receive `pres_atm` and the default temperature here but are set by their device; they are not in `temp_settings`.
+- **Altitude changes only the ambient pressure.** No hypoxic ventilatory acclimatisation, no change in gas density.
 
 ## Example definition (JSON)
 
-From `term_neonate.json` — note the per-site temperature/humidity profile (cool, half-humid mouth;
-warm, fully-saturated alveoli):
+From `term_neonate.json`, `models.Gas` (trimmed to the config props):
 
 ```json
 {
   "name": "Gas",
-  "description": "gas composition model",
   "model_type": "Gas",
   "is_enabled": true,
   "pres_atm": 760,
   "fio2": 0.21,
   "temp": 20,
   "humidity": 0.5,
-  "humidity_settings": { "MOUTH": 0.5, "DS": 1, "ALL": 1, "ALR": 1 },
   "temp_settings": { "MOUTH": 20, "DS": 32, "ALL": 37, "ALR": 37 },
+  "humidity_settings": { "MOUTH": 0.5, "DS": 1, "ALL": 1, "ALR": 1 },
+  "thermoregulation_name": "Thermoregulation",
   "gas_containing_modeltypes": ["GasCapacitance"]
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- Built once per scenario; runs first so every [`GasCapacitance`](./GasCapacitance.md) starts with a
-  consistent pressure/temperature/humidity and a physiological room-air (or FiO₂-set) composition.
-- The setters are the entry points the UI / `Ventilator` / `Ecls` and the bot use to change inspired
-  oxygen, ambient pressure, and airway conditioning at runtime.
-- To model **humidified inspired gas** (a heated humidifier on a ventilator circuit), raise
-  `humidity_settings.MOUTH` — and `temp_settings.MOUTH` for a *heated* humidifier — in the scenario
-  JSON, or call `set_humidity` / `set_temperature` at runtime. Both paths now take effect on
-  `MOUTH`; before the step-7 pass above, only the runtime setters did.
-- Compartments not listed in `humidity_settings` keep whatever `humidity` they carry (the
-  `GasCapacitance` default is `1.0`, a saturated wall) and are humidified over time by
-  `GasCapacitance.add_watervapour`. Device gas paths that should stay dry — the ventilator supply,
-  the ECLS sweep gas — must declare `humidity: 0` explicitly.
-- The gas chemistry itself is documented in [`GasComposition`](./GasComposition.md) and
-  [`GasCapacitance`](./GasCapacitance.md).
+One instance in every scenario, with the settings above. `fio2`: 0.21 in term_neonate, preterm_30wk, bischoff_no_pda and the fetal scenarios; 0.25 preterm_28wk; 0.26 bischoff_ltr_pda; 0.28 bischoff_bidir_pda; 0.30 preterm_25wk.
+
+## References
+
+No literature values; the temperatures and humidities are the conventional room and airway values.
 
 ````
 
@@ -6370,372 +6100,175 @@ warm, fully-saturated alveoli):
 ````markdown
 # GasCapacitance
 
-A `GasCapacitance` is a volume compartment that holds **gas** instead of blood. It extends the base
-[`Capacitance`](./Capacitance.md) with gas-specific state: a five-species composition
-(O₂, CO₂, N₂, water vapour, "other") tracked as concentrations, partial pressures and fractions,
-plus temperature/humidity dynamics and the atmospheric/external pressures relevant to a gas space.
-It models airways, alveoli and the gas side of devices (ventilator circuit, ECLS sweep gas).
+A `GasCapacitance` is a compliant gas compartment: the mouth, the airway dead space, the alveoli, and the gas lines of the ventilator and the ECLS oxygenator. On top of [Capacitance](./Capacitance.md)'s pressure–volume behaviour it carries a gas composition (O2, CO2, N2, water vapour, other), absolute pressure, temperature and humidity. Gas mixes in with every inflow, is warmed and humidified by the wall, and expands and contracts with temperature (ideal gas law). The airway dead space can carry its gas as a plug through a chain of sub-tanks instead of one well-mixed volume.
+
+## Physiology
+
+Air moves into the lungs because the alveolar pressure falls below the pressure at the mouth. On the way it is warmed and saturated with water by the airway lining; the heat and water come from the body. The first gas to reach the alveoli is the gas left in the **dead space** (the conducting airways) from the last expiration, rich in CO2. Only the part of each breath beyond the dead-space volume brings fresh gas, so alveolar ventilation = (tidal volume − dead space) × rate. With very small breaths, as in high-frequency oscillation, gas transport depends on dispersion along the airways rather than bulk flow.
+
+Partial pressures follow Dalton's law: each gas's share of the molecules times the total pressure. The capnograph at the airway opening sees the gas at the mouth end of the dead space.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Capacitance          (volume, elastance, pressure)
-        └── GasCapacitance (gas composition, heat, water vapour, atmospheric/external pressures)
+  └── Capacitance
+        └── GasCapacitance
 ```
-
-Gas flow into and out of a `GasCapacitance` is handled by separate `Resistor` models that reference
-it (e.g. `MOUTH_DS` connecting `MOUTH` → `DS`). Diffusion of individual species is handled by
-[`GasExchanger`](./GasExchanger.md) (gas ↔ blood) and [`GasDiffusor`](./GasDiffusor.md) (gas ↔ gas).
-
-## What it models
-
-A passive gas-containing compartment. It holds a volume of gas at a pressure determined by its
-elastance plus the surrounding pressures (atmospheric, chest-compression, muscle), and tracks the
-composition of that gas. Each step it relaxes its temperature toward a target, exchanges water
-vapour with its wall (evaporating toward `humidity · P_sat(T)`, condensing out anything above
-saturation), recomputes pressure, and re-derives the partial pressures and fractions from the
-current concentrations. Like its parent it has no built-in resistance or flow.
 
 ## Properties
 
-### Inherited from Capacitance
+Volume, unstressed volume, elastances and their factor layers, `pres_ext` and `fixed_composition` come from [Capacitance](./Capacitance.md#properties). `fixed_composition: true` makes an **infinite reservoir**: volume, composition, temperature and water all stay constant (MOUTH, `VENT_GASIN`, `ECLS_GAS_SOURCE`).
 
-See [`Capacitance`](./Capacitance.md) for the full list and the factor system. Key ones:
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume (config) |
-| `el_base` | mmHg/L | Baseline elastance (config) |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient (config) |
-| `pres_ext` | mmHg | External pressure, non-persistent — cleared each step (config) |
-| `fixed_composition` | bool | Freeze volume and composition (infinite reservoir) (config) |
-| `vol` | L | Current volume (computed) |
-| `pres` | mmHg | Total pressure (computed) |
-| `pres_in` | mmHg | Recoil pressure (computed) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pres_atm` | mmHg | 760 | Atmospheric pressure; set by [Gas](./Gas.md). |
+| `target_temp` | °C | 0 | Temperature the wall warms the gas toward; set by Gas (and, for the body-warmed compartments, from core temperature). |
+| `humidity` | fraction | 1.0 | How wet the wall is: the relative humidity evaporation can reach (airway mucosa 1, dry gas line 0, MOUTH 0.5). |
+| `temp_tc` | s | 1.0 | Thermal equilibration time constant. |
+| `h2o_tc` | s | 0.2 | Water vapour equilibration time constant. |
 
-`GasCapacitance` also re-initializes `fixed_composition` to `false` in its own constructor.
+### Config: series dead space (set by Respiration and the Ventilator)
 
-### Config (unique to GasCapacitance)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `series_segments` | – | 1 | Number of composition sub-tanks; 1 = well mixed. DS: 32 in every scenario. |
+| `distal_models` | list | `[]` | Neighbours at the distal end (DS: `ALL`, `ALR`). |
+| `dispersion_coeff` | – | 0 | Flow-driven (Taylor-type) axial dispersion strength. DS: 0.015. |
+| `dispersion_tau_max` | s | 0.1 | Cap on the one-way flow time in the dispersion term. |
+| `diffusion_rate` | L/s per interface | 0 | Flow-independent (molecular) exchange. DS: 1e-5. |
+| `tube_port_model` | – | `""` | Neighbour reached through the ET-tube lumen (the ventilator circuit); set by the Ventilator. |
+| `tube_volume` | L | 0 | Rigid ET-tube lumen ahead of the tube port: π r² L while intubated, 0 otherwise (4 mm × 110 mm = 1.4 mL). |
+| `tube_segments` | – | 3 | Sub-tanks of the tube lumen. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `pres_atm` | mmHg | Atmospheric pressure (default 760); set by the [`Gas`](./Gas.md) manager at build |
-| `pres_cc` | mmHg | Chest-compression external pressure, non-persistent — cleared each step |
-| `pres_mus` | mmHg | Muscle external pressure, non-persistent — cleared each step |
-| `target_temp` | °C | Temperature the gas relaxes toward. Seeded per-site by `Gas`; for the body-warmed airway compartments (`DS`/`ALL`/`ALR`) it then **rides body core temperature** each thermoregulation update — see below |
-| `temp` | °C | Current gas temperature (also runtime state; seeded by `Gas`) |
-| `humidity` | fraction | **Wall wetness**: the relative humidity this compartment can sustain by evaporation, 0–1. Read every step by `add_watervapour` — it is a target, not a state variable. Airway mucosa is `1.0`; a dry medical gas line is `0.0`. Default `1.0` |
-| `temp_tc` | s | Thermal equilibration time constant (default `1.0`) |
-| `h2o_tc` | s | Water-vapour equilibration time constant (default `0.2`) |
-
-### Computed (gas state)
-
-Concentrations are in mmol/L; partial pressures in mmHg; fractions are unitless 0–1.
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `ctotal` | mmol/L | Total gas molecule concentration (`ch2o + co2 + cco2 + cn2 + cother`) |
-| `co2` | mmol/L | Oxygen concentration (note: the name is "concentration of O₂", not CO₂) |
-| `cco2` | mmol/L | Carbon dioxide concentration |
-| `cn2` | mmol/L | Nitrogen concentration |
-| `ch2o` | mmol/L | Water vapour concentration |
-| `cother` | mmol/L | Other-gases concentration |
-| `po2` | mmHg | Partial pressure of O₂ |
-| `pco2` | mmHg | Partial pressure of CO₂ |
-| `pn2` | mmHg | Partial pressure of N₂ |
-| `ph2o` | mmHg | Partial pressure of water vapour |
-| `pother` | mmHg | Partial pressure of other gases |
-| `pres_rel` | mmHg | Pressure relative to atmospheric (`pres − pres_atm`) |
-| `fo2` | fraction | Fraction of O₂ |
-| `fco2` | fraction | Fraction of CO₂ |
-| `fn2` | fraction | Fraction of N₂ |
-| `fh2o` | fraction | Fraction of water vapour |
-| `fother` | fraction | Fraction of other gases |
+| `pres` | mmHg | Absolute pressure: recoil + `pres_ext` + `pres_atm`. |
+| `pres_rel` | mmHg | Pressure relative to atmospheric (airway / alveolar pressure as a clinician reads it). |
+| `temp` | °C | Gas temperature. |
+| `ctotal` | mmol/L | Total gas concentration. |
+| `co2`, `cco2`, `cn2`, `ch2o`, `cother` | mmol/L | Concentrations per species. |
+| `po2`, `pco2`, `pn2`, `ph2o`, `pother` | mmHg | Partial pressures. |
+| `fo2`, `fco2`, `fn2`, `fh2o`, `fother` | – | Fractions of the (wet) gas. |
 
-`_gas_constant = 62.36367` (L·mmHg/(mol·K)) is a local constant used by `add_heat` / `add_watervapour`.
+With series dead space on, the partial pressures and fractions are those of the **airway-opening** sub-tank (what a capnograph samples); the concentrations are the bulk mean.
 
-## Factor system
+## Calculation
 
-`GasCapacitance` inherits the full three-tier factor system from [`Capacitance`](./Capacitance.md)
-acting on `el_base`, `u_vol` and `el_k`:
+Each step (`calc_model`):
 
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `el_base_factor`, `u_vol_factor`, `el_k_factor` | Transient effects, reset to 1.0 each step |
-| Persistent (`_ps`) | `el_base_factor_ps`, `u_vol_factor_ps`, `el_k_factor_ps` | Ongoing modulation (e.g. lung recruitment) |
-| Scaling (`_scaling_ps`) | `el_base_factor_scaling_ps`, `u_vol_factor_scaling_ps`, `el_k_factor_scaling_ps` | `ModelScaler` weight/manual scaling |
+1. **`add_heat`** (not for fixed compartments). Relax `temp` toward `target_temp`: `dT = (target − temp) · min(1, dt/temp_tc)`. The gas expands by `dV = n·R·dT / p` and every concentration dilutes by `V₀/V₁` (heating moves no molecules). The sensible heat drawn from the wall, `n · 29.1 J/(mol·K) · dT`, is metered.
+2. **`add_watervapour`** (not for fixed compartments). Asymmetric target:
+   - **evaporate** up to `humidity × SVP(temp)` (see [Units](./Units.md));
+   - **condense** only out of supersaturation, down to `SVP(temp)`;
+   - in between, the wall is neither source nor sink (a dry gas line doesn't dehumidify wet gas).
 
-The gas composition itself is **not** factor-driven (no `*_factor` on the concentrations).
+   The water concentration for the target is solved directly and approached with `min(1, dt/h2o_tc)`. Dry species dilute (or concentrate) by `V₀/V₁`. The latent heat, 43.4 kJ/mol, is metered; condensing returns it.
+3. With series dead space: the same change is replayed on every sub-tank, then dispersion and diffusion between sub-tanks.
+4. **Elastances, volumes, pressure** (Capacitance): `pres = recoil + pres_ext + pres_atm`; `pres_ext` is reset.
+5. **`calc_gas_composition`:** `ctotal` = sum of the species; partial pressure = (c / ctotal) × `pres`; fractions likewise.
 
-`temp_tc` and `h2o_tc` are deliberately plain scalars rather than factor triplets. The factor
-convention is for core physics parameters that interventions and `ModelScaler` modulate; these are
-equilibration kinetics that nothing currently sweeps, so they sit in the same category as
-`target_temp`, `pres_atm` and `fixed_composition` — configuration, not modulated physics. The
-additive-factor form composes onto a scalar cleanly if a consumer ever needs it.
+**Mixing (`volume_in`).** An inflow of `dvol` from a neighbour mixes in by volume: `c = (c·V + (c_in − c)·dvol) / V`, and the same for temperature. Before that:
+- A **fixed-composition receiver** stays unchanged.
+- **Gas from a pressurised fixed source** (e.g. the 1160 mmHg ventilator supply) is rescaled by `P_here / P_source`, so it arrives at the receiver's molar density; fractions are unchanged.
+- **Between two ordinary compartments there is no rescaling,** so every molecule the donor loses arrives (rescaling there lost ~1 % of VO2 per transfer).
 
-## Calculation cycle (`calc_model`)
+The incoming parcel keeps its temperature; `add_heat` handles the thermal expansion.
 
-`GasCapacitance` overrides `calc_model` (it does not simply inherit the Capacitance cycle):
-
-1. **`add_heat`** — relax `temp` toward `target_temp` with a first-order lag whose time constant is
-   in **seconds**: `dT = (target_temp − temp) · min(1, Δt / temp_tc)`, then `temp += dT`. Adjust
-   volume for the temperature change via the ideal gas law `dV = (ctotal · vol · R · dT) / pres`
-   (added as `dV / 1000`). Skipped entirely when `fixed_composition` — an infinite reservoir holds
-   its temperature, just as `volume_in` holds its composition. Volume is floored at 0.
-2. **`add_watervapour`** — exchange water with the compartment wall. Two distinct mechanisms give
-   an **asymmetric** target:
-   - *Evaporation* raises `ph2o` up to `humidity · pH2Ot`.
-   - *Condensation* lowers `ph2o`, but only out of genuine supersaturation (`ph2o > pH2Ot`), and
-     only down to `pH2Ot`.
-
-   Between the two the wall is neither source nor sink and nothing happens. That dead band is what
-   stops a dry gas line (`humidity = 0`) from acting as a dehumidifier on wet gas flowing into it;
-   for a saturated wall (`humidity = 1`) it has zero width and the rule reduces to "track
-   saturation". Having picked a target pressure `p_target`, the water concentration that achieves it
-   against the current **dry** gas load is solved directly rather than iterated:
-
-   ```
-   c_dry       = co2 + cco2 + cn2 + cother
-   ch2o_target = c_dry · p_target / (pres − p_target)
-   ch2o       += (ch2o_target − ch2o) · min(1, Δt / h2o_tc)
-   ```
-
-   The volume the added (or removed) water occupies follows from the ideal gas law. Skipped when
-   `fixed_composition`.
-
-   Because the step is a *fraction of the remaining gap* toward a concentration — rather than an
-   absolute mmol amount — the time constant is independent of compartment size. Because that
-   fraction is `Δt / tc`, it is also independent of `modeling_stepsize`. Both `min(1, …)` clamps
-   mean a step longer than the time constant lands exactly on target instead of overshooting into
-   oscillation.
-3. **`calc_elastances` / `calc_volumes`** (inherited) compute `el_eff`, `u_vol_eff`, `el_k_eff`.
-4. **`calc_pressure`** — calls `super.calc_pressure()` (recoil + `pres_ext`, then clears `pres_ext`),
-   then adds the gas-space external pressures:
-   ```
-   pres     = pres_in + pres_ext + pres_cc + pres_mus + pres_atm
-   pres_rel = pres − pres_atm
-   pres_cc := 0;  pres_mus := 0          (both non-persistent, cleared each step)
-   ```
-5. **`calc_gas_composition`** (the method, see below) — recompute `ctotal` and derive partial
-   pressures and fractions from the current concentrations.
-
-### `calc_watervapour_pressure`
-
-Saturated water-vapour pressure as a function of temperature (Kelvin via `+273.15`):
-
-```
-pH2Ot = exp(20.386 − 5132 / (temp + 273.15))
-```
-
-An Antoine-type form returning mmHg: 46.49 at 37 °C, 35.45 at 32 °C, 17.81 at 20 °C.
-
-### Modelling assumptions for heat and water
-
-- **The water source is unlimited, but its heat cost is now metered.** There is no liquid reservoir
-  behind the wall, so a compartment with `humidity > 0` can evaporate indefinitely, and respiratory
-  *water* loss is still not conserved anywhere. The *energy* is: `add_heat` accumulates
-  `n_gas · _cp_molar · dT` into `_q_wall_sensible` and `add_watervapour` accumulates
-  `n_h2o · _latent_h2o` into `_q_wall_latent`, both **signed**, so gas cooling and condensing credit
-  heat back to the wall. [`Gas.drain_respiratory_heat()`](./Gas.md) sums and clears these across the
-  body-warmed compartments and [`Thermoregulation`](./Thermoregulation.md) charges the total to the
-  body's heat balance as `Q_resp`. The accumulators are `_`-prefixed deliberately: `ModelEngine`
-  strips `_` keys from state dumps, keeping them out of scenario JSON and out of `reseed_*.mjs`.
-  Note `Thermoregulation.rel_humidity` remains a separate *skin* term and is still not coupled here.
-- **Condensate is discarded.** Water that condenses out of supersaturated gas simply leaves the
-  system; it does not pool, drain, or re-evaporate.
-- **Brief supersaturation during expiration is expected, not a defect.** Condensation is a
-  first-order lag, so a compartment can sit a little above 100 % RH while advection supplies water
-  faster than `h2o_tc` removes it. In `term_neonate` the dead space swings between roughly 68 % and
-  102 % RH over a breath as its temperature moves between about 22 °C and 35 °C — expiration pushes
-  saturated 36 °C alveolar gas (≈44.7 mmHg) into a cooler space that can only hold ≈42 mmHg. That
-  is exhaled breath condensate. Sample a full cycle before concluding a compartment is wrong; an
-  instantaneous reading lands at an arbitrary breath phase.
-- **`fixed_composition` compartments are inert to both heat and water.** They are infinite
-  reservoirs, so `add_heat` and `add_watervapour` both skip them, matching how `volume_in` already
-  holds their composition and temperature against advective mixing. Their `humidity` is therefore
-  *not* self-correcting: it is applied once, by [`Gas`](./Gas.md) at build time (from
-  `humidity_settings`/`temp_settings`) or by `set_humidity`/`set_temperature` at runtime, both of
-  which rebuild the composition explicitly. Changing `humidity` on such a compartment by any other
-  route leaves `ph2o` stale.
-- **Humidifying the inspired gas barely moves the alveolar gas — this is correct.** Raising `MOUTH`
-  from 50 % to 100 % RH at 20 °C changes alveolar `ph2o` by ≈0.2 mmHg and `po2` not at all, because
-  the airway wall already saturates the gas before it arrives. A heated humidifier (37 °C, 100 % RH)
-  raises alveolar `ph2o` from ≈44 to ≈46 mmHg, essentially by removing the inspiratory cooling. What
-  a humidifier really changes clinically is *where the water comes from* — the device instead of the
-  mucosa — and since the wall is an unlimited source with no water or heat debt (first bullet),
-  that benefit has nothing to attach to here.
-- **No water or heat crosses the blood–gas barrier.** [`GasExchanger`](./GasExchanger.md) and
-  [`GasDiffusor`](./GasDiffusor.md) transfer only O₂ and CO₂. An alveolus is humidified from its own
-  `target_temp`, not from pulmonary capillary blood.
-- **`target_temp` tracks body core temperature (for the body-warmed compartments).**
-  [`Thermoregulation`](./Thermoregulation.md) pushes `core_temp` onto the perfused airway
-  compartments each update via `Gas.set_body_temperature` — the alveoli (`ALL`/`ALR`) target core
-  directly, the dead space (`DS`) holds its build-time offset (≈5 °C) below it. So a febrile or
-  hypothermic patient conditions inspired gas toward the *actual* core, not a hard 37 °C, and the
-  alveolar gas moves with the blood it exchanges with. The coupling is **neutral at rest** (at
-  core == set-point the targets equal their build values) and inactive when thermoregulation is
-  absent or disabled (targets stay at their seeded values). `MOUTH` is excluded — it is the
-  inspired-air source, warmed by the environment, not the body. A residual ~1–2 °C alveolar-below-
-  core deficit remains from tidal mixing with cooler dead-space gas.
-- **Both routines conserve molar mass.** Heating and humidification change the volume, so each
-  rescales every concentration by `V₀/V₁` afterwards. Heating moves no molecules at all;
-  humidification moves only water. Without that rescale the compartment would keep its
-  concentrations while growing, inventing gas out of nothing — measured at +5.8 % dry moles for a
-  20 → 37 °C warm-up and +6.7 % for a dry → saturated humidification. The error was invisible in
-  every clinical output, because those are all ratios (`fo2 = co2/ctotal`, `po2 = fo2 · pres`) in
-  which a uniform inflation cancels exactly.
-
-- **Gas expands across a pressure gradient on transfer.** `volume_in` scales the incoming molar
-  density by `P_here / P_there` (see below). With that and the mass conservation above, `ctotal`
-  agrees with the ideal gas law to within ~2 % everywhere, including under mechanical ventilation.
-
-### `calc_gas_composition` (method)
-
-Recomputes the total concentration and derives partials/fractions from the **current** species
-concentrations (returns early if `ctotal === 0` to avoid division by zero):
-
-```
-ctotal = ch2o + co2 + cco2 + cn2 + cother
-p_s    = (c_s / ctotal) · pres        for s ∈ {h2o, o2, co2, n2, other}
-f_s    =  c_s / ctotal
-```
-
-This is distinct from the standalone [`calc_gas_composition`](./GasComposition.md) *initializer*,
-which instead sets the concentrations from a target FiO₂/temperature/humidity mix.
-
-## Composition mixing (`volume_in`)
-
-`GasCapacitance` overrides `volume_in(dvol, comp_from)`. It calls `super.volume_in` to update the
-volume, then mixes the incoming concentrations and temperature by volume fraction (the same
-algebraically-correct dilution as [`BloodCapacitance`](./BloodCapacitance.md)) — but first corrects
-the incoming molar density for the pressure difference between the two compartments:
-
-```
-k    = pres / comp_from.pres                                (1.0 at equal pressure)
-co2  = (co2·vol  + (comp_from.co2·k − co2)·dvol) / vol      (and cco2, cn2, ch2o, cother)
-temp = (temp·vol + (comp_from.temp  − temp)·dvol) / vol
-```
-
-**Why `k` is needed.** Gas is compressible, so a parcel crossing a pressure gradient expands or is
-compressed — the same molecules occupy a different volume here than they did in `comp_from`. Mixing
-raw concentrations is only valid between compartments at equal pressure. Without the correction a
-pressurised supply injects its own molar density downstream: `VENT_GASIN` sits at 1160 mmHg with
-`ctotal ≈ 63.5` (correct *for its own pressure*), and gas leaving it for a 770 mmHg circuit used to
-arrive still at 63.5, driving the alveoli to ~65 mmol/L where 760 mmHg at 37 °C allows only ~40.
-
-Every species scales by the same `k`, so the **gas fractions delivered are unchanged** — this
-corrects molar density only, never composition. `k` is 1.0 between compartments at equal pressure,
-which in practice is every pairing in the model (measured 0.999–1.009) except the pressurised
-supplies: `VENT_GASIN` (k ≈ 1.51) and `ECLS_GAS_SOURCE` (k ≈ 1.26). Those are all
-`fixed_composition` reservoirs whose `volume_out` is a no-op, so nothing is actually drawn down on
-the donor side for the rescale to contradict.
-
-Temperature is deliberately **not** folded into `k`. The parcel arrives at `comp_from`'s temperature
-and `add_heat` performs the thermal expansion, and its matching dilution, as the compartment relaxes
-toward `target_temp`. Including temperature here would double-count it.
-
-Mixing is **skipped for `fixed_composition`** compartments (an infinite reservoir holds its
-composition and temperature constant) and **guarded against an empty compartment** (`vol <= 0`
-returns early — no division by zero).
+**Respiratory heat.** The metered heat (`_q_wall_sensible`, `_q_wall_latent`, signed: cooling and condensation credit the wall) is collected by `Gas.drain_respiratory_heat()` for Thermoregulation.
 
 ## Series dead space
 
-A single well-mixed compartment is a poor dead space. Mixing makes part of it "ventilated", so its
-*effective* dead space saturates near its own volume and barely grows when it gets bigger. It also
-turns oscillatory flow (HFOV) into perfect mixing every cycle. With `series_segments > 1` the
-compartment keeps **one pressure/volume node**, so the network is unchanged, but carries its gas
-**composition** through a chain of sub-tanks, ordered proximal → distal:
+A single well-mixed compartment is a poor dead space: mixing makes part of it "ventilated", so its effective dead space barely grows with its volume, and oscillatory flow (HFOV) is perfectly mixed every cycle. With `series_segments > 1` the compartment keeps **one pressure/volume node** (the network is unchanged) but carries its composition through a chain of sub-tanks, proximal → distal:
 
 ```
 [ tube lumen sub-tanks (rigid, only while intubated) ] [ DS sub-tanks (share vol equally) ]
   ^ tube port (VENT_GASCIRCUIT)                        ^ airway port (MOUTH, leak)   distal port ^ (ALL, ALR)
 ```
 
-- **Ports.** A neighbour in `distal_models` connects at the distal end. The `tube_port_model` (the
-  ventilator circuit) connects through the rigid tube-lumen sub-tanks (`tube_volume`, πr²L, set by
-  the Ventilator while intubated). Everything else (mouth, tube leak) connects at the proximal DS
-  end.
-- **Advection.** An inflow of dvol enters its end; every DS sub-tank grows by dvol/n, so the parcel
-  pushes gas along the chain. Outflow leaves from the receiver's end, and the chain shifts towards it.
-  The donor side is handled by `_seg_take(receiver, dvol)`, called at the top of the receiver's
-  `volume_in`, so a resistor needs no changes.
-- **Dispersion.** Neighbouring sub-tanks exchange `e = dispersion_coeff · q² · τ · dt / V_seg` per
-  step. That's the `u²·τ` Taylor-type dispersion written per segment (A·dx = V_seg, so no airway
-  geometry is needed). τ is the time the flow has run one way, capped at `dispersion_tau_max`
-  (0.1 s), so fast oscillation disperses in proportion to f·Vt². The exchange is mass-conserving
-  between unequal sub-tanks.
-- **Molecular diffusion.** `diffusion_rate` (L/s per interface, default 0; set by Respiration from
-  `dead_space_diffusion`) adds `e = diffusion_rate · dt` to every interface, also when no gas flows,
-  so the dead space keeps mixing during apnoea.
-- **Ends.** `_end_conc(neighbour)` / `_end_add(neighbour, dn)` read and change the sub-tank that faces
-  a neighbour (the bulk for a well-mixed compartment). The gas `mix_flow` of a
-  [`Resistor`](./Resistor.md) uses them.
-- **Bulk consistency.** The bulk concentrations (`co2`, `cco2`, …) are kept equal to the mean of the
-  DS sub-tanks. Heat and water vapour act on the bulk, and the same affine change is replayed on
-  every sub-tank. The partial pressures and fractions report the **airway-opening** sub-tank (what a
-  capnograph samples); the bulk `ctotal` still drives the gas law.
+- **Ports.** A neighbour in `distal_models` connects at the distal end; `tube_port_model` through the rigid tube sub-tanks; anything else (mouth, tube leak) at the proximal DS end.
+- **Advection.** An inflow enters its end and every DS sub-tank grows by dvol/n, pushing gas along. An outflow leaves from the receiver's end. The donor side runs through `_seg_take`, called by the receiver's `volume_in`, so resistors need no changes.
+- **Dispersion.** Neighbouring sub-tanks exchange `e = dispersion_coeff · q² · τ · dt / V_seg`: Taylor-type `u²·τ` dispersion written per segment (no airway geometry needed). τ is the time flow has run one way, capped at `dispersion_tau_max`, so fast oscillation disperses in proportion to f·Vt². Mass-conserving between unequal sub-tanks.
+- **Molecular diffusion** (`diffusion_rate`) acts also without flow, so the dead space keeps mixing during apnoea.
+- **Ends.** `_end_conc(neighbour)` / `_end_add(neighbour, dn)` read and change the sub-tank facing a neighbour; the gas `mix_flow` of a [Resistor](./Resistor.md#mixing-without-net-flow-mix_flow) uses them.
+- **Bulk.** The bulk concentrations equal the mean of the DS sub-tanks, so heat, water and the gas law work unchanged.
 
-**Calibration** (`scripts/probe_dead_space.mjs`, preterm_28wk, PRVC 5 mL/kg; HFOV with 2.5 mm ETT):
+Calibration when it was introduced (`scripts/probe_dead_space.mjs`, preterm_28wk, PRVC 5 mL/kg; HFOV with a 2.5 mm tube):
 
-| check | well-mixed (1) | series (32, dispersion 0.015) |
+| Check | Well-mixed (1) | Series (32, dispersion 0.015) |
 |---|---|---|
-| PaCO₂, DS +0 / +50 / +100 % | 67 / 70 / 72 | 81 / 98 / 122, as (Vt − VD)·rate predicts |
-| HFOV PaCO₂ 6 / 10 / 15 Hz | 10 / 11 / 11 (no f effect) | f·Vt² law: PaCO₂·DCO₂ = 1955–2290 (±8 %) over 8–15 Hz × amplitude 15–30 |
-| sub-tank count | — | 8 → 16 → 32 still changes HFOV (numerical dispersion), so the count is fixed at 32 and the dispersion term carries the transport |
-| spontaneous baselines, all 39 scenarios | — | PaCO₂ −0.6 … +1.1 mmHg, PaO₂ ±1 (the breathing controller compensates) |
-| runtime | — | +7–9 % |
+| PaCO2 with DS +0 / +50 / +100 % | 67 / 70 / 72 | 81 / 98 / 122, as (Vt − VD)·rate predicts |
+| HFOV PaCO2 at 6 / 10 / 15 Hz | 10 / 11 / 11 (no frequency effect) | f·Vt² law: PaCO2·DCO2 constant within ±8 % over 8–15 Hz × amplitude 15–30 |
+| Sub-tank count | – | 8 → 16 → 32 still changes HFOV (numerical dispersion), so the count is fixed at 32 and the dispersion term carries the transport |
+| Runtime | – | +7–9 % |
 
-Turned on for the airway `DS` by [Respiration](./Respiration.md) (`dead_space_segments`,
-`dead_space_dispersion`). The internal `_seg*` state is `_`-prefixed and stays out of state dumps.
+## Factor system
+
+[Capacitance](./Capacitance.md#factor-system)'s additive layers on `el_base`, `el_k` and `u_vol`. Surfactant, atelectasis and the Calibrator act on the alveoli through them.
+
+## Inputs and outputs
+
+- **Reads:** neighbours' composition and temperature (through `volume_in`); `pres_ext` written by others.
+- **Written by:**
+  - [Gas](./Gas.md) (`pres_atm`, `temp`, `target_temp`, `humidity`, composition);
+  - [Respiration](./Respiration.md) (series dead space on DS);
+  - the Ventilator (`tube_volume`, `tube_port_model`);
+  - Breathing and the thorax coupling (`pres_ext`);
+  - GasExchanger (`co2`, `cco2`);
+  - the devices (their own gas lines).
+- **Read by:** GasExchanger (alveolar pO2/pCO2), Monitor (etCO2, airway pressure), the Ventilator, `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **The airway wall is an unlimited water source.** Water loss isn't tracked; the heat is (metered for Thermoregulation). Condensate leaves the system.
+- **Brief supersaturation on expiration is real.** Condensation lags (`h2o_tc`), so the dead space can sit slightly above 100 % RH while warm alveolar gas flows into it. In term_neonate it swings between ~68 % and 102 % RH over a breath (22–35 °C). Sample a full cycle.
+- **Humidifying inspired gas barely changes alveolar gas,** correctly: MOUTH 50 → 100 % RH moves alveolar pH2O ~0.2 mmHg, because the airway saturates the gas anyway. The clinical benefit of a humidifier (sparing the mucosa) has nothing to attach to, since the wall has no water debt.
+- **Fixed-composition compartments don't self-correct.** Their temperature and humidity change only through `Gas.set_temperature` / `set_humidity`, which rebuild the composition.
+- **No water or heat crosses the blood–gas barrier.**
+- **Ideal gas, single heat capacity** (air's 29.1 J/(mol·K), also for water vapour).
+- **Pressures are absolute.** Compare against `pres_atm`, or use `pres_rel`.
 
 ## Example definition (JSON)
 
-A lung alveolar compartment (left lung) — non-fixed composition, warmed and humidified by the
-[`Gas`](./Gas.md) manager:
+From `term_neonate.json`, `models.Respiration.components.ALL` (trimmed to the config props; `target_temp` rounded):
 
 ```json
 {
   "name": "ALL",
-  "description": "gas capacitance model of the alveolar space of the left lung",
   "model_type": "GasCapacitance",
   "is_enabled": true,
+  "fixed_composition": false,
   "u_vol": 0.04,
-  "el_base": 186,
+  "el_base": 331.94,
   "el_k": 0,
-  "pres_ext": 0,
-  "fixed_composition": false
+  "pres_atm": 760,
+  "target_temp": 36.99,
+  "humidity": 1,
+  "temp_tc": 1,
+  "h2o_tc": 0.2,
+  "series_segments": 1
 }
 ```
 
-A fixed-composition reservoir (ventilator gas source) keeps its composition and volume constant:
+## Usage in the scenarios
 
-```json
-{
-  "name": "VENT_GASIN",
-  "description": "gas reservoir of the mechanical ventilator",
-  "model_type": "GasCapacitance",
-  "is_enabled": false,
-  "u_vol": 5,
-  "el_base": 1000,
-  "el_k": 0,
-  "fixed_composition": true
-}
-```
+Ten instances in every scenario:
 
-(`temp`, `humidity`, `target_temp` and `pres_atm` are normally seeded by the [`Gas`](./Gas.md)
-manager from its `temp_settings` / `humidity_settings` / `pres_atm`, rather than per-compartment.)
+| Compartment | Role | Notes |
+|---|---|---|
+| `MOUTH` | Room air | fixed, 20 °C, 50 % RH |
+| `DS` | Airway dead space | 32 series sub-tanks, 32 °C, 100 % RH |
+| `ALL`, `ALR` | Left and right alveoli | 37 °C, 100 % RH |
+| `VENT_GASIN`, `VENT_GASCIRCUIT`, `VENT_GASOUT` | Ventilator supply, circuit, exhaust | `VENT_GASIN` fixed (pressurised source) |
+| `ECLS_GAS_SOURCE`, `ECLS_GAS_OXY`, `ECLS_GAS_OUT` | Oxygenator sweep gas | source fixed |
 
-## Usage in the model
+## References
 
-- Airway/alveolar chain: `MOUTH` (fixed-composition outside air) → `DS` (dead space) → `ALL`/`ALR`
-  (left/right alveoli), wired by `Resistor`s; `GASEX_LL`/`GASEX_RL` exchange O₂/CO₂ between the
-  alveoli and the lung-capillary blood.
-- Device gas spaces: ventilator (`VENT_GASIN`/`VENT_GASCIRCUIT`/`VENT_GASOUT`) and ECLS
-  (`ECLS_GAS_SOURCE`/`ECLS_GAS_OXY`/`ECLS_GAS_OUT`); the gas sources are `fixed_composition: true`.
-- The [`Gas`](./Gas.md) manager discovers every `GasCapacitance` at build, seeds its pressure,
-  temperature and humidity, and bootstraps the initial composition via the standalone
-  [`calc_gas_composition`](./GasComposition.md).
+- Taylor GI. Dispersion of soluble matter in solvent flowing slowly through a tube. *Proc R Soc Lond A* 1953;219:186–203 (the `u²·τ` dispersion form).
 
 ````
 
@@ -6744,242 +6277,61 @@ manager from its `temp_settings` / `humidity_settings` / `pres_atm`, rather than
 ````markdown
 # GasComposition
 
-`GasComposition.js` exports the standalone function
-**`calc_gas_composition(gc, fio2 = 0.205, temp = 37, humidity = 1.0, fico2 = 0.000392)`** — an
-**initializer** that sets a gas compartment's full composition from a target dry-gas mix and the
-local temperature and humidity. It is the counterpart to the
-[`GasCapacitance.calc_gas_composition`](./GasCapacitance.md) *method* (which instead derives partial
-pressures from the compartment's already-present concentrations).
+`GasComposition` holds one function, `calc_gas_composition(gc, fio2, temp, humidity, fico2)`. It **overwrites** a gas compartment's whole composition with fresh gas of a given dry O2 (and CO2) fraction, at the compartment's current pressure, the given temperature and humidity. It initialises gas compartments and sets gas sources (room air, ventilator and oxygenator supply). It is a module of functions, not a model class.
 
-> ⚠️ **The `humidity` argument here is not the same thing as `GasCapacitance.humidity`,** despite the
-> shared name. This one is a *one-shot initial condition*: the relative humidity to build the
-> composition at, right now. `GasCapacitance.humidity` is a *live target* — the wall wetness the
-> compartment relaxes toward on every step. They usually hold the same value (callers pass
-> `model.humidity` through), but they answer different questions, and this is the most likely place
-> to get confused. See [`GasCapacitance`](./GasCapacitance.md#config-unique-to-gascapacitance).
+The per-step partial pressures of a compartment are computed by its own method [`GasCapacitance.calc_gas_composition()`](./GasCapacitance.md#calculation), not by this function.
 
-## Inheritance
+## Physiology
 
-This is **not a class** — it is a module-level function, so it has no inheritance chain. It takes a
-gas-compartment instance `gc` (typically a [`GasCapacitance`](./GasCapacitance.md)) by reference and
-writes its composition fields in place. It does not extend `BaseModelClass` and is not registered in
-`ModelIndex.js`.
+"FiO2 0.21" means 21 % of the **dry** gas is O2. Once the gas is humidified, water vapour takes its share of the total pressure, and the other gases share what's left:
 
-## What it models
+```
+pO2 = FiO2 · (P − pH2O)        in room air at 37 °C, 100 % RH: 0.21 · (760 − 47) ≈ 150 mmHg
+```
 
-The wet (humidified) gas composition of a compartment at its current pressure. Given a **dry**
-inspired fraction of O₂ and CO₂, with N₂ (and "other") taking the remainder, it computes the
-saturated water-vapour pressure at the compartment's temperature, removes that vapour pressure from
-the available dry-gas pressure, and partitions the rest among O₂, CO₂, N₂ and "other" — yielding a
-mutually consistent set of partial pressures, fractions and concentrations that sum to `ctotal`.
+## API
 
-## Parameters
+```js
+import { calc_gas_composition } from "./component_models/GasComposition.js";
+calc_gas_composition(gc, fio2 = 0.205, temp = 37, humidity = 1.0, fico2 = 0.000392);
+```
 
-| Parameter | Default | Description |
-|---|---|---|
-| `gc` | — | The gas compartment to write (mutated in place) |
-| `fio2` | 0.205 | Target **dry** O₂ fraction |
-| `temp` | 37 | Temperature (°C) used for the gas law and vapour pressure |
-| `humidity` | 1.0 | Relative humidity 0–1 |
-| `fico2` | 0.000392 | Target **dry** CO₂ fraction |
+| Argument | Unit | Default | Description |
+|---|---|---|---|
+| `gc` | – | – | A GasCapacitance. |
+| `fio2` | – | 0.205 | Dry O2 fraction, clamped 0–1. Callers always pass it (Gas uses 0.21 at room air). |
+| `temp` | °C | 37 | Temperature; written to `gc.temp`. |
+| `humidity` | – | 1.0 | Relative humidity 0–1; written to `gc.humidity`. |
+| `fico2` | – | 0.000392 | Dry CO2 fraction (ambient ~0.04 %), clamped to `1 − fio2`. Only the ECLS sweep gas passes its own. |
 
-Reference dry-air constants (module-local): `_fo2_dry = 0.205`, `_fco2_dry = 0.000392`,
-`_fn2_dry = 0.794608`, `_fother_dry = 0.0`, `_gas_constant = 62.36367` (L·mmHg/(mol·K)).
+**Writes on `gc`:** `temp`, `humidity`, `ctotal`, and for each species (O2, CO2, N2, H2O, other) the concentration, partial pressure and fraction. It also refreshes `gc.pres` by running the compartment's elastance, volume and pressure calculations, without stepping it (no heat or water exchange).
 
 ## Calculation
 
-### 1. Dry-gas fractions (re-normalize N₂ / other to the supplied O₂/CO₂)
+1. **Dry mix.** O2 = `fio2`, CO2 = `fico2`; N2 takes the rest (the reference N2 share is rescaled to `1 − fio2 − fico2`; "other" is 0).
+2. **Pressure:** `gc.pres` from the current volume. If it isn't positive, it returns after setting `temp` and `humidity`, leaving the composition unchanged.
+3. **Total concentration** from the ideal gas law: `ctotal = P / (R·(273.15 + temp)) · 1000` (mmol/L).
+4. **Water vapour:** `pH2O = svp_h2o(temp) · humidity` (see [Units](./Units.md)); `fH2O = pH2O/P`.
+5. **Each dry species:** `p = f_dry · (P − pH2O)`, fraction `p/P`, concentration `fraction · ctotal`.
 
-```
-new_fo2_dry    = fio2
-new_fco2_dry   = fico2
-new_fn2_dry    = _fn2_dry    · (1 − (fio2 + fico2)) / (1 − (_fo2_dry + _fco2_dry))
-new_fother_dry = _fother_dry · (1 − (fio2 + fico2)) / (1 − (_fo2_dry + _fco2_dry))
-```
+## Assumptions and limitations
 
-### 2. Get a current pressure
+- **`fo2` reads below the FiO2 you set.** It is the fraction of the *wet* gas: `fio2 · (1 − fH2O)`. At 20 °C and 50 % RH (MOUTH), 0.21 becomes 0.208. Divide by `1 − fh2o` for the dry fraction.
+- **It discards the compartment's history,** including its CO2. That is why [Gas](./Gas.md) only rebuilds fixed sources at runtime, never airway compartments.
+- **Dry air is O2 + N2 + CO2.** Argon (0.93 %) is counted as N2; "other" (e.g. an anaesthetic or helium) is always 0 here.
+- **Uses the compartment's current pressure.** A source rebuilt at an elevated pressure (the 1160 mmHg ventilator supply) gets the matching molar density.
 
-It calls `gc.calc_model()` to ensure `gc.pres` is up to date, reads `pressure = gc.pres`, then
-**persists** the supplied `temp` and `humidity` onto `gc` (so the compartment's own per-step
-calculations stay consistent with the concentrations set below). If `pressure <= 0` it **returns
-early** (a non-physical pressure would otherwise produce Infinity/NaN fractions).
+## Callers
 
-### 3. Total concentration (ideal gas law)
-
-```
-ctotal = (pressure / (R · (273.15 + temp))) · 1000        (mmol/L)
-```
-
-### 4. Water vapour (saturated × humidity)
-
-```
-ph2o = exp(20.386 − 5132 / (temp + 273.15)) · humidity
-fh2o = ph2o / pressure
-ch2o = fh2o · ctotal
-```
-
-### 5. Partition the remaining (dry) pressure among each species
-
-For each species `s ∈ {o2, co2, n2, other}`, the dry fraction is applied to the **non-vapour**
-pressure `(pressure − ph2o)`, and the fraction/concentration follow:
-
-```
-p_s = new_f{s}_dry · (pressure − ph2o)
-f_s = p_s / pressure
-c_s = f_s · ctotal
-```
-
-(Recall `gc.co2` is the **oxygen** concentration — see [`GasCapacitance`](./GasCapacitance.md).)
-All partial pressures, fractions and concentrations are thus mutually consistent and the
-concentrations sum to `ctotal`.
-
-> **`fo2` is a wet fraction and will read below the `fio2` you set.** The dry fraction is applied to
-> `(pressure − ph2o)`, but `f_s` divides by the full `pressure` — so setting `fio2 = 0.21` on a
-> saturated 37 °C compartment at 760 mmHg yields `fo2 ≈ 0.197`. That is correct, not a rounding
-> error: it is the same water-vapour dilution the alveolar gas equation accounts for. The runtime
-> `GasCapacitance.calc_gas_composition` method uses the same wet convention, so the two agree. If
-> you need the dry fraction back, divide by `(1 − fh2o)`.
-
-## When it is used
-
-To **seed or reset** a compartment to a known gas mix, never as the per-step update:
-
-- at build, by [`Gas.init_model`](./Gas.md) for freshly-constructed compartments;
-- when FiO₂ / temperature / humidity changes, via `Gas.set_fio2` (and the `Ventilator` / `Ecls`
-  setters);
-- on the ventilator / ECLS gas sources.
-
-The per-step composition update is done by the [`GasCapacitance.calc_gas_composition`](./GasCapacitance.md)
-*method*, which derives partials from existing concentrations and does **not** overwrite the mix.
-
-## Notes
-
-- The Kelvin conversions use `273.15` consistently (matching the per-step water-vapour formula in
-  `GasCapacitance.calc_watervapour_pressure`).
-- ⚠️ It **overwrites** the composition. Calling it on a diffusing compartment every step would reset
-  it to the fixed inspired mix — which is exactly why [`GasDiffusor`](./GasDiffusor.md) and
-  [`GasExchanger`](./GasExchanger.md) use the *method*, not this function.
-
-````
-
-### FILE: explain-engine/docs/GasDiffusor.md
-
-````markdown
-# GasDiffusor
-
-A `GasDiffusor` diffuses gases between **two gas compartments**, driven by their partial-pressure
-difference. It is the gas-to-gas analogue of [`BloodDiffusor`](./BloodDiffusor.md) (blood-to-blood)
-and [`GasExchanger`](./GasExchanger.md) (blood-to-gas). It moves four species — O₂, CO₂, N₂ and
-"other" — down their gradients between two [`GasCapacitance`](./GasCapacitance.md) compartments.
-
-## Inheritance
-
-```
-BaseModelClass
-  └── GasDiffusor   (partial-pressure-driven gas-to-gas diffusion of O₂/CO₂/N₂/other)
-```
-
-Lives in `base_models/` (alongside `GasExchanger` and `BloodDiffusor`). It is a transport element,
-not a compartment: it holds no volume and writes directly into the two compartments it references.
-
-## What it models
-
-```
-gas1 (po2, pco2, pn2, pother)  ⇌[GasDiffusor]⇌  gas2 (...)
-   flux_s = (p1_s − p2_s) · dif_s_step · Δt        for s ∈ {o2, co2, n2, other}
-```
-
-Each step it refreshes both compartments' partial pressures from their current concentrations,
-composes the effective diffusion constants, then for each species moves the flux out of `comp_gas1`
-and into `comp_gas2`.
-
-## Properties
-
-### Config
-
-| Property | Unit | Description |
+| Caller | Compartments | When |
 |---|---|---|
-| `comp_gas1` | name | First gas compartment (the `p1` side) |
-| `comp_gas2` | name | Second gas compartment (the `p2` side) |
-| `dif_o2` | mmol/(mmHg·s) | O₂ diffusion constant (default 0.01) |
-| `dif_co2` | mmol/(mmHg·s) | CO₂ diffusion constant (default 0.01) |
-| `dif_n2` | mmol/(mmHg·s) | N₂ diffusion constant (default 0.01) |
-| `dif_other` | mmol/(mmHg·s) | Other-gases diffusion constant (default 0.01) |
+| [Gas](./Gas.md) | every gas compartment without gas; supersaturated ones; MOUTH | build; `set_fio2`, `set_temperature`, `set_humidity` |
+| [Ventilator](./Ventilator.md) | `VENT_GASIN`, `VENT_GASCIRCUIT`, `VENT_GASOUT` | build, FiO2 / temperature / humidity changes |
+| [Ecls](./Ecls.md) | `ECLS_GAS_SOURCE` | sweep-gas FiO2, CO2, temperature or humidity changes |
 
-### Computed / local
+## References
 
-| Property | Unit | Description |
-|---|---|---|
-| `dif_o2_step` / `dif_co2_step` / `dif_n2_step` / `dif_other_step` | mmol/(mmHg·s) | Effective diffusion constants after the factors |
-| `_comp_gas1` / `_comp_gas2` | ref | Resolved compartment instances |
-
-## Factor system
-
-Each diffusion constant uses the three-tier [factor / effective-value pattern](./Capacitance.md).
-Note the scaling tier here is named **`_factor_scaling`** (not `_factor_scaling_ps` as on
-`Capacitance`):
-
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `dif_o2_factor`, `dif_co2_factor`, `dif_n2_factor`, `dif_other_factor` | Transient effects, reset to 1.0 each step |
-| Persistent (`_ps`) | `dif_o2_factor_ps`, … | Ongoing modulation |
-| Scaling (`_scaling`) | `dif_o2_factor_scaling`, … | `ModelScaler` scaling |
-
-The effective constant (shown for O₂; identical form for CO₂/N₂/other):
-
-```
-dif_o2_step = dif_o2
-            + (dif_o2_factor          − 1) · dif_o2
-            + (dif_o2_factor_ps       − 1) · dif_o2
-            + (dif_o2_factor_scaling  − 1) · dif_o2
-```
-
-## Calculation cycle (`calc_model`)
-
-1. Resolve `_comp_gas1` / `_comp_gas2` from `model.models`.
-2. Refresh each compartment's partial pressures via the
-   **[`GasCapacitance.calc_gas_composition`](./GasCapacitance.md) method** — which derives partials
-   from the current concentrations. **Not** the standalone
-   [`calc_gas_composition`](./GasComposition.md) initializer, which would reset both compartments to
-   a fixed room-air mix every step (and so produce no real diffusion).
-3. Compose the four effective diffusion constants (`dif_*_step`).
-4. For each species, compute `d = (p1 − p2) · dif_step · Δt` and apply it — subtract from
-   `comp_gas1`, add to `comp_gas2`, mixing into the concentration over the compartment volume:
-   ```
-   comp_gas1.c = (comp_gas1.c · vol1 − d) / vol1
-   comp_gas2.c = (comp_gas2.c · vol2 + d) / vol2
-   ```
-   Each write is **guarded by `fixed_composition` and a positive volume** (`vol > 0`), so a fixed
-   (infinite-reservoir) compartment stays constant and an empty compartment cannot produce NaN.
-5. Reset the non-persistent factors (`dif_o2_factor` … `dif_other_factor`) to 1.0.
-
-## Example definition (JSON)
-
-No standard scenario wires a `GasDiffusor` (the lung exchanges to blood through a
-[`GasExchanger`](./GasExchanger.md), not gas-to-gas), so there is no in-repo example. A correct
-definition follows the shape of the other transport elements:
-
-```json
-{
-  "name": "GASDIF_EXAMPLE",
-  "description": "gas-to-gas diffusor between two gas compartments",
-  "model_type": "GasDiffusor",
-  "is_enabled": true,
-  "comp_gas1": "DS",
-  "comp_gas2": "ALL",
-  "dif_o2": 0.01,
-  "dif_co2": 0.01,
-  "dif_n2": 0.01,
-  "dif_other": 0.01
-}
-```
-
-## Usage in the model
-
-- **Not used in the standard scenarios** — this element is latent but correct if wired up (e.g. to
-  model diffusive mixing between two gas spaces without bulk flow).
-- The method-vs-initializer distinction in step 2 is essential: using the standalone initializer here
-  would overwrite both compartments with the inspired mix every step.
+None; ideal gas law and Dalton's law.
 
 ````
 
@@ -6988,255 +6340,286 @@ definition follows the shape of the other transport elements:
 ````markdown
 # GasExchanger
 
-A `GasExchanger` moves O₂ and CO₂ across the **blood–gas barrier** — between a blood compartment and a
-gas compartment — driven by their partial-pressure difference. It models alveolar gas exchange in the
-lung and the membrane of an ECLS oxygenator.
+A `GasExchanger` moves O2 and CO2 by diffusion between a **blood** compartment and a **gas** compartment: the alveolar gas and pulmonary capillary blood of each lung, and the sweep gas and blood of the ECLS oxygenator. Every bit of oxygen the patient takes up and CO2 it removes through the lungs crosses one of these.
+
+## Physiology
+
+In the alveoli, gas and blood are separated by a membrane less than a micrometre thick. O2 diffuses from the alveolar gas (pO2 ~100 mmHg) into the mixed-venous blood (~40 mmHg), and CO2 the other way. The rate is Fick's law: flux = diffusing capacity × partial-pressure difference. The diffusing capacity lumps membrane area, thickness and the gas's solubility; CO2 diffuses about 20 times more easily than O2. In a healthy lung, blood equilibrates with alveolar gas well within its transit time, so oxygenation is limited by ventilation and perfusion, not diffusion. Lung disease (RDS, atelectasis, oedema) lowers the effective capacity by removing area.
+
+The exchange also changes the gas volume: more O2 is taken up than CO2 given off (respiratory quotient < 1), so alveolar gas shrinks a little with every breath. During apnoea that shrinkage draws gas down the airways: apnoeic oxygenation.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── GasExchanger   (partial-pressure-driven O₂/CO₂ transfer between blood and gas)
+  └── GasExchanger
 ```
-
-Lives in `base_models/` (alongside `GasDiffusor` and `BloodDiffusor`). It is a transport element, not
-a compartment: it holds no volume and writes directly into the blood and gas compartments it
-references. It pairs a [`BloodCapacitance`](./BloodCapacitance.md)-family compartment with a
-[`GasCapacitance`](./GasCapacitance.md).
-
-## What it models
-
-```
-blood (po2, pco2)  ⇌[GasExchanger]⇌  gas (po2, pco2)
-   flux_o2  = (po2_blood  − po2_gas)  · dif_o2_step  · Δt
-   flux_co2 = (pco2_blood − pco2_gas) · dif_co2_step · Δt
-```
-
-Each step it recomputes the blood gas composition, computes the O₂ and CO₂ fluxes from the
-partial-pressure gradients, and transfers them between the blood's total contents (`to2`/`tco2`,
-mmol/L) and the gas compartment's concentrations (`co2`/`cco2`, mmol/L). The fluxes are signed, so the
-same element loads O₂ into blood at the lung when `po2_gas > po2_blood` and the gradient simply flips
-direction for CO₂.
-
-### Optional membrane transfer ceiling (`o2_cap` / `co2_cap`)
-
-By default the flux is pure partial-pressure diffusion with no upper bound, so a well-mixed compartment
-equilibrates fully every pass — fine for the alveolus, but it means a membrane oxygenator would always
-saturate its outlet regardless of blood flow. Setting `o2_cap`/`co2_cap` > 0 (mmol/s) **caps the
-per-step flux magnitude** at `cap · Δt`, modelling a membrane with a finite rated transfer. In steady
-state the outlet content becomes `venous + cap / Q_blood`, so below the rated flow the blood still
-fully saturates but above it the outlet saturation **falls** (total transfer plateaus at `cap`).
-
-The caps default to `0` and only the [`Ecls`](./Ecls.md) device sets them, only on `ECLS_GASEX` (from
-its oxygenator library). The native-lung exchangers `GASEX_LL`/`GASEX_RL` never receive a cap, so they
-keep the exact legacy pure-diffusion behaviour — this class change is inert for the lung.
 
 ## Properties
 
-### Config
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `comp_blood` | – | `""` | Blood compartment (e.g. `LL_CAP`, `ECLS_OXY`). |
+| `comp_gas` | – | `""` | Gas compartment (e.g. `ALL`, `ECLS_GAS_OXY`). |
+| `dif_o2` | mmol/(mmHg·s) | 0 | O2 diffusing capacity. |
+| `dif_co2` | mmol/(mmHg·s) | 0 | CO2 diffusing capacity. |
+| `o2_cap`, `co2_cap` | mmol/s | 0, 0 | Optional membrane transfer ceiling; 0 = none. Only the ECLS oxygenator uses it (set by `Ecls` from the oxygenator's rated flow). |
+| `bc_interval` | s | 0.002 | How often the blood-gas solve runs; fluxes in between use the last pO2/pCO2. |
+
+### Factors
+
+| Property | Default | Layer and writers |
+|---|---|---|
+| `dif_o2_factor`, `dif_co2_factor` | 1.0 | Non-persistent (reset each step): `Surfactant` (derecruitment). |
+| `dif_o2_factor_ps`, `dif_co2_factor_ps` | 1.0 | Persistent, changed as deltas: `Respiration` (`set_gasexchange` and atelectasis), the `Calibrator`. |
+| `dif_o2_factor_scaling_ps`, `dif_co2_factor_scaling_ps` | 1.0 | Scaling layer; nothing writes it. (Named `*_factor_scaling` before v1.0.) |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `comp_blood` | name | Blood compartment (the `po2`/`pco2` blood side) |
-| `comp_gas` | name | Gas compartment (the `po2`/`pco2` gas side) |
-| `dif_o2` | mmol/(mmHg·s) | O₂ diffusion constant (default 0.0) |
-| `dif_co2` | mmol/(mmHg·s) | CO₂ diffusion constant (default 0.0) |
-| `o2_cap` | mmol/s | Optional **membrane transfer ceiling** for O₂; `0` (default) = disabled = legacy pure-diffusion |
-| `co2_cap` | mmol/s | Optional membrane transfer ceiling for CO₂; `0` (default) = disabled |
+| `flux_o2`, `flux_co2` | mmol per step | Amount moved this step, positive = blood → gas (O2 uptake is negative). Divide by the step size for a rate. |
+| `dif_o2_step`, `dif_co2_step` | mmol/(mmHg·s) | Effective diffusing capacities with the factors. |
 
-### Computed / local
+## Calculation
 
-| Property | Unit | Description |
-|---|---|---|
-| `flux_o2` | mmol | O₂ transferred this step (blood → gas positive) |
-| `flux_co2` | mmol | CO₂ transferred this step (blood → gas positive) |
-| `dif_o2_step` / `dif_co2_step` | mmol/(mmHg·s) | Effective diffusion constants after the factors |
-| `_blood` / `_gas` | ref | Resolved compartment instances |
+Each step (skipped if either compartment is missing or empty):
+
+1. **Blood gases** of `comp_blood` by [`calc_blood_composition`](./BloodComposition.md), every `bc_interval`. The gas side's partial pressures come from its own step.
+2. **Factors**, additive, floored at 0 (several writers lowering them together must not make a negative capacity):
+   ```
+   dif_step = dif · (1 + (factor − 1) + (factor_ps − 1) + (factor_scaling_ps − 1)),   ≥ 0
+   ```
+3. **Fluxes** (Fick):
+   ```
+   flux_o2  = (pO2_blood  − pO2_gas)  · dif_o2_step  · dt
+   flux_co2 = (pCO2_blood − pCO2_gas) · dif_co2_step · dt
+   ```
+   - A gas is skipped while the blood solve has failed (the `-1` sentinel); otherwise the gradient would pump a runaway flux.
+   - With a ceiling set, each flux is clamped to `cap · dt`.
+   - Each flux is capped at what the donor holds.
+4. **Contents.** Blood `to2`/`tco2` and gas `co2`/`cco2` change by the flux over their volumes (a `fixed_composition` side is left unchanged).
+5. **Gas volume.** The net molar exchange `flux_o2 + flux_co2` changes the gas volume at the gas compartment's pressure and temperature (ideal gas); every species keeps its moles in the new volume. Alveolar gas shrinks when uptake exceeds output, and the pressure drop draws gas in through the airways.
 
 ## Factor system
 
-`dif_o2` and `dif_co2` use the three-tier [factor / effective-value pattern](./Capacitance.md). Note
-the scaling tier here is named **`_factor_scaling`** (not `_factor_scaling_ps` as on `Capacitance`):
+Additive layers, as in [Capacitance](./Capacitance.md#factor-system), with a floor at 0. See [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
 
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `dif_o2_factor`, `dif_co2_factor` | Transient effects, reset to 1.0 each step |
-| Persistent (`_ps`) | `dif_o2_factor_ps`, `dif_co2_factor_ps` | `Respiration` / scenario modulation of diffusion capacity |
-| Scaling (`_scaling`) | `dif_o2_factor_scaling`, `dif_co2_factor_scaling` | `ModelScaler` scaling |
+## Inputs and outputs
 
-The effective constant (shown for O₂; identical for CO₂):
+- **Reads:** blood `po2`, `pco2`, `to2`, `tco2`, `vol`; gas `po2`, `pco2`, `co2`, `cco2`, `vol`, `pres`, `temp`.
+- **Writes:** blood `to2`, `tco2` (and its solved gases); gas `co2`, `cco2`, every gas concentration and `vol` (volume change).
+- **Written by:** `Surfactant`, `Respiration`, the `Calibrator` (factors); `Ecls` (`dif_o2`, `dif_co2`, `o2_cap`, `co2_cap` of `ECLS_GASEX`); the scenario generators (`dif_o2`, `dif_co2`).
+- **Read by:** `DataCollector` watchers; the probes (`flux_o2` as VO2).
 
-```
-dif_o2_step = dif_o2
-            + (dif_o2_factor          − 1) · dif_o2
-            + (dif_o2_factor_ps       − 1) · dif_o2
-            + (dif_o2_factor_scaling  − 1) · dif_o2
-```
+## Assumptions and limitations
 
-Both constants are floored at 0. The layers add, so several writers lowering them at once (Surfactant
-derecruitment plus atelectasis) could otherwise make one negative. Gas would then be pumped against
-its gradient, and the blood gases would blow up.
-
-## Calculation cycle (`calc_model`)
-
-1. Resolve `_blood` / `_gas` from `model.models`.
-2. Call `calc_blood_composition(_blood)` (from [`BloodComposition`](./BloodComposition.md)) to get
-   current blood `po2`/`pco2`; read `po2_blood`, `pco2_blood`, `to2_blood`, `tco2_blood` and the gas
-   `co2`, `cco2`, `po2`, `pco2`.
-3. **Skip the step** if either compartment's volume is `<= 0` (both volumes are denominators).
-4. Compose the effective diffusion constants `dif_o2_step` / `dif_co2_step` from the factors.
-5. **O₂ flux** and new contents:
-   ```
-   flux_o2      = (po2_blood − po2_gas) · dif_o2_step · Δt
-   if (o2_cap > 0) flux_o2 = clamp(flux_o2, −o2_cap·Δt, +o2_cap·Δt)   # membrane transfer ceiling
-   new_to2_blood = (to2_blood · vol_blood − flux_o2) / vol_blood     (floored at 0)
-   new_co2_gas   = (co2_gas   · vol_gas   + flux_o2) / vol_gas       (floored at 0)
-   ```
-6. **CO₂ flux** and new contents:
-   ```
-   flux_co2      = (pco2_blood − pco2_gas) · dif_co2_step · Δt
-   if (co2_cap > 0) flux_co2 = clamp(flux_co2, −co2_cap·Δt, +co2_cap·Δt)
-   new_tco2_blood = (tco2_blood · vol_blood − flux_co2) / vol_blood  (floored at 0)
-   new_cco2_gas   = (cco2_gas   · vol_gas   + flux_co2) / vol_gas     (floored at 0)
-   ```
-7. Write the results back, **guarding each compartment by `fixed_composition`**: the blood
-   `to2`/`tco2` are updated only if `!_blood.fixed_composition`, and the gas `co2`/`cco2` only if
-   `!_gas.fixed_composition` — so a fixed (infinite-reservoir) compartment is not changed.
-8. Reset the non-persistent factors (`dif_o2_factor`, `dif_co2_factor`) to 1.0.
-
-Note the flux sign convention: positive `flux_o2`/`flux_co2` moves substance **out of blood and into
-gas**. At the lung `po2_gas > po2_blood`, so `flux_o2` is negative (O₂ loads into blood) while
-`pco2_blood > pco2_gas` makes `flux_co2` positive (CO₂ off-loads to gas).
+- **Fick diffusion between two well-mixed compartments.** No capillary transit time, no end-capillary equilibration profile, no diffusion limitation that appears only at high cardiac output. Ventilation–perfusion mismatch comes from the network (intrapulmonary shunts, two lungs), not from inside the exchanger.
+- **The CO2/O2 capacity ratio is 6 in every scenario,** a calibration value (`scripts/reseed_term_neonate.mjs` raised CO2 sixfold), not the physical ~20.
+- **Diffusing capacities are per scenario,** set by the generators: term 0.001 / 0.006 per lung, preterm and Bischoff 0.00031–0.00068 / 0.0018–0.0041. As a lung DLO2 that is ~2.7 mL/(min·mmHg) at term (0.76 per kg).
+- **The fetal lungs exchange nothing** (`dif_o2` = `dif_co2` = 0), but the exchangers still run their blood solve.
+- **No water vapour or nitrogen crosses the membrane** (no N2 washout into blood, no absorption atelectasis from N2).
 
 ## Example definition (JSON)
 
-From `term_neonate.json` — the left-lung exchanger between the left-lung capillary blood and the left
-alveolar gas:
+From `term_neonate.json`, `models.Respiration.components.GASEX_LL` (trimmed to the config props):
 
 ```json
 {
   "name": "GASEX_LL",
-  "description": "gas exchanger model of the blood-gas connection of the left lung",
   "model_type": "GasExchanger",
   "is_enabled": true,
   "comp_blood": "LL_CAP",
   "comp_gas": "ALL",
   "dif_o2": 0.001,
-  "dif_co2": 0.006
+  "dif_co2": 0.006,
+  "o2_cap": 0,
+  "co2_cap": 0,
+  "bc_interval": 0.002
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- `GASEX_LL` / `GASEX_RL` — left / right lung capillary blood ↔ alveolar gas (`ALL` / `ALR`); the
-  `dif_o2`/`dif_co2` factors are how `Respiration` (and scaling) modulate diffusion capacity.
-- `ECLS_GASEX` — ECLS oxygenator blood ↔ sweep gas; the sweep gas is a `fixed_composition` reservoir,
-  so only the blood side is updated.
-- The volume guard and `fixed_composition` guards ensure a collapsed alveolus cannot produce NaN and a
-  fixed sweep-gas / blood reservoir stays constant.
+Three instances in every scenario:
+
+| Exchanger | Blood ↔ gas | State |
+|---|---|---|
+| `GASEX_LL`, `GASEX_RL` | `LL_CAP` ↔ `ALL`, `RL_CAP` ↔ `ALR` | enabled; capacity 0 in the fetal scenarios |
+| `ECLS_GASEX` | `ECLS_OXY` ↔ `ECLS_GAS_OXY` | disabled until ECLS runs; set by `Ecls` |
+
+| Scenario | `dif_o2` | `dif_co2` |
+|---|---|---|
+| term_neonate | 0.001 | 0.006 |
+| preterm_30wk | 0.00068 | 0.00405 |
+| preterm_28wk | 0.00045 | 0.0027 |
+| preterm_25wk | 0.00032 | 0.00189 |
+| bischoff no-PDA / L→R / bidir | 0.00034 / 0.00032 / 0.00031 | 0.00206 / 0.00194 / 0.00184 |
+| fetal ×3 | 0 | 0 |
+
+## References
+
+No literature values; the capacities are calibrated per scenario against arterial gases (see the `*Reference.md` pages).
+
+````
+
+### FILE: explain-engine/docs/GasMixing.md
+
+````markdown
+# GasMixing
+
+`helpers/GasMixing.js` holds `exchange_gas`, the gas counterpart of [BloodMixing](./BloodMixing.md)'s `exchange_blood`: two gas compartments swap an equal volume of gas each step, so their compositions move toward each other without any net flow. It is what a [Resistor](./Resistor.md#mixing-without-net-flow-mix_flow)'s `mix_flow` does between gas compartments.
+
+## Physiology
+
+Gas moves between the airways and the alveoli not only by bulk flow. Near the alveoli, molecular diffusion takes over, and the heartbeat stirs the gas in the small airways (cardiogenic mixing). Both mix fresh and alveolar gas a little even between breaths, or with no breathing at all (apnoeic oxygenation, CO2 washout during apnoea).
+
+## API
+
+| Function | Arguments | Description |
+|---|---|---|
+| `exchange_gas(a, b, dv)` | two GasCapacitances, volume swapped each way (L) | Swaps `dv` of gas between the ends of `a` and `b` that face each other. |
+
+```
+dv   = min(dv, ½ · min(V_a_end, V_b_end))          stability clamp
+Δn_k = (c_b,k − c_a,k) · dv                        mmol of species k moving b → a
+a gains Δn_k at its end facing b, b loses it at its end facing a
+```
+
+- Applied to O2, CO2, N2, H2O and other; each species is conserved and no volume moves.
+- **The end facing the neighbour:** for a well-mixed compartment its bulk; for a series dead space (see [GasCapacitance](./GasCapacitance.md#series-dead-space)) the sub-tank at that end, so DS–alveolus mixing acts on the distal sub-tank, not the whole dead space.
+- **A `fixed_composition` side** keeps its composition (an infinite reservoir); the other side relaxes toward it.
+- **No effect** when `dv ≤ 0` or either end volume is 0.
+- **Temperature is not exchanged;** each compartment's wall sets it.
+
+`Resistor.step_model` calls it when `mix_flow > 0`, the connection is open, and both sides are gas compartments; blood compartments go to `exchange_blood` instead.
+
+## Usage in the scenarios
+
+`DS_ALL` and `DS_ALR` (dead space ↔ alveoli) have `mix_flow` 0.001 L/s (60 mL/min each way) in every scenario. Per 0.5 ms step that is 0.5 µL, far below the clamp (a distal DS sub-tank is ~0.25 mL at term).
+
+## Assumptions and limitations
+
+- **One lumped exchange rate** for diffusion and cardiogenic mixing. It doesn't follow heart rate or stroke volume, and doesn't depend on the gas (CO2 and O2 mix equally).
+- **Explicit:** concentrations from before the swap; the clamp keeps it stable.
+- It shares scratch buffers between calls and so must not run re-entrantly (it never does in the single-threaded worker).
 
 ````
 
 ### FILE: explain-engine/docs/Glucose.md
 
 ````markdown
-# Glucose (blood-glucose / insulin controller)
+# Glucose
 
-The `Glucose` model is a **slow blood-glucose process controller** — same family as
-[`Hormones`](./Hormones.md), [`Kidneys`](./Kidneys.md) and [`Drugs`](./Drugs.md): it holds no
-compartment of its own, resolves references to other models lazily, runs on an `_update_interval`,
-and **owns its source/sink while enabled** (releasing them once on disable). Default config is
-**neutral at rest** — the set-point auto-seeds to the resting arterial glucose, `insulin` and
-`counterreg` sit at `1.0`, and because the default `hgp_rate == glu_use_rate` hepatic production
-exactly balances peripheral utilization, so total body glucose mass is conserved. A scenario that
-ships it behaves identically at rest and only diverges on perturbation.
+`Glucose` is the blood-glucose and insulin controller. Glucose is a blood solute (mmol/L) that flows with the blood like sodium. `Glucose` adds the liver's production into the central vein and removes the tissues' use from the same beds and shares as [Metabolism](./Metabolism.md). Insulin (rising with hyperglycaemia) and counter-regulation (rising with hypoglycaemia) adjust both. It holds no compartment and is neutral at rest.
 
-`glucose` is a **new blood solute (mmol/L)**. It advects through the whole circuit for free via the
-engine's existing `volume_in` solute mixing in `BloodCapacitance`/`HeartChamber`, exactly like Na/K
-— the controller only seeds the key and adjusts its source/sink. (A scenario should also list
-`"glucose"` in [`Blood`](./Blood.md)`.solutes` so every compartment starts seeded; `_seed_keys()`
-below is a lazy safety net that mirrors [`Drugs`](./Drugs.md).)
+## Physiology
 
-## Causal loop
+A newborn uses about 4–6 mg glucose/kg/min, much of it in the brain. After the umbilical cord is cut, glucose comes from the liver (glycogen breakdown and gluconeogenesis) and from feeds or IV dextrose. Insulin, released as glucose rises, increases uptake by muscle and fat and suppresses hepatic output. Counter-regulatory hormones (glucagon, catecholamines, cortisol), released as glucose falls, raise hepatic output. Brain uptake does **not** depend on insulin, which is why hypoglycaemia injures the brain. Preterm and stressed infants are prone to both hypo- and hyperglycaemia.
+
+## Inheritance
 
 ```
-SENSE                      CONTROL (1.0 = baseline)        EFFECTORS (owned, default-neutral)
-AA.solutes.glucose ──┬──► insulin     (hyperglycemia ↑) ──► uptake_factor      → peripheral SINK ↑
-   (plasma_model)    │                                  └─► production_factor  → hepatic SOURCE ↓
-                     └──► counterreg   (hypoglycemia  ↑) ──► production_factor  → hepatic SOURCE ↑
-
-SOURCE  hepatic glucose production → IVCI (injection_site):  prod = (hgp_rate/60)·weight·u·production_factor  [mmol]
-SINK    peripheral utilization, split over Metabolism.metabolic_active_models by fvo2:
-                                                            use  = (glu_use_rate/60)·weight·u·uptake_factor   [mmol]
+BaseModelClass
+  └── Glucose
 ```
 
-- **SOURCE** — endogenous hepatic glucose output added straight to the central vein `IVCI`
-  (`_inject.solutes.glucose += prod_total / _inject.vol`), modulated by `production_factor`.
-- **SINK** — peripheral utilization distributed over the *same* compartments and fractions
-  [`Metabolism`](./Metabolism.md) uses for O₂ (`metabolic_active_models`, a `site → fvo2` map),
-  scaled by `uptake_factor`. Sites with `vol <= 0` are skipped, and concentration is floored at 0.
-- **CONTROL** — `insulin` rises with hyperglycemia (↑uptake, ↓hepatic output); `counterreg` rises
-  with hypoglycemia (↑hepatic output). At the set-point both `== 1.0`.
+## Properties
 
-## Dynamics
+### Config (set in the definition JSON)
 
-Every `_update_interval` (default `1.0 s`), `_update_glucose(u)` runs (`u` = elapsed):
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `glucose_running` | boolean | `true` | Switch. Off stops source and sink and resets insulin and counter-regulation to 1. |
+| `metabolism_name` | – | `"Metabolism"` | Supplies the consumption beds and shares. |
+| `injection_site` | – | `"IVCI"` | Central vein receiving the hepatic output. |
+| `plasma_model` | – | `"AA"` | Arterial blood whose glucose drives the controller. |
+| `glu_use_rate` | mmol/kg/min | 0.03 | Tissue glucose use (5.4 mg/kg/min). |
+| `hgp_rate` | mmol/kg/min | 0.03 | Hepatic glucose production (equal to use, so neutral at rest). |
+| `glucose_setpoint` | mmol/L | 0 | Set-point; ≤ 0 = captured 30 s after build. Stored in every scenario. |
+| `insulin_gain`, `counterreg_gain` | – | 6, 6 | Drive per fractional glucose excess and deficit. |
+| `insulin_tc`, `counterreg_tc` | s | 120, 120 | Time constants. |
+| `uptake_insulin_gain` | – | 1.0 | Uptake rise per (insulin − 1). |
+| `hgp_insulin_gain`, `hgp_counterreg_gain` | – | 0.8, 2.0 | Hepatic-output suppression by insulin and rise by counter-regulation. |
+| `hormone_min`, `hormone_max` | – | 0, 10 | Clamp on insulin and counter-regulation. |
+| `uptake_factor_min`, `uptake_factor_max` | – | 0.1, 5 | Clamp on the uptake factor. |
+| `production_factor_min`, `production_factor_max` | – | 0, 8 | Clamp on the production factor. |
+| `glucose_default` | mmol/L | 4.0 | Seed for any blood compartment without a glucose key. |
 
-```
-glu_err            = (glucose − glucose_setpoint) / glucose_setpoint
-insulin_target     = clamp(1 + insulin_gain·glu_err,     hormone_min, hormone_max)
-counterreg_target  = clamp(1 − counterreg_gain·glu_err,  hormone_min, hormone_max)
-insulin            = lag(insulin, insulin_target, u, insulin_tc)          # x += u·(1/tc)·(−x+target)
-counterreg         = lag(counterreg, counterreg_target, u, counterreg_tc)
-uptake_factor      = clamp(1 + uptake_insulin_gain·(insulin−1),  uptake_factor_min, uptake_factor_max)
-production_factor  = clamp(1 − hgp_insulin_gain·(insulin−1) + hgp_counterreg_gain·(counterreg−1),
-                           production_factor_min, production_factor_max)
-```
+### Outputs
 
-**Auto-seed.** A scenario that stores `glucose_setpoint` (> 0) keeps it. Otherwise, after a
-`_warmup_delay` (30 s, to let the arterio-venous gradient settle), the set-point is pinned once to the
-then-current sensed `glucose` (`_seeded = true`). Storing it is preferred: the re-seed depends on when
-the scenario was loaded. The master gate `glucose_running`
-(false) calls `_release()` once, pinning every read-out back to neutral, then idles.
-
-## IV dextrose — no extra code
-
-IV dextrose works through the existing [`Fluids`](./Fluids.md) mechanism with **zero** changes here:
-a `d5`/`d10` fluid type simply carries `glucose` in its `solutes`, so infusing it raises compartment
-glucose the same way any fluid raises Na/K. The controller then senses the rise and responds
-(insulin↑, hepatic output↓). Likewise, `glucose` is deliberately **not** in
-[`Kidneys`](./Kidneys.md)`.filterable_solutes` — there is **no glucosuria** in this version.
-
-## Read-outs
-| Read-out | Meaning |
-|---|---|
-| `glucose` | sensed arterial glucose (mmol/L, from `plasma_model.solutes.glucose`) |
-| `insulin` / `counterreg` | controller activity (1.0 = baseline) |
-| `uptake_factor` / `production_factor` | applied SINK / SOURCE multipliers |
-| `glucose_use_step` / `glucose_prod_step` | last-update total utilization / production (mmol) |
-
-## Key parameters (defaults / units)
-| Param | Default | Meaning |
+| Property | Unit | Description |
 |---|---|---|
-| `glu_use_rate` | `0.03` mmol/kg/min | peripheral utilization (~5.4 mg/kg/min) |
-| `hgp_rate` | `0.03` mmol/kg/min | hepatic production (`== glu_use_rate` → neutral at rest) |
-| `glucose_setpoint` | `0` (auto-seed) | controller target in mmol/L; stored value kept, ≤ 0 → seeded to the resting value |
-| `insulin_gain` / `counterreg_gain` | `6.0` / `6.0` | drive per fractional glucose excess / deficit |
-| `insulin_tc` / `counterreg_tc` | `120 s` / `120 s` | controller lag time constants |
-| `uptake_insulin_gain` | `1.0` | uptake-factor rise per `(insulin−1)` |
-| `hgp_insulin_gain` / `hgp_counterreg_gain` | `0.8` / `2.0` | hepatic suppression / rise per hormone |
-| `hormone_min/max` | `0.0` / `10.0` | insulin & counterreg clamps |
-| `uptake_factor_min/max` | `0.1` / `5.0` | SINK clamp |
-| `production_factor_min/max` | `0.0` / `8.0` | SOURCE clamp |
-| `glucose_default` | `4.0` mmol/L | value used to seed the solute key where missing |
-| `metabolism_name` / `injection_site` / `plasma_model` | `Metabolism` / `IVCI` / `AA` | lazy wiring refs |
+| `glucose` | mmol/L | Sensed arterial glucose. |
+| `insulin`, `counterreg` | – | Activities (1 = rest). |
+| `uptake_factor`, `production_factor` | – | Applied factors. |
+| `glucose_use_step`, `glucose_prod_step` | mmol | Use and production in the last update. |
 
-## Wiring & related models
-- [`Metabolism`](./Metabolism.md) — supplies `metabolic_active_models` (the `site → fvo2`
-  consumption map the SINK reuses, so glucose use tracks O₂ use).
-- [`Fluids`](./Fluids.md) — IV dextrose enters via a `glucose`-carrying fluid type (no glucose code).
-- [`Hormones`](./Hormones.md) / [`Drugs`](./Drugs.md) — same controller pattern (lazy refs, update
-  interval, owned effectors, lazy key-seeding for new solutes).
+## Calculation
+
+Every 1 s:
+
+1. **Seed** a `glucose` key into every blood compartment that lacks one (once).
+2. **Sense** `AA.solutes.glucose`. If no set-point is stored, capture it after 30 s.
+3. **Controller**, with `e = (glucose − set-point) / set-point`:
+   ```
+   insulin    → clamp(1 + insulin_gain · e)          (tc 120 s)
+   counterreg → clamp(1 − counterreg_gain · e)       (tc 120 s)
+   uptake_factor     = clamp(1 + uptake_insulin_gain · (insulin − 1))
+   production_factor = clamp(1 − hgp_insulin_gain · (insulin − 1) + hgp_counterreg_gain · (counterreg − 1))
+   ```
+4. **Sink:** `glu_use_rate · weight / 60 · Δt · uptake_factor` mmol, split over Metabolism's beds by their shares (each bed floored at 0).
+5. **Source:** `hgp_rate · weight / 60 · Δt · production_factor` mmol into `IVCI`.
+
+**IV dextrose needs no extra code:** a dextrose fluid in [Fluids](./Fluids.md) carries `glucose` in its solutes, and the controller responds to the rise.
+
+## Factor system
+
+None; its own uptake and production factors.
+
+## Inputs and outputs
+
+- **Reads:** `AA.solutes.glucose`; Metabolism's `metabolic_active_models`; `model.weight`.
+- **Writes:** `solutes.glucose` of the beds and of `IVCI` (and the seed in every blood compartment).
+- **Written by:** the user (rates, switch); Fluids (dextrose, indirectly).
+- **Read by:** `DataCollector` watchers, the Monitor.
+
+## Assumptions and limitations
+
+- **Glucose lives only in the blood.** Real glucose distributes through the extracellular fluid, 3–4× the blood volume, so changes here run 3–4× too fast. With hepatic output set to 0 in term_neonate, arterial glucose falls 4.0 → 3.6 mmol/L in the first minute (~9 %/min). Listed for the re-validation.
+- **Insulin scales all uptake, the brain's included.** With hepatic output at 0, insulin falls to 0.01 within 10 min and total uptake to its 0.1 floor, so glucose levels off at ~2.8 mmol/L. That happens because the brain's use has fallen tenfold, which real brain uptake doesn't do. Listed for the re-validation (an insulin-independent brain share).
+- **Use doesn't depend on the glucose level** above the 0 floor (no Michaelis–Menten kinetics), and a depleted bed's missing use is not reported.
+- **No glucosuria** (`glucose` isn't in the Kidneys' `filterable_solutes`), no glycogen store, no lactate–glucose cycle.
+- **Hepatic output enters `IVCI`;** in the fetus that is also where the placental supply arrives through the umbilical vein, so the same parameters stand in for the placental glucose supply.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Glucose` (trimmed to the config props; gains are the defaults):
+
+```json
+{
+  "name": "Glucose",
+  "model_type": "Glucose",
+  "is_enabled": true,
+  "glucose_running": true,
+  "metabolism_name": "Metabolism",
+  "injection_site": "IVCI",
+  "plasma_model": "AA",
+  "glu_use_rate": 0.03,
+  "hgp_rate": 0.03,
+  "glucose_setpoint": 3.998
+}
+```
+
+## Usage in the scenarios
+
+One instance in every scenario, running with use = production = 0.03 mmol/kg/min. The set-points equal each scenario's `Blood.solutes.glucose`: term 4.0, fetus 3.7–4.2, preterm 5.5–7.0, Bischoff 7.0 mmol/L.
+
+## References
+
+No literature values; the rate is the textbook neonatal glucose use (4–6 mg/kg/min), the gains are model choices.
 
 ````
 
@@ -7245,135 +6628,260 @@ glucose the same way any fluid raises Na/K. The controller then senses the rise 
 ````markdown
 # Heart
 
-The `Heart` model is the **cardiac driver**. It owns the rhythm and conduction, synthesizes the ECG,
-generates the activation that contracts the chambers, applies neuro-hormonal control to contractility/
-relaxation/heart rate, and measures per-beat haemodynamics. It does not hold blood itself — the
-chambers (`HeartChamber`/`BloodTimeVaryingElastance`) do; the Heart drives their `act_factor`.
+`Heart` is the cardiac driver. It holds no blood itself; the chambers ([`HeartChamber`](./HeartChamber.md)) and the coronary bed ([`BloodTimeVaryingElastance`](./BloodTimeVaryingElastance.md)) do. Heart does five things:
+- runs the conduction system (rhythm, AV conduction, escape and ectopic beats);
+- turns each beat into an activation signal that makes the chambers contract;
+- passes autonomic, drug, temperature and myocardial-oxygen effects on to heart rate and the chambers;
+- synthesises an ECG;
+- measures each beat's volumes and pressures.
 
-## Conduction and rhythm
+## Physiology
 
-A timed state machine models the cardiac conduction system, gated off the engine-level counters
-`ncc_atrial` / `ncc_ventricular`:
+Each heartbeat starts in the **sinus node**. Its firing rate is the heart rate, set by a resting rate that the autonomic nervous system, drugs, temperature and hypoxia push up or down. The impulse spreads through the atria (P wave; the atria contract), pauses in the **AV node**, and then activates the ventricles (QRS; the ventricles contract). The ventricles stay refractory until repolarisation ends (T wave, end of QT).
 
-```
-SA node fires ─► PQ (atrial) ─► AV delay ─► QRS (ventricular) ─► QT ─► (refractory clears) ─► next beat
-```
+Explain reproduces this sequence with timers and produces the conduction disorders a clinician meets:
+- **First-degree AV block:** a long PR interval.
+- **Second-degree (2:1, 3:1) block:** some P waves aren't followed by a QRS.
+- **Complete heart block:** the atria and ventricles beat independently, the ventricles at a slow escape rate.
+- **Sinus arrest** with a ventricular escape rhythm.
+- **Ventricular tachycardia.**
+- **Single premature ventricular contractions.**
 
-- **Heart rate** is the reference rate scaled by the autonomic and modulating factors
-  (`ans_activity_hr · ans_sens`, `hr_factor`, `hr_mob_factor`, `hr_temp_factor`, `hr_drug_factor`,
-  `hr_chemo_factor`, …), each an additive `(factor − 1)·heart_rate_ref` term; `hr_override` pins it to
-  the reference. `hr_chemo_factor` (default `1.0` = no effect) is the **peripheral-chemoreflex hypoxic
-  bradycardia** lever, written by an `EF_HR_CHEMO` [Ans](./Ans.md) efferent in scenarios that model
-  apnea of prematurity (see [Apnea](./Apnea.md)); it is neutral everywhere it is not wired.
-- The sum is floored at `0`: a sinus rate can't be negative, and at `0` the SA node is silent (sinus arrest), so the ventricular escape pacemaker takes over.
-- The **sinus interval** `60 / heart_rate` drives the SA node; `pq_time`, `av_delay`, `qrs_time` and
-  the rate-corrected `qt_time` (Bazett) set the phase durations.
+The **activation signal** is what turns electricity into mechanics. During atrial and ventricular activation, Heart sends each chamber a value between 0 (relaxed) and 1 (fully contracted), which stiffens the chamber (see [TimeVaryingElastance](./TimeVaryingElastance.md)). The ventricles' pulse rises slowly and falls quickly, like the real ventricular pressure. The right ventricle can lag the left by a few milliseconds (`rv_delay`), as in a pressure-loaded RV.
 
-## Conduction-driven arrhythmias
+Heart also measures each beat as an echo or catheter study would:
+- end-diastolic and end-systolic volumes and pressures of all four chambers;
+- stroke volume and ejection fraction of both ventricles.
 
-The atrial and ventricular activations are **decoupled** so the two chambers can beat independently —
-real conduction disorders rather than a fixed SA→QRS sequence. This is gated behind **default-neutral**
-properties (at the defaults the logic is identity, so every scenario's normal rhythm is unchanged), and
-because the ECG and chamber activation already key off `ncc_atrial` (P) and `ncc_ventricular` (QRS)
-*independently*, dissociated rhythms render correctly with no ECG changes.
+It finds end-diastole and end-systole from the valves, the way they are defined clinically: the mitral valve closing starts systole, and the aortic valve closing ends it.
 
-Two intervention points:
-
-- **AV-node conduction gate** at the av-delay → ventricle step. The atrial impulse activates the
-  ventricles only if `!ventricle_is_refractory && _av_conducts()`. `av_block_mode` selects:
-  `none` (1:1), `first_degree` (1:1 with a prolonged PR — `pq_time · first_degree_pq_factor`),
-  `second_degree` (drop every `av_block_ratio`-th P → 2:1, 3:1, …), `complete` (no impulse conducts).
-  A blocked impulse leaves a P wave with no following QRS.
-- **Independent ventricular pacemaker** (`_vent_activation_timer`): fires a ventricular activation when
-  the ventricle has been quiet for `60 / rate` and is not refractory. `vent_pacemaker_mode = "escape"`
-  (slow, `vent_escape_rate` ≈ 50 bpm — only fires when conducted beats fail, i.e. complete block or
-  sinus arrest) or `"vt"` (fast ventricular focus, `vt_rate` → ventricular tachycardia). All ventricular
-  activations route through `_activate_ventricle()` (starts QRS, resets `ncc_ventricular` and the escape
-  timer).
-
-This yields the canonical conduction rhythms: **complete heart block** (atria at the sinus rate,
-ventricles at the escape rate — AV dissociation), **2nd-degree / 2:1 block** (ventricular rate ≈ ½
-atrial), **sinus arrest** (`sa_node_enabled = false` → SA silent → escape rhythm), **ventricular
-tachycardia**, and a triggered **PVC** (`trigger_pvc()` → one premature beat after `pvc_coupling`).
-
-> **Neutrality.** At the defaults (`av_block_mode = "none"`, `sa_node_enabled = true`, escape mode at
-> 50 bpm) the changes are identity — `_av_conducts()` returns `true`, and the escape pacemaker never
-> fires because every conducted beat (all scenario rates > 50 bpm) resets its timer first. The feature
-> lives entirely on the existing `Heart`, so it is available in every scenario with no model-definition
-> edits. PVCs are deterministic (`trigger_pvc()`), not random — the engine forbids `Math.random()`.
-
-## Activation → chamber contraction (`calc_varying_elastance`)
-
-Two activation functions are computed each step and pushed onto the chambers as `act_factor`:
-
-- **Atrial** `aaf` — a half-sine over the PQ window (→ atria: LA, RA / RAIVCI, RASVC).
-- **Ventricular** `vaf` — a skewed pulse over `qrs_time + qt_time` (→ LV, coronaries).
-- **Right ventricular** `rvaf` — the same pulse lagging `vaf` by `rv_delay` seconds (→ RV). At the
-  default `rv_delay` 0 it equals `vaf`, so both ventricles contract together.
-
-The Heart also propagates `ans_sens`, `ans_activity` (scaled by `ans_activity_factor` from the MOB
-hypoxia feedback) to the chambers, so the autonomic and myocardial-oxygen-balance effects reach
-`HeartChamber.calc_elastances`.
-
-## Contractility / relaxation / pericardium control
-
-Throttled setters apply **deltas** to persistent chamber factors:
-
-- `set_contractillity(left, right)` → chamber `el_max_factor_ps` (inotropy).
-- `set_relaxation(left, right)` → chamber `el_min_factor_ps` (lusitropy).
-- `set_pericardium(el_factor, extra_volume)` → `PERICARDIUM.el_base_factor_ps` and `vol_extra`.
-
-They run when `cont_factor_left/right`, `relax_factor_left/right` or `pc_el_factor` change (checked
-every 15 ms). Two things to know:
-
-- **Shared layer.** The delta lands in the same `_ps` layer that users and scenarios edit, so the
-  chamber's `el_max_factor_ps` is the sum of both.
-- **The floor breaks reversibility.** Each result is floored at `0`. A delta that hits the floor is
-  partly lost, so stepping a factor down past it and back up doesn't return to the start.
-
-## Per-beat measurements (`analyze`)
-
-At the systole↔diastole transitions it latches the end-systolic and end-diastolic volumes and
-pressures for LV/RV/LA/RA, and derives stroke volume and ejection fraction:
+## Inheritance
 
 ```
-SV = EDV − ESV          EF = SV / EDV   (guarded against EDV = 0)
+BaseModelClass
+  └── Heart
 ```
 
-## ECG (`calc_ecg`)
+## Properties
 
-A lead-II-like signal synthesized from a sum of Gaussians (P, Q, R, S, T), each positioned within its
-conduction phase so the morphology tracks the configured `pq`/`qrs`/`qt` timings; baseline is
-isoelectric at 0 mV.
+### Config: rate and timing
 
-## Configuration (model-definition fields)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `heart_rate_ref` | bpm | 110 | Resting (reference) sinus rate. term_neonate 120.33, 25 wk 160, term fetus 136. |
+| `pq_time` | s | 0.1 | Atrial activation (P wave) and PQ interval. |
+| `av_delay` | s | 0.0005 | AV-node pause after the PQ interval, before the QRS. |
+| `qrs_time` | s | 0.075 | Ventricular depolarisation (QRS). |
+| `qt_time` | s | 0.25 | QT at 60 bpm; rate-corrected each beat with Bazett, `cqt_time = qt_time·√(60/HR)`. Also sets how long the ventricles contract (see [limitations](#assumptions-and-limitations)). |
+| `rv_delay` | s | 0.0 | RV activation lag behind the LV; 0 = both together. `bischoff_bidir_pda` uses 0.008. |
 
-`heart_rate_ref`, `pq_time`, `qrs_time`, `qt_time`, `av_delay`, `rv_delay`; ECG amplitudes `p_amp`…`t_amp`;
-`ans_sens`, `ans_activity`, `ans_activity_hr`; the `*_factor` modulators; `pc_el_factor`,
-`pc_extra_volume`. Rhythm/conduction: `sa_node_enabled`, `av_block_mode`, `av_block_ratio`,
-`first_degree_pq_factor`, `vent_pacemaker_mode`, `vent_escape_rate`, `vt_rate`, `pvc_coupling`
-(+ the `trigger_pvc()` method).
+### Config: rhythm and conduction
 
-**term_neonate (calibrated assumption, 2026-10):**
-- `heart_rate_ref` 120.33, for a resting HR of 120: calm day-3 term infants measure 117–121 (Satoh
-  2016, He 2011, Agata 1994)
-- LV `el_max` ×1.15 and RV `el_max` ×1.3, so stroke volume and ejection fraction match neonatal CMR
-  (Jhaveri 2023: SV 1.6 mL/kg, EF 63 / 52.5 %) at unchanged output. Lowering HR alone is largely
-  compensated by Frank–Starling filling but leaves EF low.
-- see `scripts/_fix_term_hr_contractility.mjs` and [TermNeonateReference](./TermNeonateReference.md)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `sa_node_enabled` | boolean | `true` | `false` = sinus arrest. |
+| `av_block_mode` | – | `"none"` | `none`, `first_degree`, `second_degree` or `complete`. |
+| `av_block_ratio` | – | 2 | Second degree: every `ratio`-th P wave is blocked (2 → 2:1). |
+| `first_degree_pq_factor` | – | 2.5 | First degree: PQ interval multiplier. |
+| `vent_pacemaker_mode` | – | `"escape"` | `escape` (slow back-up pacemaker) or `vt` (fast ventricular focus). |
+| `vent_escape_enabled` | boolean | `true` | Enables the escape pacemaker. |
+| `vent_escape_rate` | bpm | 50 | Escape rhythm rate. |
+| `vt_rate` | bpm | 200 | Ventricular tachycardia rate. |
+| `pvc_coupling` | s | 0.3 | Delay of a triggered PVC (`trigger_pvc()`). |
 
-## Notes & caveats
+### Config: ECG
 
-- **End-diastolic pressures.** The diastole-branch in `analyze` now writes `*_edp` (it previously
-  wrote `*_esp`, leaving `lv_edp`/`rv_edp`/… at 0 and corrupting the end-systolic values).
-- **MOB coupling.** `ans_activity_factor` scales the sympathetic drive the Heart sends to the
-  chambers; it is set by the `Mob` model's hypoxia feedback (1.0 = no effect).
-- **`rv_delay`** is meant for a few milliseconds of RV pre-ejection lag (e.g. a pressure-loaded RV in
-  pulmonary hypertension): the LV ejects first, so aortic pressure leads PA pressure at the start of
-  systole. The delayed pulse is cut off when the next beat starts, which only matters if `rv_delay`
-  approaches the diastolic interval. Used by `bischoff_bidir_pda`.
-- The systole detection reads `LA_LV.flow` / `LV_AA.flow` directly — these mitral/aortic-valve
-  connectors are assumed present.
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `p_amp`, `q_amp`, `r_amp`, `s_amp`, `t_amp` | mV | 0.15, −0.1, 1.0, −0.25, 0.25 | Wave amplitudes of the synthetic ECG. |
+
+### Config: modulation
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `ans_sens` | – | 1.0 | Sensitivity of rate and chambers to the ANS. |
+| `hr_factor` | – | 1.0 | User heart-rate factor. |
+| `hr_override` | boolean | `false` | Pins the rate to `heart_rate_ref`, ignoring all factors. |
+| `cont_factor_left`, `cont_factor_right` | – | 1.0 | Contractility (left: LA, LV; right: RA halves, RV). A change is applied as a delta to the chambers' `el_max_factor_ps`. |
+| `relax_factor_left`, `relax_factor_right` | – | 1.0 | Diastolic stiffness, applied the same way to `el_min_factor_ps`. |
+| `pc_el_factor` | – | 1.0 | Pericardial stiffness (`PERICARDIUM` `el_base` and `el_k` `_factor_ps`). |
+| `pc_extra_volume` | L | 0.0 | Pericardial fluid (`PERICARDIUM.vol_extra`): tamponade. |
+| `cor_r_systolic_factor` | – | 0.0 | Systolic rise of the coronary inflow resistance: `AA_COR.r_factor = 1 + c·vaf` each step (intramural vessels compressed by the contracting myocardium). 5 in all shipped scenarios. |
+
+### Set by other models
+
+| Property | Unit | Default | Written by |
+|---|---|---|---|
+| `ans_activity_hr` | – | 1.0 | `EF_HR` efferent (baroreflex/chemoreflex chronotropy). |
+| `ans_activity` | – | 1.0 | `EF_HEART` efferent: sympathetic drive to the chambers (inotropy, lusitropy). |
+| `ans_activity_factor` | – | 1.0 | `Mob`: hypoxic scaling of that drive. |
+| `hr_mob_factor` | – | 1.0 | `Mob`: myocardial-oxygen-balance effect on rate. |
+| `hr_temp_factor` | – | 1.0 | `Thermoregulation`: temperature effect on rate. |
+| `hr_drug_factor` | – | 1.0 | `Drugs`: chronotropy. |
+| `hr_chemo_factor` | – | 1.0 | `EF_HR_CHEMO` efferent (preterm scenarios): hypoxic bradycardia. |
+
+### Outputs
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `heart_rate` | bpm | 120 | Sinus rate this step (from the reference and the factors). |
+| `heart_rate_measured` | bpm | 120 | Measured ventricular rate: 60 / time since the previous ventricular activation (falls when beats stop). |
+| `ecg_signal` | mV | 0 | Synthetic lead-II-like ECG. |
+| `aaf`, `vaf`, `rvaf` | – | 0 | Atrial, ventricular and right-ventricular activation (0–1). |
+| `cqt_time` | s | 0 | Rate-corrected QT of the current beat. |
+| `ncc_atrial`, `ncc_ventricular` | steps | 0 | Steps since the atrial / ventricular activation started (`-1` on the activating step). See [ARCHITECTURE §7b](./ARCHITECTURE.md#7b-ncc_-cycle-counters-live-on-the-components). |
+| `cardiac_cycle_state` | – | 0 | 1 = systole (mitral closed → aortic closed), 0 = diastole. |
+| `cardiac_cycle_running` | – | 0 | 1 from SA firing to the end of the QT. |
+| `cardiac_cycle_time` | s | 0.353 | Duration of the last SA-to-end-of-QT activation. **Not the RR interval** (use `60 / heart_rate_measured`). |
+| `lv_edv`, `lv_esv`, `lv_sv` | L | 0 | LV end-diastolic, end-systolic and stroke volume. |
+| `lv_edp`, `lv_esp` | mmHg | 0 | LV end-diastolic and end-systolic pressure, **transmural** (`pres_in`: wall recoil, without the pericardial pressure). |
+| `lv_ef` | fraction | 0 | `lv_sv / lv_edv`. |
+| `rv_edv`, `rv_esv`, `rv_sv`, `rv_edp`, `rv_esp`, `rv_ef` | L, mmHg, fraction | 0 | The same for the RV. |
+| `la_edv`, `la_esv`, `la_edp`, `la_esp` | L, mmHg | 0 | LA end-diastolic/end-systolic volume and pressure (latched at the ventricular transitions). |
+| `ra_edv`, `ra_esv`, `ra_edp`, `ra_esp` | L, mmHg | 0 | The same for the RA; with a split right atrium the sum of the two halves' volumes and the mean of their pressures. |
+
+### Internal state (public names, saved with the state)
+
+| Property | Description |
+|---|---|
+| `prev_cardiac_cycle_running`, `prev_cardiac_cycle_state` | Last step's values, for edge detection (`Mob` reads `prev_cardiac_cycle_running`). |
+| `prev_la_lv_flow`, `prev_lv_aa_flow` | Last step's mitral and LV-outflow flows, for systole detection. |
+| `prev_cont_factor_left`, `prev_cont_factor_right`, `prev_relax_factor_left`, `prev_relax_factor_right`, `prev_pc_el_factor` | The factors last applied to the chambers; a change triggers the delta setters. |
+
+## Calculation
+
+`calc_model()` runs, in this order, each step:
+
+1. **Contractility, relaxation and pericardium setters** (every 15 ms). When `cont_factor_*`, `relax_factor_*` or `pc_el_factor` changed, the *change* is added to the chambers' (or `PERICARDIUM`'s) persistent factor, floored at 0. `PERICARDIUM.vol_extra` is set from `pc_extra_volume`.
+2. **Systole detection** from the previous step's valve flows:
+   - mitral flow stopping (`LA_LV`) starts systole;
+   - the active LV outflow valve stopping (`LV_AA`, or `LV_PA` in transposition) ends it.
+
+   Without a working LV outflow (aortic atresia, HLHS), systole is the ventricular activation window instead.
+3. **Heart rate**:
+   ```
+   HR = HR_ref · (1 + (ans_activity_hr − 1)·ans_sens + (hr_factor − 1) + (hr_mob_factor − 1)
+                    + (hr_temp_factor − 1) + (hr_drug_factor − 1) + (hr_chemo_factor − 1))
+   ```
+   With `hr_override` it is `HR_ref`. It is floored at 0; at 0 the sinus node is silent.
+4. **Conduction timers**:
+   - **SA firing** (every `60/HR` s while `sa_node_enabled`) starts the PQ interval and the atrial activation (`ncc_atrial = −1`).
+   - **After PQ**, the AV delay runs.
+   - **After the AV delay**, the ventricles are activated if they aren't refractory and `av_block_mode` lets this beat through.
+   - **After the QRS** comes the QT; the ventricles are refractory until it ends.
+5. **Escape / ectopic pacemaker.**
+   - If the ventricles have been quiet for `60 / vent_escape_rate` (or `60 / vt_rate` in `vt` mode) and aren't refractory, they fire on their own. At normal rates conducted beats always come first, so the escape pacemaker only appears when conduction fails.
+   - A pending PVC fires `pvc_coupling` after `trigger_pvc()`.
+6. **ECG** (`calc_ecg`): a sum of Gaussian waves (P in the PQ interval; Q, R, S in the QRS; T in the QT), positioned relative to each phase, so the trace follows the timing settings. Isoelectric baseline 0 mV.
+7. **Rate measurement** and the `ncc_*` counters advance.
+8. **Activation** (`calc_varying_elastance`):
+   ```
+   aaf = sin(π·n_a/N_a)                       N_a = pq_time/dt, while 0 ≤ n_a < N_a
+   vaf = (n_v / (0.579·N_v)) · sin(π·n_v/N_v)  N_v = (qrs_time + cqt_time)/dt
+   rvaf = vaf shifted by rv_delay
+   ```
+   The factor 0.579 normalises the peak of `vaf` to 1. Heart writes these values to the chambers' `act_factor`:
+   - `aaf` → LA, RA (or RAIVCI/RASVC);
+   - `vaf` → LV and COR;
+   - `rvaf` → RV.
+
+   It also passes `ans_sens` and `ans_activity · ans_activity_factor` to the chambers, and sets the coronary inflow resistor's non-persistent factor `AA_COR.r_factor = 1 + cor_r_systolic_factor · vaf`.
+9. **Per-beat analysis** (`analyze`), at the systole/diastole transitions:
+   - at end-systole, it latches the end-systolic volume and pressure;
+   - at end-diastole, the end-diastolic values, then `SV = EDV − ESV` and `EF = SV / EDV` (0 if EDV = 0).
+
+## Factor system
+
+Heart has no factor layers of its own. It writes into the chambers':
+- `cont_factor_*` → `el_max_factor_ps`;
+- `relax_factor_*` → `el_min_factor_ps`;
+- `pc_el_factor` → `PERICARDIUM` `el_base_factor_ps` and `el_k_factor_ps`.
+
+Each is applied as a delta to the *shared* persistent layer, so the chamber's factor is the sum of Heart's and anyone else's change. The floor at 0 makes a delta that hits it irreversible: stepping a factor down past 0 and back up doesn't return to the start.
+
+## Inputs and outputs
+
+- **Reads:** the `LA_LV` flow and the active LV outflow valve's flow (systole timing); chamber volumes and `pres_in` (per-beat analysis); `PERICARDIUM`.
+- **Writes:**
+  - `act_factor`, `ans_sens`, `ans_activity` of LA, LV, RV, RA/RAIVCI/RASVC;
+  - `act_factor` of COR, and `AA_COR.r_factor` (systolic coronary resistance);
+  - the chambers' `el_max_factor_ps`/`el_min_factor_ps`;
+  - `PERICARDIUM` factors and `vol_extra`.
+- **Written by:** the ANS efferents (`EF_HR`, `EF_HEART`, `EF_HR_CHEMO`), `Mob`, `Thermoregulation`, `Drugs` (see above); the user (rate, rhythm, factors, `trigger_pvc`).
+- **Read by:**
+  - `Monitor` (heart rate, ECG);
+  - `HeartFunction` (`lv_esp`/`lv_esv`/`lv_edp`/`lv_edv` and the RV values, for wall stress);
+  - `Mob` (`cardiac_cycle_running`, `cardiac_cycle_time`; its chamber refs);
+  - `Pda` (`ncc_ventricular`);
+  - `DataCollector`, which always watches `ncc_atrial` and `ncc_ventricular`.
+
+## Assumptions and limitations
+
+- **QT sets both the ECG and the contraction.** `qt_time` 0.25 s gives an ECG QTc of 0.25 s, where the neonatal normal is about 0.40 s. Lengthening it would also lengthen ventricular contraction (`N_v`), which the scenarios are calibrated on. An ECG-only QT is a possible later change.
+- **The same timings in every scenario.** `pq_time` 0.1, `qrs_time` 0.075, `qt_time` 0.25 and `av_delay` 0.0005 are used from 25 weeks to term and in the fetus.
+- **The AV delay is nearly zero.** The PR interval is essentially `pq_time`, and atrial contraction (the `aaf` pulse) spans the whole PQ interval, ending just as the ventricles activate.
+- **`cardiac_cycle_time` is the activation time, not the RR interval** (0.35 s against 0.50 s at term). `Mob` currently uses it as the beat duration when it amortises the stroke-work O2 cost, which overestimates stroke-work MVO2 (×1.4 at term) and flattens its rise with heart rate. To be fixed in the `Mob` pass.
+- **End-diastolic and end-systolic pressures are transmural.** They exclude the pericardial (and thoracic) pressure, which is about −3 to −8 mmHg at term, so they read higher than a catheter's cavity pressure. Transmural is the right quantity for wall stress (`HeartFunction`).
+- **Rate factors add.** Each factor adds `(factor − 1)·HR_ref`; they don't multiply.
+- **Systole timing needs the left-heart valves.** `LA_LV` and an LV outflow valve are assumed present unless the LV has no outflow.
+- **Deterministic rhythm.** No beat-to-beat variability; PVCs are triggered, not random (the engine forbids `Math.random()`).
+
+## Calibration (term_neonate)
+
+- `heart_rate_ref` 120.33 gives a resting HR of 120; calm day-3 term infants measure 117–121 (Satoh 2016, He 2011, Agata 1994).
+- LV `el_max` ×1.15 and RV `el_max` ×1.3 make stroke volume and ejection fraction match neonatal CMR (Jhaveri 2023: SV 1.6 mL/kg, EF 63 / 52.5 %) at unchanged output.
+
+See `scripts/_fix_term_hr_contractility.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Heart` (trimmed to the main config props; `components` holds the chambers, valves and `PERICARDIUM`):
+
+```json
+{
+  "name": "Heart",
+  "model_type": "Heart",
+  "is_enabled": true,
+  "heart_rate_ref": 120.3333,
+  "pq_time": 0.1,
+  "qrs_time": 0.075,
+  "qt_time": 0.25,
+  "av_delay": 0.0005,
+  "ans_sens": 1,
+  "av_block_mode": "none",
+  "vent_pacemaker_mode": "escape",
+  "cont_factor_left": 1,
+  "cont_factor_right": 1,
+  "relax_factor_left": 1,
+  "relax_factor_right": 1,
+  "pc_el_factor": 1,
+  "pc_extra_volume": 0
+}
+```
+
+## Usage in the scenarios
+
+One `Heart` in every scenario, at the top of the model list (it sets the chambers' activation before they step). It owns 14 sub-models:
+- the chambers `LA`, `LV`, `RV`, `RAIVCI`, `RASVC`;
+- the valves `LA_LV`, `RAIVCI_RV`, `RASVC_RV`, `RV_PA`, `LV_AA`, and the disabled `RV_AA`, `LV_PA`;
+- the intra-atrial connection `RAIVCI_RASVC`;
+- `PERICARDIUM`.
+
+The coronary bed `COR` belongs to `Mob`.
+
+Scenario differences:
+
+| | `heart_rate_ref` | Contractility / relaxation factors |
+|---|---|---|
+| term_neonate | 120.33 | – |
+| term fetus | 136 | `cont_factor_left` 1.15 |
+| 25 wk preterm | 160 | `relax_factor_*` 1.12 |
+| bischoff_bidir_pda | 160 | `cont_factor_*` 0.4, `relax_factor_*` 1.12, `rv_delay` 0.008 |
+
+## References
+
+- Bazett HC. An analysis of the time-relations of electrocardiograms. *Heart* 1920;7:353–370. (QT rate correction.)
+- Term calibration sources (Satoh 2016, He 2011, Agata 1994, Jhaveri 2023) are listed in [TermNeonateReference](./TermNeonateReference.md).
 
 ````
 
@@ -7382,365 +6890,381 @@ isoelectric at 0 mV.
 ````markdown
 # HeartChamber
 
-A HeartChamber represents a cardiac chamber (atrium or ventricle) with time-varying elastance, ANS-mediated contractility and relaxation, and blood composition tracking. It is the model used for LA, LV, RAIVCI, RASVC, and RV.
+A `HeartChamber` is a heart chamber: a [`TimeVaryingElastance`](./TimeVaryingElastance.md) that holds blood (composition mixed like a [`BloodCapacitance`](./BloodCapacitance.md)). Its contractility and relaxation respond to the autonomic nervous system, drugs, myocardial oxygen balance, load and remodelling. The atria and ventricles (`LA`, `LV`, `RV` and the two halves of the right atrium) are HeartChambers.
+
+## Physiology
+
+Each chamber stiffens when activated and relaxes in between (see [TimeVaryingElastance](./TimeVaryingElastance.md#physiology)). Two numbers describe it:
+- **`el_max`, contractility:** how stiff it gets at peak contraction.
+- **`el_min`, diastolic stiffness:** how easily it fills.
+
+Several influences change those two numbers, and HeartChamber adds them up:
+
+- **Sympathetic (β1) stimulation** raises contractility (*inotropy*) and speeds relaxation, lowering diastolic stiffness (*lusitropy*).
+- **Inotropes and lusitropes** (adrenaline, milrinone, …) do the same through the `Drugs` model.
+- **Myocardial hypoxia** (oxygen supply below demand) depresses contractility through `Mob`.
+- **Load and remodelling.** An acutely overloaded ventricle loses contractility (afterload mismatch). A chronically overloaded one remodels: it dilates (larger unstressed volume), stiffens and loses contractility. `HeartFunction` models both.
+- **The clinician or scenario** sets contractility and relaxation per side of the heart through `Heart` (`cont_factor_*`, `relax_factor_*`).
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── TimeVaryingElastance         (volume, time-varying elastance, pressure)
-        └── HeartChamber           (ANS coupling, blood composition)
+  └── TimeVaryingElastance
+        └── HeartChamber      (own factor composition with ANS/drug/Mob/load/remodel terms; blood mixing)
 ```
 
-## Relationship to BloodTimeVaryingElastance
-
-Both `HeartChamber` and `BloodTimeVaryingElastance` extend `TimeVaryingElastance` and add blood composition tracking. The key difference is that HeartChamber overrides `calc_elastances()` to incorporate autonomic nervous system effects on contractility and relaxation via beta-1 adrenergic receptor modeling.
-
-## What it models
-
-A cardiac chamber whose elastance cycles between `el_min` (diastole) and `el_max` (systole), driven by the `act_factor` provided by the `Heart` model. The ANS modulates both values:
-
-- **Diastolic function (el_min)**: Beta-1 receptor activation produces a lusitropic effect -- it *decreases* el_min, improving relaxation. A lower el_min means better diastolic filling.
-- **Systolic function (el_max)**: Beta-1 receptor activation produces a positive inotropic effect -- it *increases* el_max, strengthening contraction.
-
-The `Heart` model also applies contractility (`cont_factor_left/right`) and relaxation (`relax_factor_left/right`) factors via the `el_max_factor_ps` and `el_min_factor_ps` persistent factors.
+HeartChamber overrides `calc_elastances` and `calc_volumes` (extra terms, floors) and `volume_in` (blood mixing). `calc_pressure` is inherited unchanged. Its sibling [`BloodTimeVaryingElastance`](./BloodTimeVaryingElastance.md) (the coronary bed) has the mixing but none of the extra terms.
 
 ## Properties
 
-### Inherited from TimeVaryingElastance
+Elastance, volume, activation and factor props are inherited: see [TimeVaryingElastance → Properties](./TimeVaryingElastance.md#properties).
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume |
-| `el_min` | mmHg/L | Minimum elastance (diastolic stiffness) |
-| `el_max` | mmHg/L | Maximum elastance (systolic stiffness / contractility) |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient |
-| `act_factor` | 0-1 | Activation factor (set by Heart model: `aaf` for atria, `vaf` for ventricles) |
-| `vol` | L | Current blood volume |
-| `pres` | mmHg | Total pressure |
-| `pres_in` | mmHg | Recoil pressure |
-| `pres_ext` | mmHg | External pressure (non-persistent, e.g., pericardial pressure) |
+### Config (set in the definition JSON)
 
-### ANS properties (unique to HeartChamber)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `temp` | °C | 37.0 | Blood temperature; mixed on inflow, relaxed toward `body_temp` by `Blood`. |
+| `viscosity` | cP | 6.0 | Overwritten by `Blood` from the chamber's haemoglobin every step; not mixed. |
+| `solutes` | object | `{}` | Solute concentrations, seeded from `Blood` when empty. |
+| `drugs` | object | `{}` | Drug concentrations (`Drugs`). |
 
-| Property | Unit | Description |
-|---|---|---|
-| `ans_sens` | 0-1 | Sensitivity to ANS activity. Set by the Heart model. |
-| `ans_activity` | unitless | ANS activity level. 1.0 = baseline, >1 = sympathetic stimulation. Set by Heart model. |
+### Set by other models
 
-### Blood composition
+| Property | Unit | Default | Written by | Effect |
+|---|---|---|---|---|
+| `ans_sens` | – | 1.0 | `Heart` (its own `ans_sens`), every step | Sensitivity to `ans_activity`. |
+| `ans_activity` | – | 1.0 | `Heart`: `ans_activity · ans_activity_factor` (`EF_HEART` drive scaled by `Mob`), every step | > 1 raises `el_max` and lowers `el_min`. |
+| `el_max_mob_factor` | – | 1.0 | `Mob` (all chambers) | Hypoxic contractility depression. |
+| `el_max_drug_factor` | – | 1.0 | `Drugs` (all chambers) | Inotropy. |
+| `el_min_drug_factor` | – | 1.0 | `Drugs` (all chambers) | Lusitropy; < 1 = better relaxation. |
+| `el_max_load_factor` | – | 1.0 | `HeartFunction` (LV, RV) | Acute load-induced contractility depression. |
+| `el_max_remodel_factor` | – | 1.0 | `HeartFunction` (LV, RV) | Chronic remodelling: contractility. |
+| `el_k_remodel_factor` | – | 1.0 | `HeartFunction` (LV, RV) | Chronic remodelling: diastolic stiffening. |
+| `u_vol_remodel_factor` | – | 1.0 | `HeartFunction` (LV, RV) | Chronic remodelling: dilation. |
+| `act_factor` | – | 0.0 | `Heart` | Activation (inherited; see [TimeVaryingElastance](./TimeVaryingElastance.md#set-by-other-models)). |
 
-| Property | Unit | Description |
-|---|---|---|
-| `temp` | degC | Blood temperature |
-| `viscosity` | cP | Blood viscosity |
-| `to2` | mmol/L | Total oxygen concentration |
-| `tco2` | mmol/L | Total carbon dioxide concentration |
-| `ph` | unitless | Blood pH (-1 = not calculated) |
-| `pco2` | mmHg | Partial pressure of CO2 (-1 = not calculated) |
-| `po2` | mmHg | Partial pressure of O2 (-1 = not calculated) |
-| `so2` | unitless | Oxygen saturation (-1 = not calculated) |
-| `hco3` | mmol/L | Bicarbonate concentration (-1 = not calculated) |
-| `be` | mmol/L | Base excess (-1 = not calculated) |
-| `solutes` | object | Dictionary of solute concentrations |
-| `drugs` | object | Dictionary of drug concentrations |
+These factors are not reset each step; their writers hold them. The props `Blood` and `BloodComposition` write onto every blood compartment (`haldane_coeff`, `P50_0`, `viscosity_ref`, `body_temp`, `blood_temp_tc`, `temp_ext_override`, `prev_ph`, `prev_po2`) are described on [BloodCapacitance](./BloodCapacitance.md#set-by-other-models).
 
-### Calculated intermediates
+### Outputs
 
-| Property | Unit | Description |
-|---|---|---|
-| `el_min_eff` | mmHg/L | Effective minimum elastance this step |
-| `el_max_eff` | mmHg/L | Effective maximum elastance this step |
-| `el_k_eff` | mmHg/L² | Effective non-linear elastance coefficient |
-| `u_vol_eff` | L | Effective unstressed volume |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `to2`, `tco2` | mmol/L | 0.0 | Total O2 and CO2 content; mixed on inflow. |
+| `ph`, `pco2`, `po2`, `so2`, `hco3`, `be` | as in [BloodCapacitance](./BloodCapacitance.md#outputs) | -1 | Blood gases, `-1` = not calculated. `Blood` solves them for `RAIVCI` (once per second). |
 
-## ANS elastance modulation
+## Calculation
 
-HeartChamber overrides `calc_elastances()` to add ANS effects. The key difference from the parent class:
+`calc_model()` (inherited) runs `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
 
-### Diastolic function (lusitropic effect)
+1. **`calc_elastances`** composes every term **additively** against the base value:
+   ```
+   el_min_eff = el_min · (1 + (el_min_factor − 1) + (el_min_factor_ps − 1) + (el_min_factor_scaling_ps − 1)
+                            + (el_min_drug_factor − 1)
+                            − (ans_activity − 1)·ans_sens)                      ← subtracted: lusitropy
+   el_max_eff = el_max · (1 + (el_max_factor − 1) + (el_max_factor_ps − 1) + (el_max_factor_scaling_ps − 1)
+                            + (el_max_mob_factor − 1) + (el_max_drug_factor − 1)
+                            + (el_max_load_factor − 1) + (el_max_remodel_factor − 1)
+                            + (ans_activity − 1)·ans_sens)                      ← added: inotropy
+   el_k_eff   = el_k · (1 + (el_k_factor − 1) + (el_k_factor_ps − 1) + (el_k_factor_scaling_ps − 1)
+                          + (el_k_remodel_factor − 1)
+                          + (the el_min modulation above: relaxation, drug lusitropy, ANS))
+   ```
+   The diastolic modulation scales the **whole** diastolic curve, `el_min` and `el_k` alike, so relaxation, lusitropy and the ANS still act on a chamber whose diastolic stiffness is quadratic.
+   Then:
+   - `el_min_eff` and `el_k_eff` are floored at 0 (the subtracted terms could take them below);
+   - `el_max_eff` is raised to `el_min_eff` if it falls below it;
+   - the non-persistent factors are reset.
+2. **`calc_volumes`**: `u_vol_eff = u_vol · (1 + the three layers + (u_vol_remodel_factor − 1))`, floored at 0. `u_vol_factor` is reset.
+3. **`calc_pressure`** (inherited): `pres_in = p_ed + (p_es − p_ed)·act_factor` (see [TimeVaryingElastance → Calculation](./TimeVaryingElastance.md#calculation)), plus the pericardial `pres_ext`.
 
-ANS activation *decreases* el_min (better relaxation):
+**`volume_in(dvol, comp_from)`** adds the volume and mixes the incoming blood with [`mix_blood_in`](./BloodMixing.md): `to2`, `tco2`, solutes, drugs and temperature.
 
-```
-el_min_eff = el_min
-  + (el_min_factor - 1) * el_min
-  + (el_min_factor_ps - 1) * el_min
-  + (el_min_factor_scaling_ps - 1) * el_min
-  - (ans_activity - 1) * el_min * ans_sens    // note: SUBTRACTED
-```
+## Factor system
 
-### Systolic function (inotropic effect)
+All layers and terms are **additive**, unlike `BloodVessel`'s multiplicative composition (see [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern)). Two consequences:
 
-ANS activation *increases* el_max (stronger contraction):
+- **Effects add, they don't compound.** For example, `Heart` contractility +20 % and an inotrope +20 % give +40 %, not +44 %.
+- **One sign is reversed.** The ANS term is *subtracted* for `el_min`: more sympathetic drive means a lower diastolic stiffness.
 
-```
-el_max_eff = el_max
-  + (el_max_factor - 1) * el_max
-  + (el_max_factor_ps - 1) * el_max
-  + (el_max_factor_scaling_ps - 1) * el_max
-  + (el_max_mob_factor - 1) * el_max          // myocardial-oxygen-balance (Mob)
-  + (el_max_drug_factor - 1) * el_max         // inotropy (Drugs PK/PD)
-  + (el_max_load_factor - 1) * el_max         // acute load-induced depression (HeartFunction)
-  + (el_max_remodel_factor - 1) * el_max      // chronic remodeling (HeartFunction)
-  + (ans_activity - 1) * el_max * ans_sens    // note: ADDED
-```
+The persistent layers are written by `Heart`:
+- `set_contractility` → `el_max_factor_ps`;
+- `set_relaxation` → `el_min_factor_ps`, left and right separately.
 
-A safety check ensures `el_max_eff` never falls below `el_min_eff`.
+The scaling layers are written by `ModelScaler`, and the `Calibrator` also writes `el_max_factor_ps`.
 
-`el_k_eff` likewise adds a chronic remodeling term (`el_k_remodel_factor`, diastolic stiffening from
-HeartFunction) alongside its three factor tiers, and `calc_volumes()` is overridden to add the
-eccentric-dilation term (`u_vol_remodel_factor`, HeartFunction) to `u_vol_eff`. All four of these
-extra factors default to `1.0` (no effect) and are *not* reset each step — see
-[HeartFunction.md](./HeartFunction.md) and the Mob/Drugs models.
+## Inputs and outputs
 
-## Three-tier factor system
+- **Reads:** the upstream compartment on inflow (composition).
+- **Written by:**
+  - `Heart` (activation, ANS, contractility and relaxation factors);
+  - `Mob`, `Drugs`, `HeartFunction` (the terms above);
+  - `Blood` (temperature, viscosity, seed composition);
+  - `PERICARDIUM` (`pres_ext`);
+  - the valves and connectors (volume).
+- **Read by:**
+  - the valves and connectors (`pres`);
+  - `Heart` (volumes and `pres_in` for the per-beat analysis);
+  - `Mob` (LV/RV pressure and volume for stroke work);
+  - `Monitor`, `Blood` (`RAIVCI` blood gas);
+  - `DataCollector` watchers (PV loops).
 
-| Tier | Factors | Purpose |
-|---|---|---|
-| Non-persistent | `u_vol_factor`, `el_min_factor`, `el_max_factor`, `el_k_factor` | Transient effects, reset each step |
-| Persistent (`_ps`) | `u_vol_factor_ps`, `el_min_factor_ps`, `el_max_factor_ps`, `el_k_factor_ps` | Heart model contractility/relaxation factors |
-| Scaling (`_scaling_ps`) | `u_vol_factor_scaling_ps`, `el_min_factor_scaling_ps`, `el_max_factor_scaling_ps`, `el_k_factor_scaling_ps` | ModelScaler weight/manual scaling |
+## Assumptions and limitations
 
-The persistent factors are the primary mechanism by which the `Heart` model controls chamber function:
-- `el_max_factor_ps` is adjusted by `Heart.set_contractillity()` via `cont_factor_left/right`
-- `el_min_factor_ps` is adjusted by `Heart.set_relaxation()` via `relax_factor_left/right`
-
-## Pressure calculation
-
-Inherited from `TimeVaryingElastance`:
-
-```
-p_ms = (vol - u_vol_eff) * el_max_eff
-p_ed = el_k_eff * (vol - u_vol_eff)^2 + el_min_eff * (vol - u_vol_eff)
-pres_in = (p_ms - p_ed) * act_factor + p_ed
-```
-
-During diastole (`act_factor = 0`), pressure is determined by `el_min_eff` (and `el_k_eff` for non-linear behavior). During systole (`act_factor` approaches peak), pressure is dominated by `el_max_eff`.
-
-## Mixing logic (`volume_in`)
-
-Overrides `volume_in` to perform composition mixing when blood flows in, through the shared `mix_blood_in` ([`helpers/BloodMixing.js`](../helpers/BloodMixing.js)), the same as `BloodCapacitance`:
-
-```
-concentration += ((concentration_from - concentration) * dvol) / vol
-```
-
-Applied to: `to2`, `tco2`, all `solutes`, all `drugs`, `temp`, `viscosity`.
-
-## Calculation cycle
-
-1. `calc_elastances()` -- compute el_min_eff, el_max_eff, el_k_eff with ANS modulation (overridden)
-2. `calc_volumes()` -- compute u_vol_eff including the `u_vol_remodel_factor` term (overridden)
-3. `calc_pressure()` -- compute time-varying pressure (inherited from TimeVaryingElastance)
-
-## Interaction with the Heart model
-
-The `Heart` model orchestrates all HeartChamber instances:
-
-1. Sets `act_factor` each step: `aaf` (atrial activation function) for LA, RAIVCI, RASVC; `vaf` (ventricular activation function) for LV, RV
-2. Sets `ans_activity` and `ans_sens` for ANS coupling
-3. Adjusts `el_max_factor_ps` via `set_contractillity()` (systolic function control)
-4. Adjusts `el_min_factor_ps` via `set_relaxation()` (diastolic function control)
-
-Flow between chambers is handled by separate `Resistor` models (e.g., `LA_LV` for the mitral valve, `LV_AA` for the aortic valve).
+- **Additive composition.** Large simultaneous effects add linearly. Several large negative terms together can only be stopped by the floor at 0.
+- **One ANS signal, all chambers.** The atria and both ventricles get the same `ans_activity` and `ans_sens`.
+- **Quadratic diastolic relation** (see [The diastolic relation](#the-diastolic-relation)): steeper than linear but less steep than the measured power law. Two scenarios still use linear chambers.
+- **One unstressed volume** for the diastolic and systolic relations (inherited).
+- **Right-ventricle unstressed volume.** The postnatal scenarios give the RV a `u_vol` 5.5× the LV's (term 4.0 vs 0.73 mL, since the first commit). `u_vol` is also the volume intercept of the end-systolic relation, so the RV's end-systolic elastance comes out at 28 mmHg/mL, about the LV's 30, where real RVs are typically ~⅓–½ of the LV. Term RV volumes and EF (52 %) match CMR, but the RV is too insensitive to afterload. With the fetal ratio (1.64×, already used by the fetal scenarios) and `el_max` rescaled, pulmonary arterioles ×2 lower RV stroke volume 6.1 % instead of 3.5 %. To be re-parameterised in the scenario re-validation session (it shifts the PDA patients' `cont_factor_right` calibrations).
 
 ## Example definition (JSON)
+
+From `term_neonate.json`, `models.Heart.components.LV` (trimmed to the config props):
 
 ```json
 {
   "name": "LV",
-  "description": "left ventricle",
   "model_type": "HeartChamber",
   "is_enabled": true,
-  "vol": 0.0267,
-  "u_vol": 0.003,
-  "el_min": 133,
-  "el_max": 5800,
-  "el_k": 0
+  "vol": 0.00606,
+  "u_vol": 0.000733,
+  "el_min": 0,
+  "el_max": 30477.7,
+  "el_k": 156107,
+  "ans_sens": 1
 }
 ```
 
-## Instances in the model
+## The diastolic relation
 
-| Name | Chamber | Activation |
-|---|---|---|
-| `LA` | Left atrium | Atrial (aaf) |
-| `LV` | Left ventricle | Ventricular (vaf) |
-| `RAIVCI` | Right atrium (IVC portion) | Atrial (aaf) |
-| `RASVC` | Right atrium (SVC portion) | Atrial (aaf) |
-| `RV` | Right ventricle | Ventricular (vaf) |
+Normal hearts stiffen steeply as they fill. Volume-normalised end-diastolic pressure–volume curves share one shape across human, dog and rat hearts, `EDP ∝ V^2.79` (Klotz 2006). The engine's diastolic term is `el_min·S + el_k·S²` (`S = vol − u_vol`). The closest it gets is a **pure quadratic**, `el_min` 0 with all the stiffness in `el_k`: local stiffness at rest is then 2× the average, against 2.8× for the power law.
+
+In 8 scenarios all five chambers use the pure quadratic, with `el_k` fitted by `scripts/_fix_chamber_edpvr.mjs`:
+- **Fit:** the resting end-diastolic (ventricles) and mean (atria) volumes are unchanged, and so are the resting vitals.
+- **Right atrium:** the two halves share one `el_k`, and their connector `RAIVCI_RASVC` is `implicit`. With stiffening atria the explicit scheme of that low-resistance connector oscillated.
+- **Effect:** in term_neonate with the reflexes off, +30 mL of blood raises stroke volume +17 % (linear: +34 %) and LV EDP +5.6 mmHg (linear: +3.6). That is the limited preload reserve of the newborn heart.
+
+`preterm_25wk` and `bischoff_ltr_pda` still use linear chambers. These small left-to-right-duct patients respond to the curve shape itself (HR +4/+9 bpm, SvO2 −1.3 %), so they are converted only when they are re-validated against their reference values.
+
+## Usage in the scenarios
+
+Five chambers in every scenario, all owned by `Heart` and inside `PERICARDIUM`. Their elastances and activations are listed on [TimeVaryingElastance → Usage](./TimeVaryingElastance.md#usage-in-the-scenarios).
 
 ### The split right atrium
 
-The RA is two chambers, `RAIVCI` (IVC return, coronary sinus) and `RASVC` (SVC return). Each has its own
-tricuspid half (`RAIVCI_RV`, `RASVC_RV`) and foramen-ovale half (`LA_RAIVCI`, `LA_RASVC`). They are joined
-by the `RAIVCI_RASVC` resistor (in `Heart.components`):
+The right atrium is two chambers:
+- `RAIVCI` receives the IVC and the coronary sinus (`COR_RAIVCI`);
+- `RASVC` receives the SVC.
 
-- **Fetal scenarios** (`fetus_30wk`, `fetus_term`) keep the halves **separate** (`no_flow: true`). The
-  split is what produces preferential streaming: ductus venosus / IVC blood → FO → LA, SVC blood → RV.
-- **All postnatal scenarios** (since 2026-10-01) **merge** them into one atrium. The link is open in both
-  directions (`no_flow: false`, `no_back_flow: false`) with a small resistance
-  `R = max(1, ⌈2·dt·(E₁max + E₂max)⌉)`: 13 mmHg·s/L for the neonatal/CHD set (el_max 6104 each), 1 for
-  the adults. The two halves then sit within ≈ 0.01 mmHg of each other and mix fully.
-  - R must stay above `dt·(E₁+E₂)` (≈ 6 at dt 0.0005) or the explicit integration oscillates
-    (R = 2 runs away at ±350 L/min). The 2× margin covers ANS-raised elastance.
-  - `RAIVCI_RASVC` is not in `scaler_config.heart.resistance`, so weight scaling leaves it alone.
-- Before the merge, every scenario had the halves sealed. That made the SvO₂ readout IVC-only blood
-  (see [Monitor](./Monitor.md)), confined TAPVC's pulmonary venous return to `RASVC`, and kept a `RASVC`
-  ECMO cannula from reaching IVC return (see [Ecls](./Ecls.md)).
-- `scripts/_make_term_fetus.mjs` closes the link explicitly, because it starts from `term_neonate`; the
-  postnatal generators inherit the merged link from `term_neonate`.
+Each has its own tricuspid half (`RAIVCI_RV`, `RASVC_RV`, both `HeartValve`s) and foramen-ovale half (`LA_RAIVCI`, `LA_RASVC`, owned by `Shunts`). The two halves are joined by the `RAIVCI_RASVC` resistor (in `Heart.components`):
+
+| Scenarios | `RAIVCI_RASVC` | Effect |
+|---|---|---|
+| Fetal (`fetus_term`, `fetus_30wk`, `fetus_25wk`) | `no_flow: true` (sealed; `mix_flow` inactive) | Preferential streaming: ductus venosus/IVC blood → foramen ovale → LA; SVC blood → RV. |
+| Postnatal (term, preterm, Bischoff) | open both ways, `r_for`/`r_back` 13 mmHg·s/L, `mix_flow` 0.01 L/s | One atrium in pressure (the halves within ≈ 0.01 mmHg) but only **partly mixed**, as IVC/SVC streaming is in a real atrium. `mix_flow` was chosen in the engine review to bring the RA SO2 gap between the halves from 6.1 to 1.5 %. |
+
+Constraints on the resistance and mixing:
+- **Stable resistance.** The postnatal resistance follows `R = max(1, ⌈2·dt·(E₁max + E₂max)⌉)`. R must stay above `dt·(E₁ + E₂)`, about 6 at dt 0.0005, or the explicit integration oscillates; the factor 2 covers ANS-raised elastance.
+- **Not weight-scaled.** `RAIVCI_RASVC` isn't in the scaler config.
+- **Mixed venous saturation.** `Blood` solves both `RAIVCI` and `PA`, the true mixed venous blood; the Monitor reads SvO2 from `PA` (see [Monitor](./Monitor.md)).
+
+## References
+
+- Klotz S, Hay I, Dickstein ML, et al. Single-beat estimation of end-diastolic pressure-volume relationship: a novel method with potential for noninvasive application. *Am J Physiol Heart Circ Physiol* 2006;291(1):H403–H412. [doi:10.1152/ajpheart.01240.2005](https://doi.org/10.1152/ajpheart.01240.2005)
+
+Otherwise this class introduces no literature-derived values. For the time-varying elastance concept see [TimeVaryingElastance](./TimeVaryingElastance.md#references). Chamber elastances are scenario calibrations (see [TermNeonateReference](./TermNeonateReference.md)).
 
 ````
 
 ### FILE: explain-engine/docs/HeartFunction.md
 
 ````markdown
-# HeartFunction — Load-Induced Ventricular Contractility Compromise
+# HeartFunction
 
-`HeartFunction` models how a ventricle becomes **compromised** when it labors against a very high
-pressure (afterload) or is over-dilated by too much volume (preload). It is a feedback controller in
-the same family as `Mob` and `Ans`: it runs in the step loop, reads the per-beat metrics that
-`Heart.analyze()` already produces, and writes multiplier **factors** onto the `LV` and `RV`
-`HeartChamber`s. It owns no sub-models and touches no base parameters directly.
+`HeartFunction` models how a ventricle becomes compromised when it works against too high a pressure (afterload) or is stretched by too much volume (preload). It watches each ventricle's wall stress beat by beat:
+- **Acute:** stress well above the resting level depresses contractility quickly and reversibly.
+- **Chronic:** stress that stays high remodels the ventricle slowly.
 
-## Physiology — why a single signal (wall stress)
+It acts on the `LV` and `RV` [`HeartChamber`](./HeartChamber.md)s through factor props only. It owns no sub-models.
 
-The healthy Frank–Starling response (more filling → more stroke volume) and afterload sensitivity
-(higher ejection pressure → higher end-systolic volume, lower stroke volume) are **already emergent**
-in the time-varying elastance core (`TimeVaryingElastance.calc_pressure`): the ESPVR
-(`el_max` = Ees = contractility) and the EDPVR coupled to the circuit reproduce them with no extra
-code. What `HeartFunction` adds is the **pathological** part — sustained load actually *degrading*
-contractility rather than just shifting the operating point on a fixed curve.
+## Physiology
 
-The unifying signal is the **Laplace wall stress** of a thin-walled sphere:
+The healthy responses to load need no extra code; they emerge from the time-varying elastance:
+- **Frank–Starling:** more filling gives more stroke volume.
+- **Afterload sensitivity:** higher ejection pressure gives a larger end-systolic volume and less stroke volume.
 
-```
-sigma = P · r / (2 · h)
-```
+HeartFunction adds the **pathological** part: sustained load that actually *degrades* the ventricle.
 
-A single quantity captures both mechanisms:
+The common signal is the **wall stress** (Laplace's law for a sphere): `σ = P · r / (2h)`.
+- **Afterload** raises it through the pressure `P` (end-systolic stress).
+- **Dilation** raises it through the cavity radius `r` (end-diastolic stress).
 
-- **Afterload** raises `sigma` through the pressure `P` (end-systolic wall stress `sigma_es`).
-- **Dilation** raises `sigma` through the cavity radius `r` (end-diastolic wall stress `sigma_ed`).
+So one signal covers both pressure and volume overload.
 
-This is more faithful than driving off raw pressure/volume, and unlike an Ea/Ees ratio it captures
-pure volume overload. Note the modern physiology: there is **no true sarcomere "descending limb" in
-vivo** (titin caps sarcomere length ~2.2 µm). High-afterload decompensation is **afterload mismatch**
-(Ross 1976) — stroke volume falls when preload reserve is exhausted or Ees is low — and dilation harm
-is the Laplace wall-stress / energetic mismatch, not overstretch. The model is built around that view.
+- **Acute: afterload mismatch and over-distension (seconds to minutes).** When the stress rises well above its resting level, contractility falls. This follows Ross's afterload mismatch concept (stroke volume falls once the preload reserve is used up), not a sarcomere "descending limb", which does not exist in vivo. It recovers fully when the load normalises.
+- **Chronic: remodelling (hours to days).** Sustained pressure overload (concentric remodelling) stiffens the ventricle and lowers contractility slightly. Sustained volume overload (eccentric remodelling) dilates the cavity and lowers contractility.
 
-## Geometry
-
-Per ventricle, from the end-systolic and end-diastolic cavity volumes (`Heart.lv_esv/lv_edv`,
-`rv_esv/rv_edv`):
+## Inheritance
 
 ```
-r      = (3 · V_cav / 4π)^(1/3)                                  cavity radius  (V in mL → r in cm)
-R_out  = (3 · (V_cav + V_wall) / 4π)^(1/3)                       outer radius
-h      = R_out − r                                               wall thickness
+BaseModelClass
+  └── HeartFunction
 ```
 
-Wall volume scales with heart weight (reusing Mob's relation), split by a configurable LV/RV mass
-fraction, so it tracks body weight automatically:
+## Properties
 
+### Config: switches and geometry
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `hf_active` | boolean | `true` | Master switch (both layers). |
+| `remodel_active` | boolean | `true` | Chronic layer switch. |
+| `hw_intercept`, `hw_slope` | g, g/g | 7.799, 0.004296 | Heart weight `hw = hw_intercept + hw_slope · weight_kg · 1000` (the same relation as `Mob`). |
+| `wall_density` | g/mL | 1.05 | Myocardial density. |
+| `wall_frac_lv`, `wall_frac_rv` | – | 0.35, 0.15 | Share of heart mass in the LV and RV free walls. |
+| `wall_volume_lv`, `wall_volume_rv` | mL | 0.0 | Explicit wall volumes; ≤ 0 derives them from heart weight. |
+
+### Config: acute layer
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `stress_deadband` | – | 1.5 | The response starts above this multiple of the resting setpoint. |
+| `g_es_lv`, `g_ed_lv` | 1/mmHg | 0.00125, 0.005 | LV contractility loss per mmHg of end-systolic / end-diastolic stress above the dead-band. |
+| `g_es_rv`, `g_ed_rv` | 1/mmHg | 0.002, 0.0075 | The same for the RV (thinner wall, more load-sensitive). |
+| `cont_tc` | s | 30 | Time constant of the response. |
+| `cont_floor` | – | 0.2 | Lowest acute factor. |
+
+### Config: chronic layer
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `remodel_tc` | s | 86400 | Remodelling time constant (~1 day; shorten it to see remodelling in a short run). |
+| `stress_avg_tc` | s | 300 | Time constant of the slow stress average that drives remodelling. |
+| `k_conc`, `k_ecc` | 1/mmHg | 0.01, 0.02 | Concentric / eccentric drive per mmHg of sustained stress above the setpoint. |
+| `mal_conc`, `mal_ecc` | – | 0.15, 0.25 | Contractility loss per unit concentric / eccentric remodelling. |
+| `stiff_conc` | – | 0.5 | Diastolic stiffening (`el_k`) per unit concentric remodelling. |
+| `dil_ecc` | – | 0.4 | Cavity dilation (`u_vol`) per unit eccentric remodelling. |
+| `remodel_floor` | – | 0.3 | Lowest chronic contractility factor. |
+
+### Config: setpoints
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `sigma_es_ref_lv`, `sigma_ed_ref_lv`, `sigma_es_ref_rv`, `sigma_ed_ref_rv` | mmHg | 0.0 | Resting end-systolic / end-diastolic wall stress per ventricle. A value > 0 is kept as given. A value ≤ 0 is learned during the warm-up. |
+| `setpoint_warmup` | s | 60 | Learning window, in elapsed model time since the model started (not the engine clock; saved scenarios have a non-zero `model_time_total`). |
+
+### Outputs
+
+| Property | Unit | Description |
+|---|---|---|
+| `hw` | g | Heart weight. |
+| `wall_stress_es_lv`, `wall_stress_ed_lv`, `wall_stress_es_rv`, `wall_stress_ed_rv` | mmHg | Wall stress at end-systole and end-diastole. |
+| `radius_es_lv`, `radius_ed_lv`, `radius_es_rv`, `radius_ed_rv` | cm | Cavity radius of the equivalent sphere. |
+| `wall_thickness_lv`, `wall_thickness_rv` | cm | Wall thickness at end-diastole. |
+| `el_max_load_factor_lv`, `el_max_load_factor_rv` | – | Acute factor (also written to the chamber). |
+| `remodel_concentric_lv`, `remodel_eccentric_lv`, `remodel_concentric_rv`, `remodel_eccentric_rv` | – | Remodelling state. |
+
+## Calculation
+
+`calc_model()` (when `hf_active`) computes the heart weight and the two wall volumes, then for each ventricle:
+
+1. **Geometry** (thin-walled sphere, volumes in mL ≙ cm³):
+   ```
+   r = (3·V_cav / 4π)^(1/3)        h = (3·(V_cav + V_wall) / 4π)^(1/3) − r
+   σ_es = esp · r_es / (2·h_es)     σ_ed = edp · r_ed / (2·h_ed)
+   ```
+   `esp`, `esv`, `edp`, `edv` come from `Heart` (latched each beat); the pressures are transmural.
+2. **Setpoints.** During the warm-up each setpoint not given in the definition tracks the highest stress seen. While a ventricle is still learning, both of its layers are held at no effect.
+3. **Acute layer:**
+   ```
+   excess = max(0, σ − stress_deadband · σ_ref)          (end-systolic and end-diastolic)
+   target = clamp(1 − g_es·excess_es − g_ed·excess_ed, cont_floor, 1)
+   load_factor += dt/cont_tc · (target − load_factor)
+   ```
+4. **Chronic layer.** Slow averages of `σ_es` and `σ_ed` (time constant `stress_avg_tc`) drive:
+   ```
+   rc → k_conc · max(0, σ_es,slow − σ_es,ref)            (time constant remodel_tc)
+   re → k_ecc  · max(0, σ_ed,slow − σ_ed,ref)
+   ```
+5. **Write the chamber factors:**
+   ```
+   el_max_load_factor    = load_factor
+   el_max_remodel_factor = max(remodel_floor, 1 − mal_conc·rc − mal_ecc·re)
+   el_k_remodel_factor   = 1 + stiff_conc·rc
+   u_vol_remodel_factor  = 1 + dil_ecc·re
+   ```
+
+## Factor system
+
+None of its own. It writes four of [`HeartChamber`'s](./HeartChamber.md#set-by-other-models) additive terms on the LV and RV; the atria are untouched.
+
+## Inputs and outputs
+
+- **Reads:** `Heart.lv_esp`, `lv_esv`, `lv_edp`, `lv_edv` and the `rv_*` equivalents; `model.weight`.
+- **Writes:** `el_max_load_factor`, `el_max_remodel_factor`, `el_k_remodel_factor`, `u_vol_remodel_factor` on `LV` and `RV`, every step.
+- **Read by:** `DataCollector` watchers; `scripts/probe_heartfunction.mjs`.
+
+## Assumptions and limitations
+
+- **The dead-band keeps normal loading out.** The response starts only above 1.5 × the resting stress. Without it, any preload rise above rest depressed contractility; the depressed ventricle dilated, which raised the stress further, and a normal +8 % volume load ran away to `cont_floor`. In term_neonate (reflexes off), 1.5 × is reached at:
+  - a MAP of ~80 mmHg (LV afterload);
+  - LA ~9 mmHg (LV over-dilation);
+  - a doubled PVR (RV).
+
+  The gains are a quarter of their first values, so the depression is graded and stable. For example:
+  - +50 mL blood volume → LV factor 0.84 (LA 17.6);
+  - PVR ×4 → RV 0.81;
+  - arterioles ×3 → LV 0.96.
+- **Concentric remodelling does not thicken the wall.** The wall volume is fixed by heart weight, so there is no compensating fall in stress. Its diastolic stiffening acts on `el_k`, which is the whole diastolic stiffness of the chambers in 8 scenarios but 0 in the two still-linear ones (`preterm_25wk`, `bischoff_ltr_pda`), where concentric remodelling only lowers contractility. To be revisited.
+- **Spherical geometry for both ventricles.** The crescent-shaped RV is treated as a sphere with 15 % of the heart mass.
+- **The heart-weight relation has a large intercept** (7.8 g), so small infants get relatively thick walls and low wall stress. The stress values compare within a scenario, not between sizes.
+- **One-beat start-up transient.** Right after a scenario loads, the first latched beat can exceed the dead-band briefly (bischoff_ltr_pda: LV end-diastolic 1.54 ×). The effect on the load factor is about 10⁻⁵.
+- **Remodelling is slow by design** (`remodel_tc` one day). Over a normal session it stays at its saved value.
+
+## Example definition (JSON)
+
+From `preterm_25wk.json`, `models.HeartFunction` (trimmed to the main config props):
+
+```json
+{
+  "name": "HeartFunction",
+  "model_type": "HeartFunction",
+  "is_enabled": true,
+  "hf_active": true,
+  "remodel_active": true,
+  "stress_deadband": 1.5,
+  "setpoint_warmup": 60,
+  "sigma_es_ref_lv": 23.5996,
+  "sigma_ed_ref_lv": 9.2291,
+  "sigma_es_ref_rv": 42.2645,
+  "sigma_ed_ref_rv": 16.5871
+}
 ```
-hw       = hw_intercept + hw_slope · weight_kg · 1000            [g]
-V_wall_x = wall_volume_x  (if > 0)  else  hw · wall_frac_x / wall_density   [mL]
-```
 
-Wall stress uses the chamber transmural recoil pressure (`pres_in`) and the per-phase volume:
-`sigma_es = lv_esp · r_es / (2·h_es)`, `sigma_ed = lv_edp · r_ed / (2·h_ed)`.
+## Usage in the scenarios
 
-## Setpoints (auto-calibration)
+One instance in every scenario, enabled, with resting setpoints learned for that scenario. Use `scripts/_relearn_heartfunction.mjs <scenario> --write` to re-learn them after re-calibrating a scenario.
 
-Baseline wall stress depends on each scenario's geometry, so the setpoints `sigma_*_ref_{lv,rv}`
-auto-calibrate: during an initial window (`setpoint_warmup` seconds **of elapsed model time since the
-model started** — not the absolute engine clock, since scenarios are saved with a non-zero
-`model_time_total`) the model tracks the resting peak wall stress and freezes the reference to it.
-While a ventricle is still learning a setpoint, its factors are held at `1.0` (no effect). A positive
-`sigma_*_ref` in the definition is kept exactly as given and is not learned: it is never raised by
-the warm-up, so a saved scenario keeps its setpoints across save/load cycles. A ventricle whose two
-setpoints are both given responds to load from the first step.
+| Scenario | LV σ_es / σ_ed | RV σ_es / σ_ed |
+|---|---|---|
+| term_neonate | 78.1 / 21.6 | 127.4 / 57.0 |
+| fetus_term | 51.0 / 12.7 | 121.2 / 38.7 |
+| fetus_30wk | 28.2 / 8.2 | 57.2 / 21.5 |
+| fetus_25wk | 17.8 / 3.1 | 34.8 / 7.7 |
+| preterm_30wk | 39.6 / 15.8 | 52.8 / 34.5 |
+| preterm_28wk | 30.3 / 11.3 | 56.3 / 24.4 |
+| preterm_25wk | 23.6 / 9.2 | 42.3 / 16.6 |
+| bischoff_no_pda | 21.2 / 7.5 | 34.7 / 18.5 |
+| bischoff_ltr_pda | 27.1 / 14.8 | 52.3 / 21.4 |
+| bischoff_bidir_pda | 21.0 / 6.7 | 66.7 / 18.0 |
 
-## Acute layer (reversible, seconds–minutes)
+`scripts/probe_heartfunction.mjs` exercises it on term_neonate with an afterload and a volume challenge.
 
-When end-systolic stress (afterload) or end-diastolic stress (over-dilation) exceeds
-`stress_deadband` (1.5) × its setpoint, contractility is depressed, smoothed by a first-order lag
-toward the target:
+## References
 
-```
-excess_es  = max(0, sigma_es − stress_deadband·ref_es)
-excess_ed  = max(0, sigma_ed − stress_deadband·ref_ed)
-target     = clamp(1 − g_es·excess_es − g_ed·excess_ed, cont_floor, 1)
-load_factor += dt · (1/cont_tc) · (target − load_factor)
-```
+- Ross J Jr. Afterload mismatch and preload reserve: a conceptual framework for the analysis of ventricular function. *Prog Cardiovasc Dis* 1976;18(4):255–264. [doi:10.1016/0033-0620(76)90021-9](https://doi.org/10.1016/0033-0620(76)90021-9)
 
-The dead-band keeps normal loading out of it. Without it, any preload rise above rest
-depressed contractility. The depressed ventricle then dilated, which raised the stress further, so a
-normal Frank–Starling volume load (+8 % blood volume) ran away to `cont_floor`. 1.5× is reached in
-the term neonate (reflexes off) at a MAP of ~80 (LV afterload), LA ~9 mmHg (LV over-dilation) or a
-doubled PVR (RV). The gains are a quarter of their first values (`g_es_lv` 0.00125, `g_ed_lv` 0.005,
-`g_es_rv` 0.002, `g_ed_rv` 0.0075). With the original gains the loop gain above the dead-band
-exceeded 1 and a severe overload still collapsed to the floor; now the depression is graded and
-stable. For example, +50 mL blood volume gives an LV factor of 0.84 (LA 17.6), PVR ×4 an RV factor
-of 0.81 and arterioles ×3 an LV factor of 0.96.
-
-`load_factor` is written to the chamber's `el_max_load_factor`. It fully recovers to `1.0` within
-~`cont_tc` when the load normalizes (afterload mismatch is reversible / inotrope-correctable).
-
-## Chronic layer (remodeling, slow)
-
-A slow wall-stress average (time constant `stress_avg_tc`) drives two remodeling integrators with the
-time constant `remodel_tc` (default ~1 day; compress it to observe remodeling within a short run):
-
-- **Concentric** `rc` (sustained high `sigma_es`, pressure overload): thickens the wall (raises the
-  effective `V_wall`, lowering `sigma` — compensation) with a maladaptive tail of diastolic
-  stiffening and a mild contractility decline.
-- **Eccentric** `re` (sustained high `sigma_ed`, volume overload): dilates the cavity and declines
-  contractility.
-
-These map onto chamber factors:
-
-```
-el_max_remodel_factor = clamp(1 − mal_conc·rc − mal_ecc·re, remodel_floor, 1)
-el_k_remodel_factor   = 1 + stiff_conc · rc      (concentric diastolic stiffening)
-u_vol_remodel_factor  = 1 + dil_ecc · re         (eccentric cavity dilation)
-```
-
-## Wiring into the chamber
-
-`HeartChamber.calc_elastances()` adds the two `el_max` terms and the `el_k` term, and
-`HeartChamber.calc_volumes()` (overridden) adds the `u_vol` term — all following the existing additive
-`+ (factor − 1) · base` convention, so they compose cleanly with the ANS inotropic term and Mob's
-`el_max_mob_factor`. The existing `el_max_eff < el_min_eff` clamp protects the lower bound. Atria are
-left untouched (factors stay `1.0`).
-
-## Verification
-
-`scripts/probe_heartfunction.mjs` builds `term_neonate`, warms up, then applies an afterload challenge
-and a volume-overload challenge, printing wall stress, the acute factor, and the remodeling state.
-Observed behavior: at baseline factors stay ≈1.0; a transfusion drives `sigma_ed`/`sigma_es` well above
-setpoint (beyond the dead-band), depresses ejection fraction and `el_max_load_factor` (graded), and—on a
-time-compressed run—dilates `u_vol_remodel_factor` and drops `el_max_remodel_factor` (the full
-both-timescale decompensation cascade). An afterload challenge raises `sigma_es` and depresses
-contractility directionally; note that the `term_neonate` circulation has a low-resistance runoff, so
-forcing severe *pure* pressure overload is hard in that scenario (a model-of-circulation property, not
-a `HeartFunction` limitation).
-
-## Key parameters
-
-| Parameter | Meaning |
-| --- | --- |
-| `hf_active`, `remodel_active` | master switches for the acute and chronic layers |
-| `wall_frac_lv/rv`, `wall_volume_lv/rv`, `wall_density` | wall-volume geometry |
-| `g_es_lv/rv`, `g_ed_lv/rv` | acute contractility-depression gains (afterload / dilation) |
-| `cont_tc`, `cont_floor` | acute response time constant and lower bound |
-| `stress_deadband` | the acute response starts above this multiple of the resting setpoint (1.5) |
-| `remodel_tc`, `stress_avg_tc` | chronic remodeling and stress-averaging time constants |
-| `k_conc`, `k_ecc`, `mal_conc`, `mal_ecc`, `stiff_conc`, `dil_ecc`, `remodel_floor` | remodeling gains and bound |
-| `setpoint_warmup`, `sigma_*_ref_*` | setpoint auto-calibration window / overrides |
+The gains, dead-band and time constants are model choices, tuned for graded, stable behaviour (see [Assumptions](#assumptions-and-limitations)).
 
 ````
 
@@ -7749,7 +7273,7 @@ a `HeartFunction` limitation).
 ````markdown
 # HeartValve
 
-A `HeartValve` is a `Resistor` with a distinct `model_type` — it adds no code of its own:
+A `HeartValve` is a [`Resistor`](./Resistor.md) under its own `model_type`. It adds no code: the valve behaviour comes from its configuration (`no_back_flow: true`). The type is a label that marks the heart valves in a scenario.
 
 ```js
 export class HeartValve extends Resistor {
@@ -7757,152 +7281,252 @@ export class HeartValve extends Resistor {
 }
 ```
 
-All of its behaviour (flow mechanics, the forward/backward resistances, the non-linear term, the
-flags) comes from [`Resistor`](./Resistor.md). The separate type exists for clarity in definitions and
-so the UI can present valve-relevant fields.
+## Physiology
 
-## Valve behaviour
+The four heart valves keep blood moving one way: tricuspid (right atrium → right ventricle), pulmonary (right ventricle → pulmonary artery), mitral (left atrium → left ventricle) and aortic (left ventricle → aorta). A valve opens when the pressure upstream exceeds the pressure downstream and closes as soon as it reverses.
 
-Valve action is configuration, not code: a heart valve sets **`no_back_flow = true`** so blood flows
-only in the forward direction (e.g. `LA_LV`, `RV_PA`, `LV_AA`). A valve that is atretic/absent in a
-given scenario additionally sets `no_flow = true`.
+In Explain a valve is an ideal one-way resistance:
+- It opens and closes instantly at zero pressure difference.
+- It never leaks.
+- Its small forward resistance gives a pressure drop proportional to flow.
 
-See [Resistor.md](./Resistor.md) for the flow equations, the `volume_out`/`volume_in` handshake, and
-the resistance/factor details.
+That is why the valves set the timing of the cardiac cycle: the moments the mitral and aortic valves open and close divide the beat into filling, isovolumic contraction, ejection and isovolumic relaxation. `Heart` uses exactly those moments (the mitral and aortic flows starting and stopping) to measure end-diastolic and end-systolic volumes.
+
+Valve disease is set up through configuration:
+- **Atresia:** `no_flow: true`, or the valve disabled.
+- **Regurgitation:** `no_back_flow: false` with a finite `r_back`.
+- **Stenosis:** a higher `r_for`, or the turbulent `r_k`.
+
+## Inheritance
+
+```
+BaseModelClass
+  └── Resistor
+        └── HeartValve
+```
+
+## Properties
+
+All props and their defaults are `Resistor`'s: see [Resistor → Properties](./Resistor.md#properties). The ones that make a resistor a valve:
+
+| Property | Typical value | Role |
+|---|---|---|
+| `no_back_flow` | `true` | One-way: no flow when the downstream pressure is higher. |
+| `r_for` | 55 mmHg·s/L | Forward resistance of the open valve (all valves, all scenarios; to be retuned, see [limitations](#assumptions-and-limitations)). |
+| `r_back` | 55 mmHg·s/L | Only acts if `no_back_flow` is turned off (regurgitation). |
+| `no_flow` / `is_enabled` | `false` / `true` | Atresia, or an alternative connection switched off. |
+| `implicit` | `true` on the outflow valves `LV_AA`, `RV_AA` | Stable flow into the stiff aorta (see [Resistor](./Resistor.md#implicit-flow-implicit)). |
+
+## Calculation
+
+Exactly [`Resistor`'s](./Resistor.md#calculation): forward flow `Δp / r_for_eff` (or the turbulent solve when `r_k > 0`); no flow backward while `no_back_flow`. Flow, volume transfer and composition mixing happen as in any resistor.
+
+## Factor system
+
+`Resistor`'s additive `r_factor` layers (see [Resistor → Factor system](./Resistor.md#factor-system)). No model writes them on the valves in the shipped scenarios.
+
+## Inputs and outputs
+
+- **Reads / writes:** the pressures of the two chambers or vessels it joins; their volumes and composition (as any resistor).
+- **Read by:** `Heart` (`LA_LV` and the active LV outflow valve: their flow starting and stopping marks end-diastole and end-systole for the per-beat analysis), `Monitor` and `DataCollector` watchers.
+- **Written by:** the scenario generators for congenital lesions (`no_flow`, `is_enabled`, `no_back_flow`, `r_back`; e.g. `_make_dtga.mjs`, `_make_hlhs.mjs`, `_make_ta.mjs`, `_make_paivs.mjs`).
+
+## Assumptions and limitations
+
+- **Ideal valves.** Instant opening and closing, no leaflet dynamics, no closing backflow, no regurgitation unless configured.
+- **One resistance for every valve, and too high at term.** All valves have `r_for` 55 mmHg·s/L in all scenarios. At term that gives peak open-valve gradients of mitral 7.8, aortic 7.1, tricuspid 5.3 and pulmonary 4.7 mmHg. Normal neonatal velocities (about 0.5–0.7 m/s across the atrioventricular valves, 0.8–1.0 m/s across the outflow valves; ΔP ≈ 4v²) suggest roughly 1–2 and 3–4 mmHg. In the 1 kg preterm the gradients are 1.4–5.3 mmHg. A linear resistance also gives a gradient proportional to flow, where a real valve's grows with flow². The valve resistances are to be retuned per scenario in the scenario re-validation session.
+- **The type is a label.** The UI shows the same fields for `HeartValve` and `Resistor`. Nothing in the engine branches on the type.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Heart.components.LV_AA` (trimmed to the config props):
+
+```json
+{
+  "name": "LV_AA",
+  "model_type": "HeartValve",
+  "is_enabled": true,
+  "comp_from": "LV",
+  "comp_to": "AA",
+  "r_for": 55,
+  "r_back": 55,
+  "r_k": 0,
+  "no_flow": false,
+  "no_back_flow": true,
+  "implicit": true
+}
+```
+
+## Usage in the scenarios
+
+Seven valves in all 10 scenarios, all owned by `Heart`:
+
+| Valve | Connection | State |
+|---|---|---|
+| Tricuspid | `RAIVCI_RV`, `RASVC_RV` (one per right-atrial half) | enabled |
+| Mitral | `LA_LV` | enabled |
+| Pulmonary | `RV_PA` | enabled |
+| Aortic | `LV_AA` | enabled, implicit |
+| Alternative outflows | `RV_AA`, `LV_PA` | disabled; switched on by the transposition generator (`_make_dtga.mjs`) |
+
+## References
+
+No literature-derived values. The valve resistance is a scenario parameter.
 
 ````
 
 ### FILE: explain-engine/docs/Hormones.md
 
 ````markdown
-# Hormones (RAAS / ADH)
+# Hormones
 
-The `Hormones` model is the **long-loop neuro-hormonal volume / osmolality controller** — the slow
-counterpart to the fast [`Ans`](./Ans.md) baroreflex. It models the
-renin–angiotensin–aldosterone system (RAAS) plus ADH (vasopressin) as a small set of named,
-inspectable hormone **activity levels** (`1.0` = resting baseline), each driven first-order toward a
-stimulus-set target and each writing effector channels that are **independent of the ANS** (so they
-compose, never collide).
+`Hormones` is the slow neuro-hormonal controller of volume, pressure and osmolality: the renin–angiotensin–aldosterone system (RAAS) and antidiuretic hormone (ADH, vasopressin). It is the long-loop counterpart of the fast [Ans](./Ans.md) baroreflex. Each hormone is an activity level (1.0 = resting) that moves first-order toward a target set by its stimuli and acts through its own effector channels. It holds no blood and is neutral at rest: it only diverges when the patient is perturbed (haemorrhage, hyperosmolality) or a pathway is switched off.
 
-Like the [`Kidneys`](./Kidneys.md) autoregulation loop it is a **controller/process model**: it
-holds no blood, resolves references to other models lazily, runs on an update interval, and **owns
-its effector channels while enabled** (releasing them once on disable). Default config is
-**neutral** — with setpoints anchored to the scenario's resting state, every `(hormone − 1) ≈ 0`,
-so a scenario that ships a `Hormones` model behaves identically at rest and only diverges when
-perturbed or when a pathway is clamped.
+## Physiology
 
-## Sensors → hormones → effectors
+- **Renin–angiotensin.** When renal perfusion pressure or circulating volume falls, the kidney releases renin, which generates angiotensin II within tens of seconds to minutes. Angiotensin II:
+  - constricts the systemic arterioles (and the veins, mobilising volume);
+  - constricts the efferent arteriole of the glomerulus, defending filtration pressure (GFR) when perfusion falls;
+  - stimulates aldosterone.
+- **Aldosterone** acts on the distal nephron over hours: it retains sodium and excretes potassium. Hyperkalaemia stimulates it directly.
+- **ADH** rises with plasma osmolality (a 1–2 % rise is enough) and, less sensitively, with a large volume loss. It makes the collecting duct permeable to water (antidiuresis), and at high levels it constricts vessels.
+
+## Inheritance
 
 ```
-SENSORS (lazy refs)                 HORMONES (1.0 = baseline)        EFFECTORS (owned, default-neutral)
-KID_ART.pres ───────────┐
-Circulation.total_blood_volume ─┬─► angiotensin ─┐                 Circulation.svr_factor_art / _ven   (arteriolar/venular constriction)
-AA.solutes.na (osm≈2·Na) ──┐    │   (renin=drive) ├─► aldosterone   KID_CAP_KID_VEN.r_factor_ps         (renal EFFERENT constriction)
-AA.solutes.k ──────────────┼────┘                │   (cascade+K)    Kidneys.reabsorption_factors.na/.k  (Na retention / K wasting)
-                           └─────────────────────┴─► adh            Kidneys.reabs_factor_adh            (water retention / antidiuresis)
+BaseModelClass
+  └── Hormones
 ```
 
-- **angiotensin II** ← low renal perfusion + low blood volume. `renin` is the instantaneous drive;
-  `angiotensin` is its lagged effective level (`angiotensin_tc`).
-- **aldosterone** ← angiotensin (cascade) + hyperkalemia. Slow (`aldosterone_tc`).
-- **adh** ← plasma osmolality (osmotic, `osm ≈ 2·Na`) + low volume/pressure (baroregulated).
+## Properties
 
-> **Why the renal EFFERENT, not the afferent.** The renal afferent (`KID_ART.r_factor_ps`) is owned
-> by the Kidneys autoregulation loop (overwritten every tick). Angiotensin II therefore acts renally
-> through the **efferent** arteriole (`KID_CAP_KID_VEN`, a free-standing `Resistor`) — which is also
-> its signature physiology: efferent constriction raises glomerular pressure and **defends GFR** when
-> perfusion falls. Systemic constriction goes through `Circulation.svr_factor_art/_ven`, which fans a
-> delta out to every systemic arteriole/venule's `r_factor_ps` (`BloodVessel` α-couples that into
-> elastance — realistic combined constriction). The ANS uses a *separate* `ans_activity` channel, so
-> the two compose without clashing.
+### Config: gating and wiring
 
-## Dynamics
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `hormones_running` | boolean | `true` | Master switch. Off releases every owned channel to 1 once, then idles. |
+| `raas_enabled`, `adh_enabled` | boolean | `true` | Per-pathway switches (off holds that pathway's hormones at 1). |
+| `perfusion_model`, `perfusion_prop` | – | `"KID_ART"`, `"pres"` | Renal perfusion pressure (averaged over each update). |
+| `volume_model`, `volume_prop` | – | `"Circulation"`, `"total_blood_volume"` | Circulating volume. |
+| `plasma_model` | – | `"AA"` | Plasma Na and K source (`solutes`). |
+| `circulation_name`, `kidneys_name`, `efferent_name` | – | `"Circulation"`, `"Kidneys"`, `"KID_CAP_KID_VEN"` | Effector targets. |
 
-Each hormone relaxes first-order toward a stimulus target on the controller tick
-(`_update_interval`, default 1 s; hormones are slow so a fine tick is unnecessary):
-`x += u·(1/tc)·(−x + target)`, clamped to `[hormone_min, hormone_max]`. With `p/V/Na/K` the sensed
-values and `*_setpoint` the resting anchors:
+### Config: set-points
 
-```
-renin       = 1 + renin_gain·(p_set−p)/p_set + renin_vol_gain·(V_set−V)/V_set        → angiotensin (lag)
-aldo_target = 1 + aldo_gain·(angiotensin−1) + aldo_k_in_gain·(K−K_set)/K_set         → aldosterone (slow lag)
-adh_target  = 1 + adh_gain_osmo·(Na−Na_set)/Na_set + adh_gain_baro·(V_set−V)/V_set   → adh (lag)
-```
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `perfusion_setpoint` | mmHg | 40 | Healthy renal perfusion pressure of this patient. |
+| `volume_setpoint` | L | 0.4 | Healthy circulating volume of this patient. |
+| `osmo_na_setpoint` | mmol/L | 138 | Plasma Na (the osmolality proxy, osmolality ≈ 2·Na). |
+| `k_setpoint` | mmol/L | 3.5 | Plasma K. |
 
-Each `*_enabled` gate that is off pins its hormone(s) to `1.0` (neutral). Effector factors map
-`1 + gain·(hormone−1)` (K wasting is `1 − aldo_k_gain·(aldo−1)`), each clamped, then written to the
-owned channel.
+The set-points are the patient's **healthy reference**, not its current state (see [Assumptions](#assumptions-and-limitations)).
 
-## Kidneys integration
+### Config: dynamics and effects
 
-Two neutral-by-default hooks were added to `Kidneys` for this layer (see [`Kidneys`](./Kidneys.md)):
-- **`reabs_factor_adh`** — ADH's dedicated water-reabsorption multiplier, folded into `_reabs_eff`
-  (separate from the user `reabs_factor_ps` layer).
-- **`reabsorption_factors`** (per-solute dict) — aldosterone's per-solute multiplier applied in
-  `_solute_reabs` (`na > 1` retain, `k < 1` waste); also reusable for diuretics.
+| Property | Default | Description |
+|---|---|---|
+| `renin_gain`, `renin_vol_gain` | 3.0, 3.0 | Angiotensin drive per fractional perfusion and volume deficit. |
+| `angiotensin_tc` | 30 s | Angiotensin time constant. |
+| `aldo_gain`, `aldo_k_in_gain` | 1.0, 2.0 | Aldosterone drive per (angiotensin − 1) and per fractional K excess. |
+| `aldosterone_tc` | 1800 s | Aldosterone time constant (physiologic; compress for demos). |
+| `adh_gain_osmo`, `adh_gain_baro` | 4.0, 1.0 | ADH drive per fractional Na excess and per fractional volume deficit. |
+| `adh_tc` | 120 s | ADH time constant. |
+| `hormone_min`, `hormone_max` | 0, 8 | Clamp on every hormone activity. |
+| `ang_svr_gain`, `ang_svr_ven_gain` | 0.3, 0.2 | Arteriolar and venular constriction per (angiotensin − 1). |
+| `adh_svr_gain` | 0.05 | Arteriolar constriction per (ADH − 1). |
+| `ang_efferent_gain` | 0.5 | Renal efferent constriction per (angiotensin − 1). |
+| `aldo_na_gain`, `aldo_k_gain` | 0.01, 0.1 | Na reabsorption rise and K reabsorption fall per (aldosterone − 1). |
+| `adh_water_gain` | 0.015 | Water reabsorption rise per (ADH − 1). |
+| `svr_factor_min`, `svr_factor_max`, `efferent_factor_min`, `efferent_factor_max` | 0.5 / 5 | Clamps on the vascular effects. |
+| `na_factor_min`, `na_factor_max`, `k_factor_min`, `k_factor_max`, `water_factor_min`, `water_factor_max` | 0.95/1.02, 0.2/1.5, 0.5/1.03 | Clamps on the renal effects. |
 
-## Read-outs
-| Read-out | Meaning |
+### Outputs
+
+| Property | Description |
 |---|---|
-| `angiotensin` / `aldosterone` / `adh` | effective hormone activity (1.0 = baseline) |
-| `renin` | instantaneous angiotensin drive (un-lagged) |
-| `svr_factor` / `svr_ven_factor` | applied systemic arteriolar / venular constriction factor |
-| `efferent_factor` | applied renal efferent `r_factor_ps` |
-| `na_reabs_factor` / `k_reabs_factor` / `water_reabs_factor` | applied Kidneys reabsorption factors |
-| `sensed_perfusion` / `sensed_volume` / `sensed_na` / `sensed_osmolality` / `sensed_k` | sensor read-outs (`sensed_perfusion` is the mean `KID_ART.pres` over each 1 s update, integrated every step) |
+| `renin` | Instantaneous angiotensin drive (the target, un-lagged). |
+| `angiotensin`, `aldosterone`, `adh` | Hormone activities (1 = rest). |
+| `svr_factor`, `svr_ven_factor`, `efferent_factor` | Applied vascular effects. |
+| `na_reabs_factor`, `k_reabs_factor`, `water_reabs_factor` | Applied renal effects. |
+| `sensed_perfusion`, `sensed_volume`, `sensed_na`, `sensed_osmolality`, `sensed_k` | What the sensors read. |
 
-## Configuration & calibration
-Anchor `perfusion_setpoint` ≈ baseline `KID_ART.pres` (neonate ≈ 40, adult ≈ 82 mmHg),
-`volume_setpoint` ≈ baseline `Circulation.total_blood_volume` (neonate ≈ 0.286 L, adult ≈ 4.84 L),
-`osmo_na_setpoint` ≈ 138, `k_setpoint` ≈ 3.5 — so resting hormone levels ≈ 1.0 and no channel rails
-(measured headless with `Ans` disabled). Gains/time-constants are configurable per hormone; both
-scenarios ship **enabled** with **physiologic** time constants (`angiotensin_tc` 30 s, `adh_tc`
-120 s, `aldosterone_tc` 1800 s).
+## Calculation
 
-**The set-points are the patient's healthy reference, not its current state.** A congenital
-lesion keeps its size's reference, so a coarctation's low renal pressure activates RAAS
-(angiotensin ≈ 2.5), as it should. A smaller or less mature patient needs its own reference,
-otherwise it reads as hypovolaemic and hypoperfused at rest. `scripts/_reference.mjs`
-(`scaleHormoneReferences`) derives it from the baseline the patient was made from:
-- `volume_setpoint` scales with the volume factor (weight / baseline weight);
-- `perfusion_setpoint` scales with the healthy MAP the gestation defends (`BR_MAP.set_value` from
-  the GA table) over the baseline's.
+Every step the renal perfusion pressure is integrated, so the controller senses its mean, not one sample of a pulsatile pressure. **Every 1 s:**
 
-`_make_preterm.mjs`, `_make_bischoff.mjs`, `_make_fetus.mjs` and `build_patient.mjs` apply it.
-For a postnatal patient below 34 wk the renal reference of [`Kidneys`](./Kidneys.md) (preterm kidney
-section) then replaces `perfusion_setpoint` with the `KID_ART` pressure of its solved renal bed: the
-MAP rule gives 19.2 mmHg at 24 wk, below the glomerular pressure that kidney needs.
-`build_patient.mjs` never uses a targeted MAP, which may be pathological. Until 2026-10-15 the
-preterm, Bischoff and fetal scenarios kept the term reference (0.286 L, 40 mmHg). They sat at
-angiotensin ×1.75–5 and constricted their arterioles by up to ×2.25 through
-`Circulation.svr_factor_art`. `scripts/_fix_hormone_references.mjs` repaired the stored files:
-it set the references and kept that constriction in the vessels' `r_factor_ps` as a scenario
-adjustment (Circulation no longer counts it as RAAS's), so each patient's calibrated resting state
-is kept while RAAS now starts near neutral.
+1. **Fractional errors** against the set-points: perfusion and volume deficits, Na and K excesses.
+2. **Hormones** (each a first-order lag with step fraction `min(1, Δt/tc)`, clamped 0–8):
+   ```
+   renin       = 1 + renin_gain·perf_deficit + renin_vol_gain·vol_deficit
+   angiotensin → renin                                                      (tc 30 s)
+   aldosterone → 1 + aldo_gain·(angiotensin − 1) + aldo_k_in_gain·k_excess   (tc 1800 s)
+   adh         → 1 + adh_gain_osmo·na_excess + adh_gain_baro·vol_deficit      (tc 120 s)
+   ```
+3. **Effects**, clamped:
+   ```
+   Circulation.svr_factor_hormones_art = 1 + 0.3·(ang − 1) + 0.05·(adh − 1)
+   Circulation.svr_factor_hormones_ven = 1 + 0.2·(ang − 1)
+   KID_CAP_KID_VEN.r_factor_ps         = 1 + 0.5·(ang − 1)                    renal efferent arteriole
+   Kidneys.reabsorption_factors.na     = 1 + 0.01·(aldo − 1)
+   Kidneys.reabsorption_factors.k      = 1 − 0.1·(aldo − 1)
+   Kidneys.reabs_factor_adh            = 1 + 0.015·(adh − 1)
+   ```
 
-**Validated headless** (`scripts/headless.mjs <scenario> --bleed FRAC | --naload Δ --phase2 S`,
-optionally `--hset aldosterone_tc=…` to compress for a quick loop check):
-- **Resting neutrality:** hormones ≈ 1.0; GFR/urine/FENa unchanged from the no-hormone calibration;
-  disabling (`hormones_running=false`) is byte-identical.
-- **Hemorrhage (−8% volume):** angiotensin/aldosterone↑, efferent constricts → GFR defended
-  (adult 100 → 72 mL/min), urine → oliguria (1.0 → 0.64 mL/kg/hr).
-- **Hyperosmolar (+12 mmol/L Na):** ADH↑ (1.0 → 1.35) → antidiuresis (urine 1.0 → 0.48 mL/kg/hr),
-  RAAS stays quiet (osmolality drives only ADH).
-- Stable over long physiologic-`tc` runs (no oscillation/railing).
+## Factor system
 
-## Simplifications / limitations (current scope)
-- **Aldosterone's volume effect is muted:** the engine's water transport follows the water fraction,
-  not osmotically coupled to Na, so aldosterone shows mainly as ↓FENa / ↓urine-Na rather than large
-  volume shifts. ADH (water) and AngII (vasoconstriction) carry the volume/pressure defense.
-- With **physiologic** `aldosterone_tc` (~30 min), aldosterone barely moves in short scenarios —
-  expected; compress `aldosterone_tc` for interactive demos.
-- While enabled, `Hormones` **owns** `Circulation.svr_factor_*`, `KID_CAP_KID_VEN.r_factor_ps`, and
-  the Kidneys hormone factors — manual edits to those channels are overridden (same precedent as
-  autoregulation owning `KID_ART.r_factor_ps`). The clean "off" switch is `hormones_running = false`
-  (or per-pathway `raas_enabled` / `adh_enabled`), which releases the channels back to neutral.
-- Not modeled: ANP / natriuretic peptides, thirst / fluid intake, direct osmotic water-follows-Na
-  coupling. Severe (>~15%) acute hemorrhage can drive the circulation model to non-physiologic
-  (negative) pressures — a pre-existing circulation limitation, independent of this layer.
+Hormones writes **its own channels**, so it composes with the other writers instead of overwriting them:
+- **Circulation:** `svr_factor_hormones_art` / `_ven`, which Circulation adds to the vessels' `r_factor_ps` as deltas, next to the user's `svr_factor_art` and Drugs' `svr_factor_drug`. See [Circulation](./Circulation.md).
+- **The renal efferent resistor:** its `r_factor_ps`, owned by Hormones. The renal *afferent* is left to the Kidneys' autoregulation, which acts on `AD_KID_ART`.
+- **Kidneys:** dedicated hormone factors (`reabsorption_factors`, `reabs_factor_adh`), separate from the user's reabsorption layer. See [Kidneys](./Kidneys.md).
+
+## Inputs and outputs
+
+- **Reads:** `KID_ART.pres`, `Circulation.total_blood_volume`, `AA.solutes.na` and `.k`.
+- **Writes:** the channels above.
+- **Written by:** the user (switches, gains); the scenario generators (set-points, via `scripts/_reference.mjs`).
+- **Read by:** Circulation, Kidneys and the efferent resistor (the channels); `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **Set-points are the healthy reference of the patient's size and gestation.** A lesion keeps its size's reference, so a coarctation's low renal pressure activates RAAS (angiotensin ≈ 2.5), as it should. `scripts/_reference.mjs` (`scaleHormoneReferences`) derives them: volume scales with weight, perfusion with the gestation's defended MAP (`BR_MAP.set_value`). `_make_preterm.mjs`, `_make_bischoff.mjs`, `_make_fetus*.mjs` and `build_patient.mjs` apply it; below 34 weeks the [Kidneys](./Kidneys.md) renal reference replaces `perfusion_setpoint`.
+- **Near-neutral at rest** in every scenario (300 s from build): angiotensin, aldosterone and ADH 0.99–1.03, except **fetus_term**. There the fetal renal pressure (39 mmHg) sits above its reference (35 mmHg), so angiotensin settles at 0.70 and the arteriolar factor at 0.91. This is known from its validation ([TermFetusReference](./TermFetusReference.md)); the stored file holds 0.77 / 0.93, so it drifts a little after loading.
+- **Aldosterone's volume effect is small:** water transport isn't osmotically coupled to Na, so aldosterone shows as lower urinary Na rather than volume. ADH and angiotensin carry the volume and pressure defence. With the physiologic `aldosterone_tc`, aldosterone barely moves in a short session.
+- **The owned channels are overwritten** while running: edit them through the hormones, or switch them off (`hormones_running`, `raas_enabled`, `adh_enabled`), which releases them to 1.
+- **Not modelled:** natriuretic peptides, thirst and intake, catecholamines (the ANS and Drugs cover those).
+- **Validation (at introduction, 2026-10):** `scripts/headless.mjs <scenario> --bleed FRAC | --naload Δ`:
+  - a −8 % haemorrhage raises angiotensin and aldosterone and constricts the efferent, so GFR is defended and urine falls toward oliguria;
+  - +12 mmol/L Na raises ADH 1.0 → 1.35 and halves urine output, while RAAS stays quiet.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Hormones` (trimmed to gating and set-points; gains and time constants are the defaults):
+
+```json
+{
+  "name": "Hormones",
+  "model_type": "Hormones",
+  "is_enabled": true,
+  "hormones_running": true,
+  "raas_enabled": true,
+  "adh_enabled": true,
+  "perfusion_setpoint": 40.85,
+  "volume_setpoint": 0.286,
+  "osmo_na_setpoint": 138.19,
+  "k_setpoint": 3.452,
+  "angiotensin_tc": 30,
+  "aldosterone_tc": 1800,
+  "adh_tc": 120
+}
+```
+
+## Usage in the scenarios
+
+One instance in every scenario, running. `perfusion_setpoint` ranges from 22.5 (25 wk, Bischoff) to 40.9 mmHg (term), `volume_setpoint` from 55 to 286 mL.
+
+## References
+
+No literature values; gains and time constants are model choices calibrated for teaching.
 
 ````
 
@@ -7911,309 +7535,185 @@ optionally `--hset aldosterone_tc=…` to compress for a quick loop check):
 ````markdown
 # Kidneys
 
-The `Kidneys` model turns the otherwise passive renal vascular bed
-(`KID_ART → KID_CAP → KID_VEN`) into an active filtration unit. It is a
-**controller/process model** (like [`Placenta`](./Placenta.md)) — it holds no
-blood itself, it operates on the existing glomerular capillary `KID_CAP` and a
-new `URINE` bladder compartment it owns.
+`Kidneys` turns the renal vascular bed (`KID_ART` → `KID_CAP` → `KID_VEN`) into a filtering organ. It holds no blood itself. Each step it:
+- filters plasma out of the glomerular capillary `KID_CAP` by the Starling balance;
+- reabsorbs most of the water and each solute by its own fraction;
+- moves the rest into a `URINE` compartment it owns.
 
-**Scope: fluid balance & urine output, per-solute reabsorption, and optional GFR autoregulation**
-(myogenic + TGF, see below). Reabsorption fractions are static (no hormonal control yet); no
-clearance/acid-base or RAAS/ADH — those are future phases.
+It also autoregulates glomerular filtration (myogenic and tubuloglomerular feedback) on the afferent arteriole, and offers the hooks through which [Hormones](./Hormones.md) applies ADH and aldosterone.
 
-## What it does each step
+## Physiology
 
-```
-oncotic = oncotic_base · (KID_CAP.solutes.albumin / albumin_ref)   # rises with hemoconcentration
-NFP     = max(0, KID_CAP.pres − p_bowman − oncotic)                 # Starling net filtration pressure
-GFR     = kf_eff · NFP                                              # glomerular filtration rate (L/s)
-Vf      = GFR · dt                                                  # filtrate volume this step (L)
-Uw      = Vf · (1 − reabsorption_fraction)                          # net urine WATER leaving the blood
-```
+The glomerulus filters plasma at a rate set by the filtration coefficient and the net filtration pressure: glomerular capillary pressure minus Bowman's capsule pressure minus plasma oncotic pressure. Proteins and cells stay behind; small solutes pass at their plasma concentration. The tubules reabsorb ~99 % of the filtered water and sodium at term, less in the immature kidney, so a preterm infant loses more sodium (higher FENa) and concentrates urine poorly.
 
-### Per-solute reabsorption (mass balance)
+Renal blood flow and GFR stay nearly constant over a range of pressures:
+- **myogenic response:** the afferent arteriole constricts when stretched;
+- **tubuloglomerular feedback:** the macula densa senses distal NaCl delivery and constricts the afferent when it is high.
 
-Each filterable solute is reabsorbed by **its own** fraction, so urine need not be
-iso-osmotic with plasma. `_transfer(Vf, wr)` does a conservative **mass balance** (NOT
-`volume_in`, which would copy *all* solutes incl. albumin/Hb and cause artifactual
-proteinuria). With water fraction `wr` and per-solute fraction `fr[s]`:
+Neonatal GFR is low and rises steeply with gestation and postnatal age.
+
+## Inheritance
 
 ```
-fr[s]  = reabsorption_fractions[s]  (else wr)         # clamped [0, 0.9999]
-Mf[s]  = Vf · C_plasma[s]                             # filtered solute mass
-Mx[s]  = min(Mf[s] · (1 − fr[s]), C[s]·V)             # excreted mass (clamped to available)
-C'[s]  = (C[s]·V − Mx[s]) / (V − Uw)                  # new blood conc (reabsorbed stays in blood)
-URINE.solutes[s] = (URINE.solutes[s]·Uvol + Mx[s]) / (Uvol + Uw)
+BaseModelClass
+  └── Kidneys
 ```
 
-Only the **net** excreted water (`Uw`) and solute mass (`Mx`) leave `KID_CAP`; the
-reabsorbed remainder is simply never removed (it returns to blood). `albumin` & `hemoglobin`
-are **not** filtered — total mass conserved, concentration scaled by `vol_before/vol_after`
-(hemoconcentration). Volume is guarded with a `1e-9` floor.
+## Properties
 
-- **Backward compatible:** if `fr[s] = wr` for every solute (e.g. an empty
-  `reabsorption_fractions`), then `Mx[s] = C[s]·Uw` and `C'[s] = C[s]` — urine is iso-osmotic
-  with plasma and output is identical to the old single-fraction model.
-- `fr[s] > wr` → solute concentrates in blood / **dilutes** in urine; `fr[s] < wr` →
-  **concentrates** in urine.
+### Config: filtration and reabsorption
 
-Net effect: diuresis slowly lowers circulating blood volume; `URINE.vol` accumulates total
-diuresis; the kidney now handles water and each solute independently (e.g. Na/Cl avidly
-reabsorbed, phosphate/urate spilled).
-
-> **Hormonal modulation hooks (driven by the [`Hormones`](./Hormones.md) RAAS/ADH model).** Two
-> dedicated, neutral-by-default factor channels let a hormonal controller modulate reabsorption
-> without colliding with the user/scenario `reabs_factor_ps` layer or the absolute
-> `reabsorption_fractions` dict:
-> - **`reabs_factor_adh`** (water) — a 4th multiplier folded into `_reabs_eff`
->   (`reabsorption_fraction · reabs_factor · reabs_factor_ps · reabs_factor_scaling_ps · reabs_factor_adh`).
->   ADH drives antidiuresis through it. Default `1.0`.
-> - **`reabsorption_factors`** (per-solute dict) — multiplies each solute's fraction in `_solute_reabs`
->   (`fr ·= reabsorption_factors[s] ?? 1`), so aldosterone can retain Na (`na > 1`) and waste K
->   (`k < 1`); also reusable for diuretics. Default `{}` (every solute → 1.0). Distinct from the
->   absolute `reabsorption_fractions` dict (this modulates on top of it).
->
-> Both default to neutral, so a scenario without a `Hormones` model is byte-identical. The absolute
-> `reabsorption_fractions` is also still scheduler-tweakable per key
-> (`setPropValue("Kidneys.reabsorption_fractions.na", …)`). The water fraction keeps its
-> `reabs_factor`/`_ps`/`_scaling_ps` stack; explicit per-solute overrides track the `wr` fallback
-> when absent.
-
-## Read-outs
-| Property | Unit | Meaning |
-|---|---|---|
-| `gfr` | mL/min | glomerular filtration rate |
-| `urine_flow` | mL/min | net urine output |
-| `nfp` | mmHg | net filtration pressure |
-| `urine_volume` | mL | cumulative diuresis (= `URINE.vol × 1000`) |
-| `fe_na` | % | fractional excretion of Na (= `(1 − fr_na)·100`) |
-
-Per-solute urine concentrations live in `URINE.solutes`.
-
-## Configuration
-| Param | Meaning |
-|---|---|
-| `kidneys_running` | master gate (false → GFR/urine = 0, bladder holds) |
-| `kf` | glomerular filtration coefficient (L/s·mmHg) — **the dominant, scenario-specific calibration knob** |
-| `p_bowman` | Bowman's capsule pressure (mmHg) |
-| `oncotic_base`, `albumin_ref` | plasma oncotic pressure at the reference albumin |
-| `reabsorption_fraction` | **water** reabsorption fraction (urine water = GFR·(1−FR)) |
-| `reabsorption_fractions` | per-solute reabsorption dict `{na, k, …}`; absent → uses the water fraction |
-| `filterable_solutes` | small solutes filtered into urine (albumin/Hb excluded) |
-
-`kf` carries the additive 3-layer factor stack (`kf_factor` / `_ps` / `_scaling_ps`),
-`reabsorption_fraction` a multiplicative one (clamped to [0, 0.9999]). The two scenarios now ship
-**distinct, headless-calibrated** per-solute fractions reflecting neonatal tubular immaturity (the
-neonate excretes a larger fraction of every solute → higher FE across the board):
-
-| reabsorption fraction | neonate | adult | → FE neonate / adult |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| water (`reabsorption_fraction`) | 0.980 | 0.990 | — |
-| na | 0.990 | 0.993 | **1.0% / 0.7%** |
-| cl | 0.988 | 0.991 | 1.2% / 0.9% |
-| lact | 0.99 | 0.99 | 1.0% / 1.0% |
-| ca | 0.975 | 0.985 | 2.5% / 1.5% |
-| mg | 0.95 | 0.96 | 5.0% / 4.0% |
-| k | 0.88 | 0.90 | 12% / 10% |
-| phosphates | 0.82 | 0.88 | 18% / 12% |
-| uma | 0.70 | 0.92 | 30% / 8% |
+| `kidneys_running` | boolean | `true` | Switch for filtration. |
+| `kid_cap_name`, `urine_name` | – | `"KID_CAP"`, `"URINE"` | Glomerular capillary and the bladder compartment (a component, kept out of the blood pool). |
+| `kf` | L/(s·mmHg) | 6.6e-6 | Filtration coefficient. term 6.0e-6, preterm 2.1–3.4e-6 (scaled by body surface). |
+| `p_bowman` | mmHg | 8 | Bowman's capsule pressure (preterm lower, scaled by the gestation's MAP). |
+| `oncotic_base`, `albumin_ref` | mmHg, g/L | 18, 25 | Plasma oncotic pressure at the reference albumin (preterm 15). |
+| `reabsorption_fraction` | – | 0.985 | Water reabsorption fraction. term 0.98, 25 wk 0.833. |
+| `reabsorption_fractions` | {solute: fraction} | `{}` | Per-solute fractions; absent = the water fraction (iso-osmotic). term Na 0.99, 25 wk 0.90. |
+| `filterable_solutes` | list | `na, k, ca, cl, lact, mg, phosphates, uma` | Solutes that pass the glomerulus. Everything else stays in the blood. |
+| `kf_factor`, `kf_factor_ps`, `kf_factor_scaling_ps` | – | 1.0 | Additive layers on `kf` (the first reset each step). |
+| `reabs_factor`, `reabs_factor_ps`, `reabs_factor_scaling_ps` | – | 1.0 | Multiplicative layers on the water fraction (the first reset each step). |
+| `reabs_factor_adh` | – | 1.0 | ADH water channel (written by Hormones). |
+| `reabsorption_factors` | {solute: factor} | `{}` | Aldosterone / drug channel on the per-solute fractions (written by Hormones: Na > 1, K < 1). |
 
-FENa is now **distinct** between scenarios (neonate ~1%, adult ~0.7%) — neonatal Na handling is
-immature, so its FENa is correctly higher. Each Na/Cl fraction stays above its scenario's water
-fraction (net-reabsorbed → dilute in urine); K/Mg/Ca/phosphate/urate fall below it (net-excreted →
-concentrated in urine).
+### Config: autoregulation
 
-The `URINE` compartment is a `BloodCapacitance` declared in the Kidneys
-`components` block (auto-instantiated by the base `init_model`), a pure sink with
-no resistor connections (it never feeds back into the circulation). `init_model` sets its
-`blood_pool = false`, so the blood-pool loops (Blood seeding and warming, Lactate clearance,
-Glucose and Drugs seeding) leave it alone.
-
-> **Wiring note.** `KID_CAP` is a component of the `Circulation` model and may be
-> instantiated *after* `Kidneys` in build order, so `_kid_cap` is resolved **lazily**
-> on the first `calc_model` step (the `URINE` own-component is resolved in `init_model`).
-
-## Calibration
-`kf` differs ~6× between scenarios because baseline `KID_CAP.pres` differs
-(neonate ≈ 37, adult ≈ 79 mmHg). Back-solve `kf ≈ target_GFR(L/s) / NFP_baseline`.
-Targets: neonate GFR ~2–4 mL/min & urine ~1–3 mL/kg/hr; adult GFR ~90–110 mL/min
-& urine ~0.5–1.5 mL/kg/hr. Keep `p_bowman + oncotic_base` well below `KID_CAP.pres`
-(the neonate NFP margin is thin, ~11 mmHg) or filtration stops.
-
-**Headless calibration.** Reproduce/re-tune with the in-repo runner
-`node scripts/headless.mjs <term_neonate|adult_female>` (builds the scenario, freezes `Ans`,
-steps to steady state, cycle-averages the renal panel: GFR, urine mL/kg/hr, NFP, the full FE
-panel, urine concentrations, and `afferent_factor`). Override knobs without editing the scenario
-JSON via `--kf`, `--water`, `--frac na=…,k=…`; add `--no-autoreg` to isolate raw filtration. The
-shipped values were calibrated this way (autoregulation enabled, `Ans` disabled):
-
-| measured (cycle-avg, steady state) | neonate | adult |
-|---|---|---|
-| GFR | 3.9 mL/min | 100 mL/min |
-| urine output | 1.3 mL/kg/hr | 1.0 mL/kg/hr |
-| FENa | 1.0% | 0.7% |
-| NFP / `KID_CAP.pres` | 10.9 / 37.0 mmHg | 44.0 / 79.0 mmHg |
-| `afferent_factor` (autoreg neutrality) | 1.02 | 0.88 |
-
-Stable across 60–150 s warm-ups (no drift/oscillation); `afferent_factor` ≈ 1 confirms
-autoregulation sits near-neutral at baseline (no railing).
-
-### Preterm kidney: the healthy renal reference by gestation
-
-Until 2026-10-15 every preterm and Bischoff scenario kept the term kidney. Bowman 8 + oncotic 18 =
-26 mmHg stood against a glomerular pressure of 18–25 mmHg, so GFR was 0 at ≤ 30 wk. The term
-myogenic set-point (40 mmHg) held the afferent at its 0.50 dilation floor, renal blood flow per kg
-was higher than term's, and `kf` was the term value at every size.
-
-`scripts/_renal_reference.mjs` gives a postnatal patient below 34 wk the kidney of its own
-gestation and size. The rules were chosen with the model's author, one at a time:
-
-| quantity | rule | basis |
-|---|---|---|
-| GFR target | Vieux 2010 day-7 medians, 7.9 (27 wk) → 30.3 (31 wk) mL/min per 1.73 m², exponential (×1.4/wk), extrapolated to 24 wk; plateau from 31 wk | Vieux, *Pediatrics* 2010 (doi 10.1542/peds.2009-1426); Gordjani 1988 |
-| `oncotic_base` | 15 mmHg at ≤ 28 wk, linear to 18 at 40 wk (kidney only; blood albumin also feeds the acid–base term) | preterm plasma COP ~15 vs term ~17–19 (*Crit Care Med* 1981) |
-| `p_bowman` | 8 × BR_MAP set-point / 50 | immature transglomerular gradient only modestly lower (Ichikawa 1979) |
-| `kf` | term `kf` × body surface / term body surface (Mosteller) | the filtration surface grows with the body |
-| renal blood flow | follows the GFR target at term's filtration fraction (RBF/GFR 21.0) | inulin and PAH clearance rise in parallel 28 → 35 wk (Fawer 1979) |
-| glomerular pressure | `p_bowman` + oncotic + GFR target / `kf` | what that `kf` needs to filter the target |
-
-`scripts/_renal_bed.mjs` (`solveRenalBed`) then sets the renal bed to these targets. With
-autoregulation off and Hormones released, it iterates the base `r_for` of `KID_ART` (afferent) and
-`KID_VEN` (efferent; a vessel pushes its resistance onto its input resistor `KID_CAP_KID_VEN`) until
-renal blood flow and `KID_CAP.pres` meet their targets. Base `r_for` is the only layer nobody else
-owns: autoregulation writes `KID_ART.r_factor_ps`, Hormones the efferent resistor's `r_factor_ps`,
-and the builder's `eng.scale(...)` groups can overwrite the vessels' `r_factor_scaling_ps`. The
-efferent resistor's own layers return to 1, so the old RAAS excess folds into the base. Last, it
-seeds the controllers at that resting state: myogenic set-point = `KID_ART.pres` (the term window
-width, scaled by the gestation's MAP), TGF set-point = GFR × Na, and Hormones'
-`perfusion_setpoint` = `KID_ART.pres`. The PR #61 rule (40 × BR_MAP/50) cannot hold here: at
-24 wk it gives 19.2 mmHg, below the glomerular pressure the kidney needs (19.7).
-
-The repaired scenarios (`scripts/_fix_renal_bed.mjs`; the same solve runs in `reseed_preterm.mjs`
-and in `build_patient.mjs` before calibration), at rest:
-
-| scenario | GFR mL/min/kg (target) | renal blood flow mL/min/kg (target) | MAP before → after |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| preterm_24wk | 0.22 (0.19) | 4.0 (4.1) | 24.5 → 27.4 |
-| bischoff_cohort (25 wk) | 0.25 (0.26) | 5.2 (5.4) | 29.5 → 30.3 |
-| p1_pda_none (25 wk) | 0.22 (0.26) | 5.5 (5.4) | 33.7 → 34.8 |
-| preterm_26wk | 0.32 (0.34) | 7.0 (7.1) | 28.8 → 30.0 |
-| preterm_28wk | 0.62 (0.63) | 13.3 (13.3) | 28.3 → 29.5 |
-| preterm_30wk | 1.12 (1.11) | 22.9 (23.4) | 33.4 → 33.5 |
-| preterm_32wk | 1.35 (1.45) | 30.0 (30.5) | 37.8 → 37.6 |
+| `autoregulation_enabled` | boolean | `false` | On in every scenario. |
+| `aff_resistor_name` | – | `"AD_KID_ART"` | The afferent's inflow resistor (the effector). |
+| `myogenic_input_model`, `myogenic_input_prop` | – | `"KID_ART"`, `"pres"` | Pressure the myogenic limb senses. |
+| `myogenic_p_set` | mmHg | 35 | Set-point: each scenario's resting `KID_ART.pres` (term 40.9, 25 wk 22.6). |
+| `myogenic_p_min`, `myogenic_p_max` | mmHg | 25, 55 | Autoregulatory window (term 25–65). |
+| `myogenic_gain_up`, `myogenic_gain_down` | 1/mmHg | 0.06 | Resistance gain above and below the set-point (scenarios 0.18). |
+| `myogenic_tc` | s | 4 | Myogenic time constant. |
+| `tgf_use_nacl` | boolean | `true` | TGF senses GFR × Na (else GFR alone). |
+| `tgf_setpoint` | – | 0 | TGF set-point; ≤ 0 = captured after `tgf_seed_delay`. Stored in every scenario. |
+| `tgf_seed_delay` | s | 30 | Warm-up before the capture. |
+| `tgf_gain`, `tgf_tc` | –, s | 0.8, 30 | TGF gain per fractional error (scenarios 2.0) and time constant. |
+| `afferent_apply_tc` | s | 6 | Lag on the applied factor. |
+| `afferent_factor_min`, `afferent_factor_max` | – | 0.5, 4 | Clamp on the applied factor (scenarios 0.5–10). |
 
-Autoregulation and angiotensin sit at ≈ 1 at rest, and blood gases are unchanged. The lower
-renal blood flow sends more blood to the rest of the body: MAP rises by 1–3 mmHg and the
-baroreflex lowers HR by 6–10 bpm at 25–28 wk. The model's author chose to keep that shift. Not
-changed: 34 wk and up (GFR already on the plateau), `fetus_30wk` (it already filters, and the
-reference values are postnatal), and the term and congenital scenarios.
+### Outputs
 
-`bischoff_cohort` and `p1_pda_none` also feed the P1 experiments, which were computed with the term
-kidney (and, in `p1_pda_none`, the term Hormones references: it got the Hormones repair of
-`scripts/_fix_hormone_references.mjs` first). Repairing them moves P1's ductal experiments (e.g. `pda_ltr` LVO/RVO 1.68 → 1.80, ductal flow
-+3 to +11 mL/kg/min); the model's author chose the correct kidney over P1's frozen numbers.
-
-## GFR autoregulation (myogenic + TGF)
-
-Optional closed-loop autoregulation (`autoregulation_enabled`, **default `false`** → the
-model is byte-identical to the no-autoregulation behaviour until toggled on). When enabled, a
-controller adjusts the **afferent arteriole** — the `KID_ART` `BloodVessel` (`aff_vessel_name`)
-— by writing its `r_factor_ps`. A `BloodVessel` owns its input resistor and pushes its computed
-resistance into it every step, so this modulates the renal supply resistor `AD_KID_ART`.
-Constricting it (`r_factor_ps > 1`) cuts renal inflow → lowers `KID_CAP.pres` → NFP → GFR (and
-α-couples a small elastance stiffening); dilating (`< 1`) raises them. Renal blood flow
-autoregulates alongside GFR. The controller runs on a 15 ms tick (`u`); each limb and the
-applied factor are first-order lagged (`x += u·(1/tc)·(−x + target)`).
-
-> **Why control the afferent vessel (upstream of the sensor), not the glomerular inflow.** The
-> myogenic limb senses `KID_ART.pres`, which sits *downstream* of `AD_KID_ART`. Constricting
-> `AD_KID_ART` lowers `KID_ART.pres` (more drop upstream), so the loop is **negative feedback**
-> (sense high → constrict → pressure falls → self-correcting). Controlling the downstream
-> `KID_ART_KID_CAP` resistor instead would *raise* the sensed pressure when it constricts —
-> positive feedback that rails the operating point. `AD_KID_ART` is also the dominant series
-> resistance, so a firm plateau needs only modest gain.
-
-**Myogenic limb (fast, `myogenic_tc ≈ 4 s`)** — senses the pressure the afferent feels
-(`myogenic_input_model.myogenic_input_prop`, default `KID_ART.pres`). Piecewise-linear,
-saturating outside the autoregulatory window `[p_min, p_max]`:
-
-```
-act = clamp(p_in, p_min, p_max) − p_set                 # deviation, saturated at the shoulders
-gain = (p_in >= p_set) ? gain_up : gain_down
-myo_target = 1 + gain·act                               # at setpoint → 1.0; rise → constrict
-```
-
-**TGF limb (slow, `tgf_tc ≈ 30 s`)** — senses distal NaCl delivery
-`tgf_signal = GFR × KID_CAP.solutes.na` (`tgf_use_nacl`; falls back to `GFR` alone). When
-`tgf_setpoint ≤ 0` it **auto-seeds**: the signal is smoothed by an EMA and the setpoint is
-captured only after a `tgf_seed_delay` (default 30 s) warm-up, so it reflects the steady
-state rather than the startup transient (seeding too early biases it low → standing
-constriction at rest). The TGF limb stays neutral (`tgf_factor = 1`) until seeded.
-
-```
-err = (tgf_signal − tgf_setpoint) / tgf_setpoint
-tgf_target = 1 + tgf_gain·err                           # high delivery → constrict
-```
-
-**Combine → clamp → lag → write** (`afferent_apply_tc ≈ 6 s`):
-
-Each limb target is floored at a small positive (`_limb_factor_floor`) so a large downward
-deviation × high gain can't drive a factor negative. Then:
-
-```
-combined = myogenic_factor · tgf_factor                 # multiplicative
-combined = clamp(combined, afferent_factor_min, afferent_factor_max)
-afferent_factor ← lag(afferent_factor → combined)       # then re-clamp
-KID_ART.r_factor_ps = afferent_factor                   # vessel propagates to AD_KID_ART
-```
-
-As perfusion pressure (`AD.pres`) rises, the afferent constricts and holds GFR / renal blood
-flow ~flat; beyond the window the factor saturates and GFR follows pressure again (the classic
-shoulders). The three lags + hard clamp keep the loop well-damped and `r_for_eff > 0`.
-
-| Read-out | Meaning |
-|---|---|
-| `myogenic_factor` / `tgf_factor` | per-limb afferent multipliers |
-| `afferent_factor` | applied (lagged, clamped) `r_factor_ps` on the afferent |
-| `sensed_pressure` | pressure driving the myogenic limb (mmHg) |
-| `tgf_signal` | current TGF signal (`GFR×Na` or `GFR`) |
-
-> **Ordering / one-step sensor delay.** `Kidneys` is a top-level model, so it steps before the
-> `Circulation` sub-compartments (`KID_ART`, `AD_KID_ART`, …) that are created during the build's
-> init pass. It therefore writes `KID_ART.r_factor_ps` **before** `KID_ART` steps and composes it
-> into the resistance it pushes to `AD_KID_ART` — same step, no effector lag (and `r_factor_ps`
-> persists, so ordering is non-fatal regardless). `Kidneys` reads `KID_ART.pres` from the previous
-> step's pass — a deliberate one-step sensor delay the lags absorb. Disabling mid-run writes
-> `KID_ART.r_factor_ps` back to `1.0` once, restoring linear behaviour.
-
-**Calibration.** Set `myogenic_p_set` to each scenario's baseline `KID_ART.pres` so the
-controller is near-neutral at steady state (the negative feedback makes this a fine-centering,
-not a stability requirement). Both scenarios ship **enabled**:
-
-| param | neonate | adult |
+| Property | Unit | Description |
 |---|---|---|
-| `autoregulation_enabled` | **true** | **true** |
-| `myogenic_p_set` / `_p_min` / `_p_max` | 40 / 25 / 65 | 83 / 55 / 140 |
-| `myogenic_gain_up` / `_down` | 0.18 | 0.25 |
-| `myogenic_tc` | 4 s | 4 s |
-| `tgf_gain` / `tgf_tc` | 2.0 / 30 s | 3.0 / 30 s |
-| `afferent_apply_tc` | 6 s | 6 s |
-| `afferent_factor_min` / `max` | 0.5 / 10.0 | 0.5 / 20.0 |
-| `tgf_setpoint` | 0 (auto-seed) | 0 (auto-seed) |
+| `nfp` | mmHg | Net filtration pressure. |
+| `gfr` | mL/min | Glomerular filtration rate. |
+| `urine_flow` | mL/min | Urine output. |
+| `urine_volume` | mL | Cumulative urine (`URINE.vol`). |
+| `fe_na` | % | Fractional excretion of sodium. |
+| `myogenic_factor`, `tgf_factor`, `afferent_factor` | – | Limb factors and the applied afferent factor. |
+| `sensed_pressure`, `tgf_signal` | mmHg, – | Inputs of the two limbs. |
 
-Validated headless (build the scenario, disable `Ans`, cycle-average, sweep preload to vary the
-upstream perfusion pressure `AD.pres`). Measured against `AD.pres` (the controller regulates
-`KID_ART.pres`, so it cannot be the x-axis): autoregulation cuts GFR variation **~77%** (neonate)
-and **~79%** (adult) vs off, stable, with ANS-on baseline `afferent_factor` ≈ 1.0 (neonate 1.02,
-adult 0.88) — no railing.
+## Calculation
 
-## Simplifications (current scope)
-- Autoregulation is **opt-in**; with it off, GFR rides directly on `KID_CAP.pres` (linear in
-  perfusion pressure).
-- Oncotic pressure is linear in albumin (not Landis-Pappenheimer).
-- Reabsorption is per-solute (each solute its own fraction), but **static** — no tubular load /
-  transport-maximum / secretion kinetics, and not yet hormonally driven (RAAS/ADH is the next phase).
-- `URINE` never empties on its own (a future `void_bladder()` function can reset it).
+Each step (nothing while off; skipped if `KID_CAP` or `URINE` is missing):
+
+1. **Effective values:** `kf_eff` (additive layers); `reabs_eff` = fraction × its layers × `reabs_factor_adh`, clamped to 0–0.9999.
+2. **Starling:**
+   ```
+   oncotic = oncotic_base · albumin / albumin_ref
+   nfp     = max(0, KID_CAP.pres − p_bowman − oncotic)
+   GFR     = kf_eff · nfp,      urine = GFR · (1 − reabs_eff)
+   ```
+3. **Transfer** of one step's filtrate `Vf`:
+   - urine water `Vf·(1 − reabs_eff)` leaves `KID_CAP` for `URINE`;
+   - each filterable solute leaves with `Vf · c · (1 − its fraction)`, its fraction modulated by `reabsorption_factors`;
+   - **everything not filtered keeps its mass**, so its concentration rises by `V_before / V_after`. That covers albumin and Hb (haemoconcentration), glucose (no glucosuria), the drugs, and the blood's O2 and CO2.
+4. **Autoregulation**, every 15 ms:
+   ```
+   myogenic → 1 + gain · (clamp(KID_ART.pres, p_min, p_max) − p_set)       (tc myogenic_tc)
+   tgf      → 1 + tgf_gain · (GFR·Na − tgf_setpoint) / tgf_setpoint          (tc tgf_tc)
+   afferent_factor → clamp(myogenic · tgf, min, max)                          (tc afferent_apply_tc)
+   AD_KID_ART.r_factor_ps = afferent_factor
+   ```
+   It acts on the afferent's inflow resistor, upstream of the sensed `KID_ART.pres`, so the loop is negative feedback. The `KID_ART` vessel keeps the systemic channels Circulation adds (SVR, Hormones, Drugs). Switching autoregulation off releases the factor to 1 once.
+
+## Factor system
+
+- `kf` takes additive layers (as Capacitance).
+- The reabsorption fraction takes multiplicative layers (it is a fraction).
+- ADH and aldosterone have their own channels: `reabs_factor_adh` and `reabsorption_factors`.
+- It owns `AD_KID_ART.r_factor_ps`.
+
+## Inputs and outputs
+
+- **Reads:** `KID_CAP` (`pres`, `vol`, `solutes`), `KID_ART.pres`.
+- **Writes:** `KID_CAP` (`vol`, `solutes`, `drugs`, `to2`, `tco2`), `URINE` (`vol`, `solutes`), `AD_KID_ART.r_factor_ps`.
+- **Written by:** Hormones (`reabs_factor_adh`, `reabsorption_factors`); the user and scenario scripts (calibration, see below).
+- **Read by:** `DataCollector` watchers, the Monitor (urine output).
+
+## Assumptions and limitations
+
+- **Oncotic pressure is linear in albumin.**
+- **Reabsorption fractions are static per solute:** no transport maxima, no secretion, no acid–base handling (bicarbonate, ammonium), no concentrating mechanism.
+- **The bladder never empties** (`URINE` accumulates).
+- **Urine water comes from `KID_CAP` only;** the rest of the body equilibrates through the circulation (no interstitial compartment).
+
+### Calibration
+
+- **Term:** `kf` was back-solved for a GFR of ~4 mL/min at a net filtration pressure of ~11 mmHg (a thin margin, so `p_bowman + oncotic` must stay well below `KID_CAP.pres`).
+- **Preterm (below 34 weeks) — the kidney of its own gestation and size:** `scripts/_renal_reference.mjs` with `scripts/_renal_bed.mjs`, applied by `reseed_preterm.mjs`, `build_patient.mjs` and `_fix_renal_bed.mjs`. The rules were chosen with the model's author:
+
+  | Quantity | Rule | Basis |
+  |---|---|---|
+  | GFR target | Vieux 2010 day-7 medians, 7.9 (27 wk) → 30.3 (31 wk) mL/min/1.73 m², exponential, extrapolated to 24 wk; plateau from 31 wk | Vieux R, et al. *Pediatrics* 2010. doi:10.1542/peds.2009-1426 |
+  | `oncotic_base` | 15 mmHg ≤ 28 wk, linear to 18 at 40 wk | preterm plasma colloid osmotic pressure ~15 vs term ~17–19 |
+  | `p_bowman` | 8 × BR_MAP set-point / 50 | immature transglomerular gradient only modestly lower |
+  | `kf` | term `kf` × body surface / term body surface (Mosteller) | the filtration surface grows with the body |
+  | Renal blood flow | follows the GFR target at term's filtration fraction | inulin and PAH clearance rise in parallel |
+  | Glomerular pressure | `p_bowman` + oncotic + GFR target / `kf` | what that `kf` needs to filter the target |
+
+  `solveRenalBed` then iterates the base resistances of `KID_ART` and `KID_VEN` until renal blood flow and `KID_CAP.pres` meet the targets. It seeds the myogenic set-point, the TGF set-point and Hormones' `perfusion_setpoint` at that rest. The resulting GFR and urine values are in the scenario tables below.
+
+- **Tooling:** `node scripts/headless.mjs <scenario>` reproduces and re-tunes the renal panel (GFR, urine, FE, afferent factor) with overrides such as `--kf` and `--water`.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Kidneys` (trimmed to the main config; `components` holds `URINE`):
+
+```json
+{
+  "name": "Kidneys",
+  "model_type": "Kidneys",
+  "is_enabled": true,
+  "kidneys_running": true,
+  "kf": 6e-6,
+  "p_bowman": 8,
+  "oncotic_base": 18,
+  "reabsorption_fraction": 0.98,
+  "reabsorption_fractions": { "na": 0.99, "cl": 0.988, "lact": 0.99, "ca": 0.975, "mg": 0.95, "k": 0.88, "uma": 0.7, "phosphates": 0.82 },
+  "autoregulation_enabled": true,
+  "aff_resistor_name": "AD_KID_ART",
+  "myogenic_p_set": 40.877,
+  "myogenic_p_min": 25,
+  "myogenic_p_max": 65,
+  "myogenic_gain_up": 0.18,
+  "myogenic_gain_down": 0.18,
+  "tgf_gain": 2,
+  "tgf_setpoint": 554.96,
+  "afferent_factor_max": 10
+}
+```
+
+## Usage in the scenarios
+
+One instance in every scenario, with autoregulation on. Stored values at rest:
+
+| Scenario | `kf` (×1e-6) | Water reabs. | GFR (mL/min) | Urine (mL/kg/h) |
+|---|---|---|---|---|
+| term_neonate | 6.0 | 0.98 | 4.75 | 1.6 |
+| fetus_term | 6.0 | 0.98 | 3.4 | 1.2 |
+| preterm_30wk / fetus_30wk | 3.4 | 0.9375 | 0.97 / 1.35 | 2.4 / 3.4 |
+| preterm_28wk | 2.6 | 0.9175 | 0.67 | 3.3 |
+| preterm_25wk, fetus_25wk, Bischoff ×3 | 2.1–2.2 | 0.833 | 0.09–0.24 | 1.3–3.2 |
+
+## References
+
+- Vieux R, Hascoet JM, Merdariu D, Fresson J, Guillemin F. Glomerular filtration rate reference values in very preterm infants. *Pediatrics* 2010;125(5):e1186–92. doi:10.1542/peds.2009-1426.
 
 ````
 
@@ -8222,154 +7722,95 @@ adult 0.88) — no railing.
 ````markdown
 # Lactate
 
-The `Lactate` model turns the previously-**static** `lact` blood solute into a **hypoxia-driven
-product** — a slow process/controller in the same family as [`Hormones`](./Hormones.md) and
-[`Glucose`](./Glucose.md). It holds no compartment of its own, resolves references to other models
-lazily, runs on an `_update_interval`, and is **NEUTRAL at rest**: with tissues adequately oxygenated
-there is no O₂ debt (no production), and lactate already sitting at its baseline produces no net
-clearance flux. A scenario shipping a `Lactate` model therefore keeps its baseline ABG and only
-diverges when tissue oxygenation falls (shock, asphyxia, severe hypoxia).
+`Lactate` makes blood lactate a product of tissue hypoxia. When a tissue bed's O2 content falls below an anaerobic threshold, the bed produces lactate in proportion to its unmet O2 demand. Lactate is cleared back toward its baseline everywhere. Lactate is a strong anion in the [BloodComposition](./BloodComposition.md) acid-base solver, so a rise lowers pH, bicarbonate and base excess, a lactic acidosis, with no change to the solver. It holds no compartment and is neutral at rest.
+
+## Physiology
+
+When tissue oxygen delivery falls below need (shock, asphyxia, severe hypoxaemia, anaemia), cells switch to anaerobic glycolysis. Each glucose then yields 2 lactate instead of being oxidised with 6 O2, so roughly 0.33 mmol lactate is made per mmol O2 not delivered. Lactate and its hydrogen ion acidify the blood. The liver (and kidney) clear it, with a half-life of minutes once perfusion is restored. A rising lactate is a key marker of perinatal asphyxia and shock; a falling one marks successful resuscitation.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Lactate   (hypoxia-driven lactate → Stewart SID → metabolic acidosis)
+  └── Lactate
 ```
-
-Lactate extends `BaseModelClass` directly. Like [`Metabolism`](./Metabolism.md) and the other process
-models it owns no compartment; it only writes `solutes.lact` onto existing blood compartments.
-
-## What it models
-
-Anaerobic lactate production under tissue O₂ debt, plus first-order whole-body clearance toward a
-resting baseline. It reuses [`Metabolism`](./Metabolism.md)'s tissue consumption map and whole-body
-VO₂ to locate the sites and size the O₂ demand, captures each site's resting tissue `to2` over a
-warm-up window, and produces lactate in proportion to the unmet O₂ demand when `to2` falls below a
-fraction of that resting level.
-
-## Why it changes pH with no solver change
-
-`Lactate` writes **only** `solutes.lact` on the blood compartments. The existing Stewart acid-base
-solver in [`BloodComposition`](./BloodComposition.md) already consumes `lact` as a strong anion when
-it forms the strong-ion difference:
-
-```js
-sid = sol["na"] + sol["k"] + 2 * sol["ca"] + 2 * sol["mg"] - sol["cl"] - sol["lact"];
-```
-
-Raising `lact` lowers the SID → lower pH / HCO3 / BE — i.e. a **lactic metabolic acidosis** — with no
-change whatsoever to the solver. The coupling is one-directional (the O₂ sensors in `Mob`/`Ans` read
-`to2`, not pH), so there is no oscillation risk.
-
-**Insertion order matters.** Lactate must run **after** [`Metabolism`](./Metabolism.md) (which sets
-each tissue's `to2` for the step) and **before** `Blood` (which solves composition). This is handled
-by the model's position in the scenario JSON `models` map — insert it just after `Metabolism`.
-
-**Changing the resting lactate without changing pH.** `uma` (unmeasured anions) enters the same
-charge balance with the same sign as `lact`. A different resting lactate can therefore be swapped in
-against `uma` (lact +x, uma −x in every blood compartment), which leaves pH, HCO₃ and BE untouched.
-
-**term_neonate (calibrated assumption, 2026-10):**
-- `lact_baseline` 1.5 mmol/L, which lies inside both day-3 references:
-  - GLOW 2021: plasma after 48 h, 1.4 (0.8–3.3)
-  - Cousineau 2005: capillary whole blood at 48 ± 12 h, 2.6 ± 0.7 (1.4–4.1)
-- applied as lact +0.5 / uma −0.5 (uma 6.09 → 5.59)
-- see `scripts/_fix_term_lactate.mjs` and [TermNeonateReference](./TermNeonateReference.md)
 
 ## Properties
 
-### Configuration (independent)
+### Config (set in the definition JSON)
 
 | Property | Unit | Default | Description |
 |---|---|---|---|
-| `lactate_running` | bool | `true` | Master gate — `false` stops production (clearance still settles once toward baseline) |
-| `metabolism_name` | string | `"Metabolism"` | Name of the model supplying the tissue map + VO₂ |
-| `lact_baseline` | mmol/L | `1.0` | Resting blood lactate; the clearance target |
-| `threshold_frac` | unitless | `0.5` | Anaerobic threshold as a fraction of each site's resting-MINIMUM `to2` |
-| `lact_per_o2_deficit` | mmol/mmol | `0.33` | Lactate produced per mmol of unmet O₂ demand (~2 lactate per glucose / 6 O₂ per glucose) |
-| `lact_clearance` | 1/s | `0.002` | First-order clearance rate toward baseline (t½ ≈ 6 min) |
-| `prod_gain` | unitless | `1.0` | Overall scaler on production (clinical-tuning convenience) |
+| `lactate_running` | boolean | `true` | Production switch (clearance always runs). |
+| `metabolism_name` | – | `"Metabolism"` | Supplies the beds, their shares and VO2. |
+| `lact_baseline` | mmol/L | 1.0 | Resting lactate, the clearance target. 1.5 in every scenario. |
+| `threshold_frac` | – | 0.5 | Anaerobic threshold as a fraction of each bed's resting O2 content. |
+| `lact_per_o2_deficit` | mmol/mmol | 0.33 | Lactate per mmol of unmet O2 demand. |
+| `lact_clearance` | 1/s | 0.002 | First-order clearance toward baseline (half-life ~6 min). |
+| `prod_gain` | – | 1.0 | Overall production scaler. |
 
-### Computed / read-out (dependent)
-
-| Property | Unit | Description |
-|---|---|---|
-| `arterial_lactate` | mmol/L | `AA.solutes.lact` arterial read-out |
-| `total_production_step` | mmol | Total lactate produced in the last update |
-| `anaerobic_fraction_max` | 0..1 | Worst-site anaerobic fraction this update |
-
-### Local / internal (`_`-prefixed)
+### Baseline (captured, saved with the state)
 
 | Property | Unit | Description |
 |---|---|---|
-| `_update_interval` | s | Controller cadence (`1.0`) |
-| `_warmup_delay` | s | Window over which the resting-MINIMUM site `to2` is captured (`90.0`) |
-| `_seeded` | bool | Set once warm-up completes; production stays gated off until then |
-| `_baseline_to2` | object | Per-site resting (minimum) `to2` captured at warm-up |
-| `_blood_components` | array | Cached list of compartments carrying a `lact` solute |
-| `_metabolism` | ref | Cached reference to the Metabolism model |
+| `baseline_captured` | boolean | The thresholds have been captured. |
+| `baseline_to2` | {bed: mmol/L} | Each bed's resting O2 content: the minimum over the first 90 s after a fresh build. |
 
-## Per-tissue-site mechanism (`_update_lactate`)
+### Outputs
 
-`Lactate` reuses `Metabolism.metabolic_active_models` (the tissue consumption map, per-site VO₂
-fraction `fvo2`) plus the whole-body `vo2`, `vo2_factor` and `vo2_temp_factor`. For each active site:
+| Property | Unit | Description |
+|---|---|---|
+| `arterial_lactate` | mmol/L | `AA` lactate. |
+| `total_production_step` | mmol | Lactate produced in the last update. |
+| `anaerobic_fraction_max` | 0–1 | Worst bed's anaerobic fraction in the last update. |
 
-```
-threshold = threshold_frac * resting_to2          (resting captured at warm-up, see below)
-anaerobic = clamp((threshold − to2) / threshold, 0, 1)        (the Mob activation idiom)
+## Calculation
 
-local_o2_demand = (O2_MMOL_PER_ML · vo2 · vo2_factor · vo2_temp_factor · weight / 60) · u · fvo2   [mmol O₂]
-lactate_produced (mmol) = anaerobic · local_o2_demand · lact_per_o2_deficit · prod_gain
-   → comp.solutes.lact += lactate_produced / comp.vol
-```
+Every 1 s:
 
-(`u` is the elapsed time since the last update, normally `_update_interval`.) `lact_per_o2_deficit
-≈ 0.33` reflects ~2 lactate per glucose / 6 O₂ per glucose ⇒ ~0.33 mmol lactate per mmol of unmet O₂
-demand.
+1. **Baseline** (fresh build only): for 90 s each bed's lowest O2 content is recorded; then production is armed. The minimum puts the threshold below the operating trough, so even chronically hypoxic scenarios (cyanotic heart disease) stay neutral at rest.
+2. **Production**, per bed with share f:
+   ```
+   threshold  = threshold_frac · baseline_to2
+   anaerobic  = clamp((threshold − to2) / threshold, 0, 1)
+   O2 demand  = vo2 · factors · weight / 60 / 22.414 · Δt · f                (mmol, as Metabolism)
+   lactate   += anaerobic · O2 demand · lact_per_o2_deficit · prod_gain      (mmol, into that bed)
+   ```
+3. **Clearance:** every blood compartment's `lact` relaxes toward `lact_baseline` by `lact_clearance · Δt`.
 
-**Clearance** runs every update on every blood compartment carrying a `lact` solute, relaxing
-first-order toward `lact_baseline` (Cori cycle / hepatic + renal handling):
+**Example** (term_neonate, FiO2 0.08): after 3 min SaO2 is 48 %, the worst bed is 42 % anaerobic and lactate 1.6 mmol/L; 3 min later it is 3.2 mmol/L with the worst bed fully anaerobic.
 
-```
-comp.solutes.lact += (lact_baseline − comp.solutes.lact) · lact_clearance · u
-```
+## Factor system
 
-## The hypoxia threshold: minimum-over-warm-up capture
+None.
 
-The per-site anaerobic `threshold` auto-seeds from the running **MINIMUM** tissue `to2` captured
-across the warm-up window (`_warmup_delay`, 90 s) — **not** a single instant. Each warm-up step,
-`_baseline_to2[site]` is set to `min(previous, comp.to2)`. Using the trough makes the threshold
-(`threshold_frac · resting`, i.e. 50 % of the resting minimum at the default `threshold_frac`) sit
-below the operating low point, so the model stays neutral at rest even in **chronically hypoxic**
-scenarios (cyanotic CHD, fetus) whose steady-state tissue `to2` is low and swings cyclically near the
-threshold.
+## Inputs and outputs
 
-Production is gated off entirely until `_seeded` becomes true (`_warmup_counter >= _warmup_delay`);
-before that the model only settles compartments toward baseline via clearance. This is what makes a
-freshly built scenario neutral at rest: no spurious lactate surge during the startup transient.
+- **Reads:** Metabolism (`metabolic_active_models`, `vo2` and its factors); each bed's `to2`, `vol`; `model.weight`.
+- **Writes:** `solutes.lact` of the beds (production) and of every blood compartment (clearance).
+- **Written by:** the user (rates, switch).
+- **Read by:** BloodComposition (as a strong anion, through `solutes.lact`); `DataCollector` watchers, the Monitor.
 
-## Calculation cadence (`calc_model`)
+## Assumptions and limitations
 
-`calc_model` accumulates `_t` into `_update_counter` and, once it reaches `_update_interval` (1 s),
-calls `_update_lactate(u)` with the elapsed interval `u` and resets the counter. References are
-resolved lazily in `_resolve_refs` (the Metabolism model and the list of `lact`-carrying
-compartments) on first use.
+- **Threshold on content, not on delivery or the deficit.** Production starts when a bed's O2 content falls below half its resting value. It is separate from [Metabolism](./Metabolism.md)'s `o2_deficit` (O2 demand that found no O2 at all), so lactate rises well before the deficit appears.
+- **Lactate lives only in the blood,** as glucose does (see [Glucose](./Glucose.md)): real lactate distributes through total body water, so concentration changes here run faster than in vivo.
+- **Clearance is first-order and constant:** it doesn't fall with liver hypoperfusion or hypothermia, and it also raises a value below baseline (e.g. after dilution) back to baseline.
+- **No glucose coupling:** producing lactate consumes no glucose, and clearing it makes none (no Cori cycle).
+- **Order:** it must follow Metabolism in the scenario's `models` map, so it reads the O2 contents Metabolism just set.
 
 ## Example definition (JSON)
 
-From `term_neonate.json`:
+From `term_neonate.json`, `models.Lactate` (trimmed to the config props):
 
 ```json
 {
   "name": "Lactate",
-  "description": "hypoxia-driven lactate production",
-  "is_enabled": true,
   "model_type": "Lactate",
-  "components": {},
+  "is_enabled": true,
   "lactate_running": true,
   "metabolism_name": "Metabolism",
-  "lact_baseline": 1,
+  "lact_baseline": 1.5,
   "threshold_frac": 0.5,
   "lact_per_o2_deficit": 0.33,
   "lact_clearance": 0.002,
@@ -8377,18 +7818,13 @@ From `term_neonate.json`:
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- Insert immediately after [`Metabolism`](./Metabolism.md) in the scenario `models` map (after the
-  tissue `to2` is set for the step, before `Blood` solves composition).
-- Neutral at rest in every shipping scenario; it diverges only under tissue O₂ debt, where it produces
-  a lactic metabolic acidosis through the Stewart SID with no solver change.
+One instance in every scenario, with the values above (baseline 1.5 mmol/L, matching `Blood.solutes.lact`).
 
-## See also
-- [`Metabolism`](./Metabolism.md) — supplies the tissue consumption map and VO₂; sets `to2` each step.
-- [`BloodComposition`](./BloodComposition.md) — the Stewart solver that turns `lact` into a pH shift.
-- [`Mob`](./Mob.md) — the myocardial O₂ balance model whose `clamp` activation idiom is reused here.
-- [`Glucose`](./Glucose.md) — sibling slow-process solute model.
+## References
+
+No literature values; 0.33 mmol lactate per mmol O2 is the glycolysis stoichiometry (2 lactate per glucose, 6 O2 per glucose), the clearance half-life is a model choice.
 
 ````
 
@@ -8498,7 +7934,7 @@ Core physics params (`el_base`, `u_vol`, `el_k`, `r_for`, `r_back`, `r_k`, …) 
 |---|---|---|
 | `<p>_factor` | non-persistent — reset to `1.0` every step | transient interventions |
 | `<p>_factor_ps` | persistent across steps | user / scenario / event adjustments |
-| `<p>_factor_scaling_ps` | persistent | `ModelScaler` (weight/manual scaling); also the Calibrator's PAP lever on `IPSL`/`IPSR` `r_factor_scaling_ps` |
+| `<p>_factor_scaling_ps` | persistent | `ModelScaler` (weight/manual scaling); also the Calibrator's PAP lever on `IPSL`/`IPSR` `r_factor_scaling_ps`. 1.0 in every shipped scenario (baked into the base values since v1.0) |
 
 `p_eff = p + (factor-1)*p + (factor_ps-1)*p + (factor_scaling_ps-1)*p`.
 
@@ -8599,7 +8035,7 @@ lung, airway, left_lung, right_lung,
 thorax, pericardium
 ```
 
-Each group lists the component names that a given `scale_*` method touches, and the param sub-keys name which property gets scaled — e.g. `blood.volume`, `blood.el_base`, `blood.resistance`; `heart.el_min` / `heart.el_max`. `ModelScaler` writes **only** the `*_factor_scaling_ps` layer (`el_base_factor_scaling_ps`, `r_factor_scaling_ps`, `u_vol_factor_scaling_ps`, `el_min_/el_max_factor_scaling_ps`), except the volume groups which scale `vol`/`u_vol` directly. `scaleModel(group, factor)` in the API routes to these methods. See [ModelScaler](./ModelScaler.md).
+Each group lists the component names that a given `scale_*` method touches, and the param sub-keys name which property gets scaled — e.g. `blood.volume`, `blood.el_base`, `blood.resistance`; `heart.el_min` / `heart.el_max`. `ModelScaler`'s factor groups set the `*_factor_scaling_ps` layer (`el_base_factor_scaling_ps`, `r_factor_scaling_ps`, `u_vol_factor_scaling_ps`, `el_min_/el_max_factor_scaling_ps`) **absolutely**; the volume groups scale `vol`/`u_vol` directly, and `incorporate` bakes the layer into the base values. A scenario that stores a calibration in the layer loses it on the first `scale` command, so the shipped scenarios are baked (layer at 1.0). `scaleModel(group, factor)` in the API routes to these methods. See [ModelScaler](./ModelScaler.md).
 
 ## `configuration` and events
 
@@ -8635,7 +8071,7 @@ Both are `{ settings, components }` objects. `settings` holds canvas-level optio
 A flat JSON array of scenario filename stems, e.g.:
 
 ```json
-["adult_female", "term_neonate", "fetus_term", "preterm_28wk", "..."]
+["fetus_25wk", "preterm_25wk", "preterm_28wk", "term_neonate", "..."]
 ```
 
 Each entry `X` maps to `model_definitions/X.json` and is a valid argument to `Model.load("X")`. Add a scenario here to make it selectable in consuming apps. (In explain-ui, `sync-scenarios.mjs` rebuilds its served `index.json` as the union of the canonical set and any local snapshots.)
@@ -8647,277 +8083,123 @@ Each entry `X` maps to `model_definitions/X.json` and is a valid argument to `Mo
 ````markdown
 # MaternalPlacenta
 
-The `MaternalPlacenta` model is a **controller/process model** (extends `BaseModelClass`) for the
-**maternal** side of the placenta: the perfused **intervillous space** (`PL_IVS`), a low-resistance
-blood lake fed by the **spiral arteries** off the uterine arterial supply (`UT_ART`) and draining to
-the uterine veins (`UT_VEN`), in parallel with the non-placental uterine tissue (`UT_CAP`). Like
-[Uterus](./Uterus.md) and [Placenta](./Placenta.md) it owns no blood of its own — it operates on the
-existing `PL_IVS` compartment that `Circulation` supplies, gating and scaling it from a single set of
-parameters. Its perfusion grows from ~0 (non-pregnant: the placenta does not exist) to the
-**dominant share** of uterine flow at term, driven entirely by the `Uterus`'s pregnancy gestational
-age (`preg_ga`).
+> **Experimental.** Used only by the archived `adult_female_uterus` scenario (the Pregnancy panel is hidden in the app as unfinished). It builds and runs on the current engine, but its physiology isn't calibrated; see [Assumptions and limitations](#assumptions-and-limitations).
 
-> **Maternal vs fetal — do not confuse the two placenta models.** [`Placenta`](./Placenta.md) is the
-> **fetal** placental circulation: fetal blood runs through the umbilical vessels to the fetal-side
-> capillary (`PL_FETAL_CAP`) and exchanges gas across the membrane with a *fixed-composition* maternal
-> pool (`PL_MAT`). `MaternalPlacenta` is the **maternal** side: a real, perfused intervillous bed
-> (`PL_IVS`) carrying maternal blood off the uterine circulation, with its own flow, metabolism, and
-> contraction response. The legacy `PL_MAT` fixed pool used by the fetal `Placenta` is left untouched
-> by this model; the two are not yet coupled (see *Usage in the model*).
+`MaternalPlacenta` is the **mother's** side of the placenta in the adult pregnancy model: the intervillous space (`PL_IVS`), a low-resistance blood lake fed by the spiral arteries off the uterine artery and drained by the uterine veins. It owns no blood. It controls `PL_IVS` and its resistors:
+- the spiral arteries dilate with gestational age, so placental flow grows;
+- the bed is closed when not pregnant;
+- it adds a placental oxygen consumption;
+- uterine contractions compress the bed.
+
+It is not the fetal [Placenta](./Placenta.md), which has its own fixed maternal pool `PL_MAT`.
+
+## Physiology
+
+In pregnancy the spiral arteries of the uterus are remodelled into wide, low-resistance channels. Uteroplacental blood flow rises from almost nothing to several hundred mL/min at term, most of it to the placenta, which becomes the dominant share of uterine flow. The placenta itself consumes oxygen. During a contraction the rising pressure inside the uterus compresses the intervillous space and throttles placental perfusion, which is why long or frequent contractions stress the fetus.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── MaternalPlacenta   (maternal intervillous-space controller)
-```
-
-## What it models
-
-`MaternalPlacenta` runs once per step (`calc_model`) and, when the bed is active, does five things to
-the `PL_IVS` compartment and its connecting resistors:
-
-1. **Growth with gestation.** The spiral arteries dilate as pregnancy advances. The model scales
-   `PL_IVS`'s input resistance down with GA via the persistent `r_factor_scaling_ps` layer, so
-   maternal placental blood flow grows from near-zero early to the dominant share of uterine flow at
-   term. The spiral-artery resistor *is* `PL_IVS`'s own input resistor.
-2. **Gating.** When not pregnant (or stopped) the bed is held `no_flow` on both the spiral inflow and
-   the drainage, so it adds zero perturbation to the calibrated uterine baseline. `PL_IVS` stays
-   `is_enabled` (an inert pool with a defined pressure).
-3. **Placental metabolism.** A dedicated placental VO2 is applied to `PL_IVS` using the same molar
-   conversion as `Metabolism`/`Uterus` (`O2_MMOL_PER_ML`, STPD, `helpers/Units.js`), giving real O₂ extraction across the
-   intervillous space.
-4. **Contraction compression.** The uterine intrauterine pressure (`Uterus.iup`) is applied as
-   external pressure on `PL_IVS`, so contractions throttle placental perfusion.
-5. **Read-outs.** Placental blood flow (mL/min), its share of uterine flow (%), DO2, VO2, O2ER, and
-   the arterio-venous O₂ content difference.
-
-The spiral-artery resistor (`UT_ART_PL_IVS`) hangs off `UT_ART` in **parallel** with the
-non-placental myometrial capillary (`UT_CAP`); both beds drain into the common `UT_VEN`:
-
-```
-            ┌──[UT_ART_PL_IVS]──► PL_IVS ──[PL_IVS_UT_VEN]──┐
-UT_ART ─────┤   (spiral arteries)  (intervillous bed)        ├──► UT_VEN
-            └──────────────────► UT_CAP ─────────────────────┘
-                                 (non-placental myometrium)
+  └── MaternalPlacenta
 ```
 
 ## Properties
 
-### Configuration (independent parameters)
+### Config: wiring (model names)
+
+| Property | Default | Description |
+|---|---|---|
+| `pl_ivs_name` | `"PL_IVS"` | Intervillous space (a BloodVessel). |
+| `spiral_res_name` | `"UT_ART_PL_IVS"` | Spiral-artery resistor (PL_IVS's inflow connector). |
+| `drain_res_name` | `"PL_IVS_UT_VEN"` | Drainage resistor (owned by `UT_VEN`). |
+| `ut_art_name` | `"UT_ART"` | Uterine artery (arterial O2 content for the read-outs). |
+| `ut_in_res_name` | `"AD_UT_ART"` | Total uterine inflow (for the flow-share read-out). |
+| `uterus_name` | `"Uterus"` | Source of `pregnant`, `preg_ga` and `iup`. |
+
+### Config: physiology
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `mp_running` | boolean | `true` | Master switch (flow also needs a pregnancy). |
+| `preg_ga_threshold` | weeks | 4 | Below this gestational age the placenta is absent (no flow). |
+| `preg_ga_term` | weeks | 40 | Age at which the term dilation is reached. |
+| `spiral_res_term_factor` | – | 0.01 | `PL_IVS` resistance multiplier at term (archived scenario 0.0075). |
+| `met_active` | boolean | `true` | Switches the placental O2 consumption. |
+| `mp_vo2` | mL O2/kg/min | 0.04 | Placental O2 consumption at full perfusion, per kg maternal weight (archived scenario 0.33, i.e. ~20 mL/min at 60 kg). |
+| `vo2_factor`, `vo2_factor_ps` | – | 1.0 | Non-persistent (reset each step) and persistent VO2 multipliers. |
+| `resp_q` | – | 0.8 | Respiratory quotient (CO2 added per O2 used). |
+| `contraction_pres_gain` | – | 0.6 | Fraction of the uterine pressure applied to `PL_IVS`. |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `mp_running` | bool | Master gate. Flow is *additionally* gated by pregnancy (read from the `Uterus`). |
-| `pl_ivs_name` | string | Name of the intervillous-space compartment (the blood lake). Default `"PL_IVS"`. |
-| `spiral_res_name` | string | Name of the spiral-artery resistor — owned by `PL_IVS`, equals its `r_for_eff`. Default `"UT_ART_PL_IVS"`. |
-| `drain_res_name` | string | Name of the drainage resistor (owned by `UT_VEN`). Default `"PL_IVS_UT_VEN"`. |
-| `ut_art_name` | string | Arterial source compartment, for arterial O₂-content read-outs. Default `"UT_ART"`. |
-| `ut_in_res_name` | string | Total uterine inflow resistor, for the flow-share read-out. Default `"AD_UT_ART"`. |
-| `uterus_name` | string | Where `preg_ga` / `pregnant` / `iup` are read from (single source of truth). Default `"Uterus"`. |
-| `preg_ga_threshold` | weeks | Below this GA the placenta is treated as absent (no flow). Default `4.0`. |
-| `preg_ga_term` | weeks | GA anchor at which the term dilation is reached. Default `40.0`. |
-| `spiral_res_term_factor` | unitless | `PL_IVS` resistance multiplier at term (small → large flow). Default `0.01`. |
-| `met_active` | bool | Placental O₂ consumption / CO₂ production on/off. Default `true`. |
-| `mp_vo2` | mL O₂/kg/min | Placental oxygen use (scenario-calibrated). Default `0.04`. |
-| `vo2_factor` | unitless | Non-persistent VO2 multiplier — reset to `1.0` every step. Default `1.0`. |
-| `vo2_factor_ps` | unitless | Persistent VO2 multiplier (interventions). Default `1.0`. |
-| `resp_q` | unitless | Respiratory quotient (CO₂ produced / O₂ consumed). Default `0.8`. |
-| `contraction_pres_gain` | unitless | Fraction of the uterine IUP applied as `pres_ext` on `PL_IVS`. Default `0.6`. |
+| `mp_active` | boolean | Pregnant, past the threshold and running. |
+| `mp_blood_flow` | mL/min | Placental (spiral-artery) flow, smoothed over 5 s. |
+| `mp_flow_fraction` | % | Placental share of total uterine inflow (both smoothed). |
+| `mp_do2`, `mp_vo2_ml` | mL O2/min | O2 delivery and consumption. |
+| `mp_o2er` | % | O2 extraction ratio. |
+| `mp_avo2` | mmol/L | Arterio-venous O2 content difference (`UT_ART` − `PL_IVS`). |
 
-### Read-outs (dependent parameters)
+## Calculation
 
-| Property | Unit | Description |
-|---|---|---|
-| `mp_blood_flow` | mL/min | Maternal placental blood flow (EMA-smoothed spiral-artery flow). |
-| `mp_flow_fraction` | % | Placental flow as a percentage of total uterine inflow. |
-| `mp_do2` | mL O₂/min | Oxygen delivery into the intervillous space. |
-| `mp_vo2_ml` | mL O₂/min | Oxygen uptake. |
-| `mp_o2er` | % | Oxygen extraction ratio (`mp_vo2_ml / mp_do2`). |
-| `mp_avo2` | mmol/L | Arterio-venous O₂ content difference (`UT_ART.to2 − PL_IVS.to2`). |
-| `mp_active` | bool | Whether the placental bed is perfused (pregnant **and** running). |
+Each step (references resolved lazily, so build order doesn't matter):
 
-### Internal state (not configured)
-
-`_pl_ivs`, `_spiral_res`, `_drain_res`, `_ut_art`, `_ut_in_res`, `_uterus` are lazily-resolved model
-references (resolved in `calc_model`, not `init_model`, since they may be built after this controller).
-`_flow_ema` / `_ut_in_ema` are exponentially-smoothed flows (L/s) and `_flow_tc` (5.0 s) is the
-smoothing time constant.
-
-## `init_model(args)`
-
-Calls `super.init_model(args)` to apply the config args. It does **not** resolve the compartment /
-resistor / `Uterus` references — those are resolved lazily inside `calc_model` so the model is
-independent of build order.
-
-## `calc_model()`
-
-Runs every step. Steps in order:
-
-1. **Lazy reference resolution.** Resolve any still-null reference (`_pl_ivs`, `_spiral_res`,
-   `_drain_res`, `_ut_art`, `_ut_in_res`, `_uterus`) from `model_engine.models`. If `PL_IVS` cannot be
-   found, return immediately.
-
-2. **Pregnancy progress.** Read `ga = Uterus.preg_ga` and `pregnant = Uterus.pregnant`. Compute a
-   normalized fraction:
-
-   ```
-   frac = 0
-   if pregnant and ga > preg_ga_threshold:
-       frac = (ga - preg_ga_threshold) / (preg_ga_term - preg_ga_threshold)   # clamped to ≤ 1.0
-   active = mp_running and frac > 0
-   mp_active = active
-   ```
-
-3. **Gating.** Re-asserted every step:
-   - `PL_IVS.no_flow = !active` and `drain_res.no_flow_ext = !active` (the drainage resistor is owned by `UT_VEN`, which re-copies its own `no_flow` every step, so the external gate is used). A non-pregnant or stopped placenta
-     is perfectly inert (no perturbation of the uterine baseline), but `PL_IVS` stays `is_enabled` so
-     it retains a defined pressure.
-   - If **not active**: restore `PL_IVS.r_factor_scaling_ps = 1.0` (the layer this model owns), zero
-     all read-outs, and return.
-
-4. **Spiral-artery dilation.** Scale `PL_IVS` input resistance down with GA:
-
-   ```
-   res_factor = 1.0 + frac * (spiral_res_term_factor - 1.0)
-   PL_IVS.r_factor_scaling_ps = res_factor
-   ```
-
-   Written every step (idempotent — the engine recomputes `r_for_eff` from the base each step;
-   `BloodVessel` composes `r_factor_scaling_ps` multiplicatively, disjoint from the layers any other
-   model writes).
-
-5. **Contraction compression.** Add the uterine IUP as external pressure on the bed:
-
-   ```
-   PL_IVS.pres_ext += Uterus.iup * contraction_pres_gain
-   ```
-
-   Re-asserted each step (the compartment resets `pres_ext` after use).
-
-6. **Placental metabolism (when `met_active` and `PL_IVS.vol > 0`).** VO2 is scaled by **perfusion**,
-   not GA, so a small early-gestation placenta with little flow consumes little O₂ (a full-strength
-   VO2 on a tiny early flow would drive O2ER far above 100%):
-
-   ```
-   flow_ratio = (res_factor > 0) ? spiral_res_term_factor / res_factor : 0      # 0..1, ~1 at term
-   vo2_eff    = mp_vo2 * vo2_factor * vo2_factor_ps * flow_ratio                 # mL O2/kg/min
-   vo2_step   = (O2_MMOL_PER_ML * vo2_eff * model.weight / 60.0) * _t            # mmol per step
-
-   PL_IVS.to2  = max(0, (PL_IVS.to2 * vol - vo2_step) / vol)
-   PL_IVS.tco2 = max(0, (PL_IVS.tco2 * vol + vo2_step * resp_q) / vol)
-   mp_vo2_ml   = vo2_eff * model.weight                                         # mL O2/min
-   ```
-
-   where `O2_MMOL_PER_ML = 1/22.414` (STPD) and `vol = PL_IVS.vol`. Then `vo2_factor` is reset to `1.0`. When
-   inactive metabolism, `mp_vo2_ml = 0`.
-
-7. **Smoothed flows (EMA).** With `alpha = _t / (_flow_tc + _t)`:
-
-   ```
-   _flow_ema  += (spiral_res.flow  - _flow_ema)  * alpha     # L/s
-   _ut_in_ema += (ut_in_res.flow   - _ut_in_ema) * alpha     # L/s
-   mp_blood_flow   = _flow_ema * 60000.0                     # L/s -> mL/min
-   mp_flow_fraction = (_ut_in_ema > 0) ? (_flow_ema / _ut_in_ema) * 100.0 : 0   # %
-   ```
-
-   Both numerator and denominator of the share are smoothed so the ratio is not polluted by pulsatile
-   sampling.
-
-8. **O₂ delivery / extraction read-outs.** Arterial content is taken from `UT_ART` (falls back to
-   `PL_IVS` if `_ut_art` is missing); venous content is `PL_IVS`:
-
-   ```
-   art_to2    = ut_art ? ut_art.to2 : PL_IVS.to2
-   flow_l_min = _flow_ema * 60.0                              # L/min
-   mp_do2  = (flow_l_min * art_to2) / O2_MMOL_PER_ML          # mL O2/min
-   mp_avo2 = art_to2 - PL_IVS.to2                             # mmol/L
-   mp_o2er = (mp_do2 > 0) ? (mp_vo2_ml / mp_do2) * 100.0 : 0  # %
-   ```
+1. **Progress through pregnancy:** `frac = (preg_ga − threshold) / (term − threshold)`, clamped to 0–1, and 0 when not pregnant. The placenta is active when `mp_running` and `frac > 0`.
+2. **Inactive:** `PL_IVS.no_flow` and the drainage's `no_flow_ext` are set, `PL_IVS.r_factor_scaling_ps` is restored to 1, and the outputs are zeroed. `PL_IVS` stays enabled as an inert pool with a defined pressure.
+3. **Spiral-artery dilation:** `PL_IVS.r_factor_scaling_ps = 1 + frac·(spiral_res_term_factor − 1)`.
+4. **Contraction compression:** `PL_IVS.pres_ext += Uterus.iup · contraction_pres_gain`.
+5. **Placental metabolism.**
+   - Consumption scales with perfusion: `vo2_eff = mp_vo2 · factors · (term_factor / res_factor)`, so a small early placenta uses little O2 and the extraction stays physiological.
+   - `vo2_eff` is removed from `PL_IVS.to2` (STPD conversion, as in Metabolism), and `resp_q` times that amount is added to `tco2`.
+6. **Read-outs:** smoothed flows, the flow share, DO2, VO2, O2ER and the AV difference.
 
 ## Factor system
 
-`MaternalPlacenta` does not expose a base/`_ps`/`_scaling_ps` factor triplet of its own. It is a
-controller that **writes** other models' factor layers:
+It writes the **scaling layer** `PL_IVS.r_factor_scaling_ps`, the layer that belongs to `ModelScaler`. That is safe only while `PL_IVS` isn't in a scaler group (it isn't in the archived scenario). Its own `vo2_factor`/`vo2_factor_ps` are a simple multiplier pair.
 
-- **`PL_IVS.r_factor_scaling_ps`** — owned and written by this model for spiral-artery dilation. It is
-  the *scaling* layer, disjoint from the ANS (`r_factor`/`r_factor_ps`) layers, and composes
-  multiplicatively in `BloodVessel`. When the bed is inactive this model restores it to `1.0`.
-- **`vo2_factor` / `vo2_factor_ps`** — multipliers on the placental VO2 (non-persistent and persistent
-  respectively), mirroring the `Uterus` / `Metabolism` convention. `vo2_factor` is reset to `1.0`
-  every step.
+## Inputs and outputs
+
+- **Reads:** `Uterus.pregnant`, `preg_ga`, `iup`; `UT_ART.to2`; the flows of the spiral and uterine inflow resistors; `PL_IVS` volume and contents; `model.weight`.
+- **Writes:** `PL_IVS.no_flow`, `r_factor_scaling_ps`, `pres_ext`, `to2`, `tco2`; `PL_IVS_UT_VEN.no_flow_ext`.
+- **Written by:** the user (pregnancy settings through `Uterus`).
+
+## Assumptions and limitations
+
+- **Not calibrated across gestation.** At 40 weeks placental flow is 525 mL/min, 84 % of uterine flow, close to the term reference (~500–750 mL/min uteroplacental, ~80 % placental). But because resistance falls linearly with gestation, flow (∝ 1/R) stays small until the last weeks: 9 mL/min at 20 weeks, 42 at 36, 77 at 38. Real placental flow rises steadily from the first trimester. See the gestation table in [Uterus](./Uterus.md#assumptions-and-limitations).
+- **No fetal coupling.** Gas exchange between `PL_IVS` and a fetal placental capillary needs a combined mother + fetus scenario; the fetal [Placenta](./Placenta.md) uses its own fixed maternal pool.
+- **Linear growth** of spiral-artery conductance with gestational age between the threshold and term.
+- **Scaling-layer use** (see [Factor system](#factor-system)), as in [Uterus](./Uterus.md).
+- **Consumption is silently capped** when it would make `PL_IVS`'s O2 content negative.
 
 ## Example definition (JSON)
 
-From `model_definitions/adult_female_uterus.json`:
+From `archive/adult_female_uterus.json`, `models.MaternalPlacenta` (trimmed to the physiology props; the wiring props are the defaults):
 
 ```json
 {
   "name": "MaternalPlacenta",
-  "description": "maternal placenta: perfused intervillous space fed by spiral arteries off the uterine bed",
-  "is_enabled": true,
   "model_type": "MaternalPlacenta",
-  "components": {},
+  "is_enabled": true,
   "mp_running": true,
-  "pl_ivs_name": "PL_IVS",
-  "spiral_res_name": "UT_ART_PL_IVS",
-  "drain_res_name": "PL_IVS_UT_VEN",
-  "ut_art_name": "UT_ART",
-  "ut_in_res_name": "AD_UT_ART",
-  "uterus_name": "Uterus",
   "preg_ga_threshold": 4,
   "preg_ga_term": 40,
   "spiral_res_term_factor": 0.0075,
   "met_active": true,
   "mp_vo2": 0.33,
-  "vo2_factor": 1,
-  "vo2_factor_ps": 1,
   "resp_q": 0.8,
-  "contraction_pres_gain": 0.6,
-  "mp_blood_flow": 0,
-  "mp_flow_fraction": 0,
-  "mp_do2": 0,
-  "mp_vo2_ml": 0,
-  "mp_o2er": 0,
-  "mp_avo2": 0
+  "contraction_pres_gain": 0.6
 }
 ```
 
-The scenario also defines the compartment and resistors this model drives: `PL_IVS`
-(a `BloodCapacitance`/`BloodVessel` intervillous lake), `UT_ART_PL_IVS` (spiral-artery resistor off
-`UT_ART`), and `PL_IVS_UT_VEN` (drainage to `UT_VEN`). The scenario value
-`spiral_res_term_factor = 0.0075` is slightly lower than the class default (`0.01`) to hit the target
-term placental flow.
+## Usage in the scenarios
 
-## Usage in the model
+Only `archive/adult_female_uterus` (60 kg adult female), with `PL_IVS` between `UT_ART` and `UT_VEN` in parallel with the uterine tissue bed (`UT_CAP`). None of the canonical neonatal and fetal scenarios include it.
 
-- **Scenario:** ships in `adult_female_uterus`, the maternal pregnancy scenario built on
-  `adult_female`. It is the *maternal placenta (Part 5)* layer on top of the uterine bed (Part 1) and
-  the [`Uterus`](./Uterus.md) organ (Parts 2–4).
+## References
 
-- **Coupling with the [Uterus](./Uterus.md).** The `Uterus` is the single source of truth for
-  pregnancy state. `MaternalPlacenta` reads `Uterus.preg_ga` and `Uterus.pregnant` (to gate and scale
-  flow) and `Uterus.iup` (to compress the bed during contractions). The `Uterus` itself dilates the
-  *conduit* and *myometrial* (`UT_CAP`) beds via its own `preg_*` scaling; note its
-  `preg_cap_res_term_factor` lets the non-placental myometrium stay a modest minority while the
-  intervillous bed carries the dominant share at term. Both `UT_CAP` and `PL_IVS` drain into the
-  **common `UT_VEN`**, which is why the `Uterus`'s `ut_o2er` read-out is computed from the
-  arterio-venous content difference rather than a single bed's VO2/DO2.
-
-- **Spiral arteries off `UT_ART`, parallel to `UT_CAP`.** The spiral-artery resistor `UT_ART_PL_IVS`
-  taps the same arterial source as the myometrial capillary, so dilating `PL_IVS`'s input resistance
-  (lowering `spiral_res_term_factor`) shifts the share of uterine inflow toward the placenta — the
-  `mp_flow_fraction` read-out tracks this share.
-
-- **Contrast with the fetal [Placenta](./Placenta.md).** The fetal `Placenta` model exchanges gas
-  across the membrane with a fixed-composition maternal pool (`PL_MAT`) — an infinite reservoir held
-  at `mat_to2`/`mat_tco2`, not a perfused bed. `MaternalPlacenta` models the maternal blood lake
-  (`PL_IVS`) as a *real* perfused compartment with its own inflow, metabolism, and venous drainage.
-  The two are **not yet coupled**: there is no `PL_GASEX`-style diffusor between `PL_IVS` and a fetal
-  capillary in this version (that requires a combined mother+fetus scenario with a fetal circulation).
-  The legacy fixed `PL_MAT` pool is left untouched, and `MaternalPlacenta` runs standalone on the
-  maternal side. The `Uterus`'s `couple_placenta` hook drives `PL_MAT` (the fetal-`Placenta` pool)
-  from uterine arterial blood — that is a separate mechanism and does not feed `PL_IVS`.
+None calibrated yet.
 
 ````
 
@@ -8926,376 +8208,300 @@ term placental flow.
 ````markdown
 # Metabolism
 
-The Metabolism model is the whole-body tissue **oxygen sink and CO₂ source**. Every model step it
-removes oxygen from, and adds carbon dioxide to, a configured set of blood compartments, driving the
-arterio-venous gas gradient that the rest of the circulation transports and the lungs/placenta clear.
-It is the counterpart to gas exchange ([`GasExchanger`](./GasExchanger.md), `BloodDiffusor`):
-exchange *loads* O₂ and *unloads* CO₂ at the lung/membrane; metabolism *unloads* O₂ and *loads* CO₂ at
-the tissues.
+`Metabolism` is the body's oxygen consumption and CO2 production. Each step it removes the whole-body O2 uptake (VO2, scaled to weight) from the blood of the tissue beds, split by a fixed fraction per bed, and adds CO2 at the respiratory quotient. That is what makes venous blood desaturated and CO2-rich, which the lungs then reverse. The myocardium has its own balance in [Mob](./Mob.md).
+
+## Physiology
+
+At rest a newborn consumes about 6–7 mL O2/kg/min, roughly twice an adult's per kg, mostly for the brain, heart, liver, kidneys and gut, and for growth and heat. The tissues extract O2 from the capillary blood and give off CO2. The ratio of CO2 produced to O2 used, the respiratory quotient (RQ), depends on the fuel: about 0.7 for fat, 1.0 for carbohydrate, and above 1 when carbohydrate is turned into fat during growth.
+
+Consumption rises with fever and cold (shivering and non-shivering thermogenesis) and falls with hypothermia (about 7 % per °C, Q10 ≈ 2). When a tissue's O2 supply fails, aerobic metabolism stops: no more O2 uptake or aerobic CO2 production, and the tissue switches to anaerobic glycolysis and lactate (see [Lactate](./Lactate.md)).
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Metabolism   (whole-body O₂ consumption / CO₂ production)
-```
-
-Metabolism extends `BaseModelClass` directly. It is a *process* model: it holds no compartment of its
-own and instead writes `to2`/`tco2` onto the blood compartments named in `metabolic_active_models`.
-
-## What it models
-
-A single whole-body oxygen consumption `vo2` (ml O₂ / kg / min) is distributed across several blood
-compartments according to a per-compartment **fractional oxygen use** `fvo2`. CO₂ production follows
-from the **respiratory quotient** `resp_q` (CO₂ produced / O₂ consumed). Temperature dependence is
-applied through a Q10 factor (`vo2_temp_factor`) owned by [`Thermoregulation`](./Thermoregulation.md).
-
-```
-vo2 (ml/kg/min) ──split by fvo2──► per-compartment O₂ draw ──×resp_q──► per-compartment CO₂ release
+  └── Metabolism
 ```
 
 ## Properties
 
-### Configuration (independent)
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `met_active` | boolean | `true` | Switch. |
+| `vo2` | mL O2/kg/min | 8.1 | Whole-body O2 use excluding the myocardium (STPD). term 6.14, preterm 5.2–5.7, fetal 5.0–5.5. |
+| `vo2_factor` | – | 1.0 | Persistent user/scenario multiplier; no model writes it. |
+| `vo2_temp_factor` | – | 1.0 | Q10 temperature effect; written by [Thermoregulation](./Thermoregulation.md). |
+| `vo2_bat_factor` | – | 1.0 | O2 cost of brown-fat thermogenesis; written by Thermoregulation. |
+| `resp_q` | – | 0.8 | Respiratory quotient. term 0.8, preterm and fetal 0.92–0.95. |
+| `metabolic_active_models` | {name: fraction} | `{}` | The beds and their share of VO2 (summing to 1). |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `met_active` | bool | Master on/off switch; when false `calc_model` returns immediately |
-| `vo2` | ml/kg/min | Body oxygen consumption distributed over `metabolic_active_models`. Scenarios that run `Mob` set it to the NON-cardiac VO₂: the heart's own consumption (basal + stroke work) is added by `Mob` (term_neonate: 7.288 + 0.81 = 8.1 mL/kg/min at rest) |
-| `vo2_factor` | unitless | External multiplier on VO₂ (set by other models / interventions); `1.0` = no effect |
-| `vo2_temp_factor` | unitless | Q10 temperature multiplier on VO₂, written by [`Thermoregulation`](./Thermoregulation.md); `1.0` at 37 °C / when that model is absent or disabled |
-| `vo2_bat_factor` | unitless | O₂ cost of brown-fat (non-shivering) thermogenesis, written by [`Thermoregulation`](./Thermoregulation.md): `1 + VO2_bat / (vo2 · vo2_factor · vo2_temp_factor)`, with `VO2_bat = brown_fat_heat / caloric_equiv_o2`; `1.0` when no brown fat is active |
-| `resp_q` | unitless | Respiratory quotient (CO₂ produced / O₂ consumed), typically ~0.8 |
-| `metabolic_active_models` | object | `{ compartmentName: fvo2 }` — where O₂ is consumed and CO₂ produced; `fvo2` are fractions of `vo2` and must sum to 1.0 (Glucose distributes its uptake over the same map, so a larger sum also unbalances glucose) |
+| `o2_deficit` | mmol/s | O2 demand that found no O2 in its bed this step (0 at rest; positive in ischaemia). |
 
-### Computed / internal
+## Calculation
 
-Metabolism publishes no dependent read-out properties; its only outputs are the mutations it writes
-to each target compartment's `to2` and `tco2`. The per-step O₂ draw `vo2_step` is a local variable
-recomputed each step (not stored on the instance).
+Each step (nothing while `met_active` is off):
 
-## Q10 temperature dependence
+```
+vo2_step = vo2 · vo2_factor · vo2_temp_factor · vo2_bat_factor · weight / 60 · dt / 22.414      (mmol)
+```
 
-`vo2_temp_factor` is a **persistent channel written by `Thermoregulation`** (it is not reset each
-step like a non-persistent factor). It encodes the Q10 rule — metabolic rate rises/falls with body
-temperature — and multiplies into `vo2_step` alongside `vo2_factor`. It defaults to `1.0`, which is
-its value at 37 °C and whenever the `Thermoregulation` model is absent or disabled, so a scenario
-without thermoregulation is unaffected.
+For each bed with fraction f (a missing or empty bed is skipped):
+```
+demand = vo2_step · f
+used   = min(demand, to2 · V)                 never more O2 than the bed holds
+to2   −= used / V
+tco2  += resp_q · used / V                    CO2 only from O2 actually used
+o2_deficit += (demand − used) / dt
+```
 
-## Step calculation (`calc_model`)
+STPD conversion as in [Units](./Units.md). Example: with the brain's inflow closed in term_neonate, `BR_CAP` empties of O2 within seconds and `o2_deficit` reads 0.005 mmol/s, the brain's 6.8 mL/min share; its tCO2 stays at ~31 mmol/L. Before v1.0 CO2 kept being added from the missing O2 and reached 225 mmol/L in 2 min.
 
-Runs every model step when `met_active` is true.
+`set_metabolic_active_model(site, fraction)` changes or adds one bed's share.
 
-1. **Whole-body O₂ use for this step**, converted ml → mmol and per-minute → per-step:
+## Factor system
 
-   ```
-   vo2_step = (O2_MMOL_PER_ML · vo2 · vo2_factor · vo2_temp_factor · vo2_bat_factor · weight) / 60 · Δt        [mmol]
-   ```
+Its own multipliers on `vo2`: `vo2_factor` (user), `vo2_temp_factor` and `vo2_bat_factor` (Thermoregulation). They multiply.
 
-   - `O2_MMOL_PER_ML = 1/22.414` mmol/mL ([`helpers/Units.js`](../helpers/Units.js)): clinical VO₂ is STPD
-     (0 °C, 760 mmHg), as are the blood O₂ content constants, so the conversion does not depend on temperature.
-   - `weight` is the engine body weight (kg); `Δt` (`this._t`) is the model step size.
+## Inputs and outputs
 
-2. **For each entry in `metabolic_active_models` (`{ compartment: fvo2 }`):**
-   - Resolve the compartment.
-   - Skip silently (via `continue`) if the compartment is missing or its volume is ≤ 0, so the
-     remaining compartments are still processed.
-   - O₂ removed and CO₂ added this step (distributed by `fvo2`):
+- **Reads:** each bed's `vol`, `to2`, `tco2`; `model.weight`.
+- **Writes:** each bed's `to2`, `tco2`.
+- **Written by:** Thermoregulation (`vo2_temp_factor`, `vo2_bat_factor`); the user and scenario scripts (`vo2`, `resp_q`, the fractions).
+- **Read by:**
+  - [Lactate](./Lactate.md) and [Glucose](./Glucose.md), which reuse the bed map (Lactate must follow Metabolism in the `models` map);
+  - Thermoregulation (metabolic heat).
 
-     ```
-     dto2  = vo2_step · fvo2
-     dtco2 = vo2_step · fvo2 · resp_q
-     to2  := max(0, (to2·vol − dto2) / vol)
-     tco2 :=        (tco2·vol + dtco2) / vol
-     ```
+## Assumptions and limitations
 
-     A fixed amount of O₂/CO₂ is exchanged with the compartment's blood volume; the new concentration
-     follows from the compartment volume. `to2` is floored at 0 so a compartment cannot go O₂-negative.
+- **Fixed shares.** A bed's O2 use doesn't depend on its flow or on its own O2 (no supply dependence above the zero floor), and doesn't follow organ activity (seizures, feeding, work of breathing).
+- **The myocardium is separate** ([Mob](./Mob.md)), so lung uptake = Metabolism + Mob (term: 6.14 + ~0.8 = 7.0 mL/kg/min).
+- **The beds stand for whole organs and regions:** `RLB`/`RUB` the lumped lower and upper body, `AA`/`AD` the aortic wall.
 
-`set_metabolic_active_model(site, new_fvo2)` adds or updates one site's fraction at runtime.
+### term_neonate calibration (2026-10)
 
-## Notes & caveats
+- **Whole-body uptake.** `vo2` 6.1396 gives a lung uptake of 7.0 mL/kg/min, slightly above quiet rest. First-week references are 6.26 ± 1.51 at thermoneutral rest and 45–50 kcal/kg/d, ~6.5–7.2 mL/kg/min. Knock-on changes:
+  - CO2 production fell, so `Breathing.minute_volume_ref` and the chemoreceptor set-points were re-anchored;
+  - by Fick, SvO2 is ~81–85 % (scenario 81.5 %);
+  - Thermoregulation re-seeds its heat-loss trim at load.
 
-- **`fvo2` should sum to ~1.0.** If the configured fractions sum to more (or less) than 1, the
-  effective whole-body VO₂ is correspondingly higher (or lower) than the `vo2` setting — a definition
-  concern, not enforced by the model.
-- **O₂ floor breaks strict conservation.** When `to2` would go negative it is clamped to 0, but the
-  matching CO₂ is still produced in full. At physiological gradients this never triggers; under
-  extreme O₂ debt it would slightly over-produce CO₂. Anaerobic metabolism is not modelled here — see
-  [`Lactate`](./Lactate.md), which captures the same O₂ debt as lactate production.
-- **Empty / missing compartments are skipped** (volume ≤ 0 or an unresolved name) so they neither
-  divide by zero nor halt processing of the remaining compartments.
+  See `scripts/_fix_term_vo2.mjs`.
+- **Brain share 0.313** (was 0.42–0.45, a Holliday-type estimate from adult CMRO2 per gram). Neonatal MRI finds a term CBF of 106 mL/min (Kooi 2019) and CMRO2 well below adult values (Liu 2014). Brain flow and O2 use were brought down together, keeping its extraction at ~35 %: CBF 144 → 106 mL/min, brain VO2 11.0 → 8.1 mL/min. The other beds took over the rest proportionally. See `scripts/_fix_term_brain_mri.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+- **The fetal scenarios** give the brain 0.65 (see [fetal_circulation](./fetal_circulation.md)).
 
 ## Example definition (JSON)
 
-From `term_neonate.json`:
+From `term_neonate.json`, `models.Metabolism` (trimmed to the config props):
 
 ```json
 {
   "name": "Metabolism",
-  "description": "Metabolism model",
-  "is_enabled": true,
   "model_type": "Metabolism",
-  "components": {},
+  "is_enabled": true,
   "met_active": true,
-  "vo2": 8.1,
+  "vo2": 6.1396,
   "vo2_factor": 1,
-  "vo2_temp_factor": 1.0,
   "resp_q": 0.8,
   "metabolic_active_models": {
-    "RLB": 0.15,
-    "INT_CAP": 0.15,
-    "LS_CAP": 0.1,
-    "KID_CAP": 0.1,
-    "RUB": 0.1,
-    "AA": 0.005,
-    "AD": 0.01,
-    "BR_CAP": 0.453
+    "BR_CAP": 0.31311, "RLB": 0.16754, "INT_CAP": 0.16754,
+    "LS_CAP": 0.11169, "KID_CAP": 0.11169, "RUB": 0.11169,
+    "AA": 0.00558, "AD": 0.01117
   }
 }
 ```
 
-Here the whole-body VO₂ of 8.1 ml/kg/min is spread over the brain capillary `BR_CAP` (0.453, the
-largest sink), lower/upper body (`RLB`/`RUB`), gut/liver/kidney capillaries (`INT_CAP`/`LS_CAP`/
-`KID_CAP`), and small fractions on the aortic compartments `AA`/`AD`. (The adult `adult_female.json`
-scenario uses `vo2: 3.5` with a slightly different split.)
+## Usage in the scenarios
 
-### The brain's share in `term_neonate` (calibrated assumption)
+One instance in every scenario, with the same eight beds.
 
-The example above is the original split. The current `term_neonate` stores:
-- `vo2` 6.1396; `Mob` adds the myocardium's ~0.8 ml/kg/min on top, so lung uptake is 7.0
-  ml/kg/min (see below)
-- `BR_CAP` **0.31311**
-- `RLB`/`INT_CAP` 0.16754
-- `LS_CAP`/`KID_CAP`/`RUB` 0.11169
-- `AA` 0.00558, `AD` 0.01117
+| Scenario | `vo2` | `resp_q` | Brain share |
+|---|---|---|---|
+| term_neonate | 6.14 | 0.80 | 0.313 |
+| preterm_30wk | 5.69 | 0.92 | 0.313 |
+| preterm_25wk / 28wk, Bischoff ×3 | 5.19 | 0.95 | 0.313 |
+| fetus_term / 30wk / 25wk | 5.46 / 4.98 / 4.98 | 0.95 | 0.65 |
 
-The old brain share (0.42–0.45) was a Holliday-type estimate: adult CMRO₂ per gram × neonatal brain
-mass. Neonatal MRI finds lower values:
-- cerebral blood flow at a term median of 106 mL/min (Kooi 2019, PC-MRA, 172 term infants)
-- CMRO₂ well below adult values (Liu 2014)
+## References
 
-In 2026-10 the brain's flow and O₂ use were therefore brought down together, keeping its O₂
-extraction (~35 %, cerebral venous saturation ~62 %, as measured by Liu 2014):
-- CBF 144 → 106 mL/min
-- brain VO₂ 11.0 → 8.1 mL/min, 31 % of the Metabolism VO₂
-
-The other beds took over the remainder proportionally, so total VO₂ is unchanged. See
-`scripts/_fix_term_brain_mri.mjs` and [TermNeonateReference](./TermNeonateReference.md). A scenario
-derived from term_neonate inherits this split.
-
-### Whole-body VO₂ in `term_neonate` (calibrated assumption)
-
-`vo2` is **not** the whole-body O₂ uptake when [`Mob`](./Mob.md) is present: Mob consumes the
-myocardium's O₂ (basal plus stroke work, ~0.8 ml/kg/min at rest) on top of it.
-
-The scenario used to take up 8.1 ml/kg/min (7.288 + Mob). The first-week references are lower:
-- 6.26 ± 1.51 at thermoneutral rest
-- resting energy expenditure of 45–50 kcal/kg/d, i.e. ~6.5–7.2 ml O₂/kg/min
-
-So in 2026-10 `vo2` was set to 6.1396, for a lung uptake of **7.0 ml/kg/min**. That sits slightly
-above quiet rest, matching the scenario's calm, mixed sleep/awake state. Knock-on changes:
-- CO₂ production falls with VO₂, so `Breathing.minute_volume_ref` and the chemoreceptor set-points
-  were re-anchored to keep the chemoreflex neutral
-- at the measured output and Hb, Fick puts SvO₂ at ~81–85 % (scenario 81.5 %)
-- Thermoregulation re-seeds its heat-loss trim at load, so the lower metabolic heat does not cool
-  the patient
-
-See `scripts/_fix_term_vo2.mjs`.
-
-## Usage in the model
-
-- One Metabolism instance per scenario; it is the sole driver of resting tissue O₂ extraction and CO₂
-  generation, and thus of the venous desaturation that gas exchange must reverse.
-- [`Lactate`](./Lactate.md) reuses Metabolism's `metabolic_active_models` map and `vo2`/`vo2_factor`/
-  `vo2_temp_factor` to compute hypoxia-driven lactate, and must be inserted in the scenario `models`
-  map immediately after Metabolism.
-- [`Thermoregulation`](./Thermoregulation.md) modulates consumption by writing `vo2_temp_factor`.
-- The myocardium has its own dedicated balance, [`Mob`](./Mob.md); the heart is therefore not listed
-  in `metabolic_active_models`.
+Kooi 2019 and Liu 2014 (cerebral flow and CMRO2) and the term VO2 references are cited with details in [TermNeonateReference](./TermNeonateReference.md).
 
 ````
 
 ### FILE: explain-engine/docs/Mob.md
 
 ````markdown
-# Mob — Myocardial Oxygen Balance
+# Mob
 
-`Mob` models the **oxygen economy of the heart muscle**: how much O₂ the myocardium consumes, how
-that O₂ is drawn from the coronary blood pool, and how myocardial **hypoxia** feeds back onto cardiac
-function (rate, contractility, autonomic drive). It is the cardiac analogue of
-[`Metabolism`](./Metabolism.md) — but where Metabolism is a passive tissue sink, `Mob` also closes a
-regulatory loop with the `Heart`.
+`Mob` is the **myocardial oxygen balance**. It computes the heart's own O2 consumption, a basal part plus the cost of its mechanical stroke work, and takes it from the coronary blood pool `COR`. When coronary O2 runs low it depresses heart rate, contractility and the heart's response to sympathetic drive: the ischaemic, failing myocardium. It owns the coronary circulation (`COR` and its connectors) as sub-models.
+
+## Physiology
+
+The heart extracts more of its blood's oxygen than any other organ, about 70 % at rest (coronary sinus saturation ~30 %). It can therefore raise its O2 supply almost only by raising coronary flow. Its O2 use has two parts:
+- a **basal** part, for ion pumps and housekeeping;
+- a **work** part, proportional to the pressure–volume work of each beat (the P–V loop area) and divided by the contractile efficiency (~35 % of the extra O2 becomes external work).
+
+The left ventricle is perfused mainly in diastole, when the muscle relaxes (see [Heart](./Heart.md) for the systolic compression). Coronary hypoxia makes the myocardium beat slower and weaker. Severe ischaemia ends in bradycardia and failure, a key step in neonatal collapse.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Mob   (myocardial O₂ consumption + coronary draw + hypoxia feedback)
+  └── Mob
 ```
-
-Mob extends `BaseModelClass` directly. It **owns the coronary sub-network** (`COR`, `AA_COR`,
-`COR_RAIVCI`, `COR_RASVC`) declared under its `components` block; the base `init_model` instantiates
-those into `model.models` so they participate in the global step loop.
-
-## What it models
-
-Myocardial VO₂ as the sum of a basal term and a stroke-work term (both natively in mmol O₂ per gram
-of heart tissue), the per-step consumption of that O₂ from the coronary blood pool with CO₂ added
-back via the respiratory quotient, and three first-order-smoothed hypoxia feedback channels onto the
-Heart (rate, contractility, autonomic activity).
 
 ## Properties
 
-### Configuration (independent)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `mob_active` | bool | Master on/off; `calc_model` returns immediately when false |
-| `to2_ref` | mmol/L | Upper edge of the coronary-O₂ hypoxia window (no effect at/above) |
-| `to2_min` | mmol/L | Lower edge of the hypoxia window (floor of activation) |
-| `resp_q` | unitless | Myocardial respiratory quotient (CO₂ produced / O₂ consumed), default `0.8` |
-| `bm_vo2_per_g` | mmol/(g·s) | Basal myocardial O₂ cost per gram of myocardium |
-| `mech_efficiency` | — | Incremental (contractile) work efficiency: O₂ energy = stroke work / efficiency, default `0.35` |
-| `caloric_equiv_o2` | J/mL | Energy per mL O₂ (STPD), default `20.1` |
-| `hw_intercept`, `hw_slope` | g, g/g | Heart-mass-from-body-weight regression: `hw = hw_intercept + hw_slope · weight_kg · 1000` |
-| `hr_factor_min/max`, `hr_tc` | unitless, s | Heart-rate hypoxia channel bounds + time constant |
-| `cont_factor_min/max`, `cont_tc` | unitless, s | Contractility hypoxia channel bounds + time constant |
-| `ans_factor_min/max`, `ans_tc` | unitless, s | Autonomic hypoxia channel bounds + time constant |
-
-### Computed / read-out (dependent)
-
-| Property | Unit | Description |
-|---|---|---|
-| `hw` | g | Heart weight derived from body weight |
-| `bm_vo2` | mmol/s | Basal myocardial O₂ consumption rate |
-| `sw_vo2` | mmol/s | Stroke-work O₂ consumption rate |
-| `mob_vo2` | mmol/s | Total myocardial O₂ consumption (`bm_vo2 + sw_vo2`) |
-| `mvo2_step` | mmol | O₂ consumed this step (`mob_vo2 · Δt`) |
-| `stroke_work_lv` / `stroke_work_rv` / `stroke_work_total` | mmHg·mL | Per-beat P-V loop area (left / right / sum) |
-| `hr_factor` / `cont_factor` / `ans_activity_factor` | unitless | Current values of the three hypoxia channels (1.0 = no effect) |
-| `mob` | mmol/s | Myocardial O₂ balance: coronary O₂ delivery (`AA_COR.flow · AA.to2`) minus consumption |
-
-## Oxygen consumption
-
-Two physiologically explicit terms, both in **mmol O₂ / s**, scaled by heart weight `hw`:
-
-```
-hw      = hw_intercept + hw_slope · weight_kg · 1000           [g]   (heart mass from body weight)
-bm_vo2  = bm_vo2_per_g · hw                                    [mmol/s]   basal metabolism
-sw_vo2  = stroke_work_total[J] / (mech_efficiency · caloric_equiv_o2) · O2_MMOL_PER_ML / cycle_time   [mmol/s]
-mob_vo2 = bm_vo2 + sw_vo2
-```
-
-### Stroke work (`calc_sw_vo2`)
-
-**Stroke work** is the area of the ventricular pressure–volume loop, accumulated by trapezoidal `P·dV`
-integration each step and split by flow direction:
-
-- filling (dV > 0) accumulates into `_pv_area_*_inc`
-- ejection (dV < 0) accumulates into `_pv_area_*_dec`
-- at the rising edge of `Heart.cardiac_cycle_running` (start of a new cycle):
-  `stroke_work = _pv_area_dec − _pv_area_inc` (the enclosed loop area), the per-beat O₂ cost
-  `_sw_vo2_per_beat = stroke_work_total · 0.133322 J/(mmHg·L) / (mech_efficiency · caloric_equiv_o2) · O2_MMOL_PER_ML` is computed (the P-V area is in mmHg·L), and the accumulators reset. The edge is `Heart.cardiac_cycle_running` rising while `Heart.prev_cardiac_cycle_running` is 0.
-
-The per-beat stroke-work cost is then amortized over the current `cardiac_cycle_time` to give the
-`sw_vo2` rate.
-
-## Coronary pool update
-
-Per step, `mvo2_step = mob_vo2 · Δt` is drawn from the coronary blood pool `COR`, with CO₂ added back
-via the respiratory quotient `resp_q`:
-
-```
-COR.to2  := (to2·vol − mvo2_step) / vol
-COR.tco2 := (tco2·vol + mvo2_step·resp_q) / vol
-```
-
-The update is applied only when it keeps `to2 ≥ 0` (see caveats).
-
-## Hypoxia feedback to the Heart (`calc_hypoxia_effects`)
-
-Coronary O₂ (`COR.to2`) drives a one-sided `activation_function`: at/above `to2_ref` there is no
-effect; below it the activation goes negative, reaching its floor at `to2_min`. The per-channel gain
-is rebuilt each step (`(factor_max − factor_min) / (to2_ref − to2_min)`) so live edits to the
-bounds take effect. Three independent channels each low-pass the activation with their own time
-constant (`hr_tc`, `cont_tc`, `ans_tc`) and map it onto a factor in `[*_min, *_max]`:
-
-| Channel | Computed factor | Written to | Effect |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| Heart rate | `hr_factor` | `Heart.hr_mob_factor` | lowers heart rate (bradycardia) |
-| Contractility | `cont_factor` | each chamber's `el_max_mob_factor` (LV, RV, LA, and RAIVCI/RASVC if present) | lowers `el_max` (negative inotropy) |
-| Autonomic | `ans_activity_factor` | `Heart.ans_activity_factor` | scales the sympathetic drive the Heart propagates to the chambers |
+| `mob_active` | boolean | `true` | Switch. |
+| `bm_vo2_per_g` | mmol O2/g/s | 3.7e-5 | Basal O2 use per gram of heart. |
+| `hw_intercept`, `hw_slope` | g, g/g | 7.799, 0.004296 | Heart weight = intercept + slope · body weight (g): 23 g at 3.5 kg, 10.8 g at 0.7 kg. |
+| `mech_efficiency` | – | 0.35 | Incremental (contractile) efficiency: stroke work / O2 energy. With the basal part included, whole-heart efficiency is the textbook ~15–20 %. |
+| `caloric_equiv_o2` | J/mL O2 | 20.1 | Energy per mL O2 (STPD). |
+| `resp_q` | – | 0.8 | Myocardial respiratory quotient. |
+| `to2_ref`, `to2_min` | mmol/L | 0.2, 0.0002 | Coronary O2 content below which hypoxia effects start, and where they reach their floor. |
+| `hr_factor_min`, `hr_factor_max`, `hr_tc` | –, s | 0.01, 1, 5 | Heart-rate channel range and time constant. |
+| `cont_factor_min`, `cont_factor_max`, `cont_tc` | –, s | 0.01, 1, 5 | Contractility channel. |
+| `ans_factor_min`, `ans_factor_max`, `ans_tc` | –, s | 0.01, 1, 5 | Sympathetic-responsiveness channel. |
 
-At normal coronary O₂ all three factors are 1.0 (no effect); under severe coronary hypoxia each drives
-toward its `*_min` (default 0.01), i.e. profound suppression of rate, contractility and autonomic
-responsiveness — the model of an ischemic, failing myocardium.
+### Outputs
 
-### How the channels reach the physics
+| Property | Unit | Description |
+|---|---|---|
+| `hw` | g | Heart weight. |
+| `bm_vo2`, `sw_vo2`, `mob_vo2` | mmol/s | Basal, stroke-work and total myocardial O2 use. |
+| `mvo2_step` | mmol | O2 demanded this step. |
+| `stroke_work_lv`, `stroke_work_rv`, `stroke_work_total` | mmHg·L | P–V loop areas of the last beat. |
+| `beat_interval` | s | Measured time between the last two beats. |
+| `mob` | mmol/s | Instantaneous O2 balance: coronary O2 inflow (`AA_COR.flow · AA.to2`) minus use. |
+| `o2_deficit` | mmol/s | Demand `COR` could not supply this step (0 at rest). |
+| `hr_factor`, `cont_factor`, `ans_activity_factor` | – | Applied hypoxia effects (1 = none). |
+| `hr_g`, `cont_g`, `ans_g` | – | Hypoxia gains (rebuilt every step). |
 
-- **`hr_mob_factor`** is read in `Heart.calc_model` (heart-rate sum).
-- **`el_max_mob_factor`** is read in `HeartChamber.calc_elastances` as an additive factor on `el_max`
-  (alongside `el_max_factor`, `el_max_factor_ps`, …).
-- **`ans_activity_factor`** is read in `Heart.calc_varying_elastance`: the chambers receive
-  `ans_activity · ans_activity_factor` instead of `ans_activity`, so it scales the sympathetic
-  inotropy/lusitropy term in `HeartChamber.calc_elastances`.
+## Calculation
 
-## Notes & caveats
+Each step (skipped if `AA`, `AA_COR`, `COR`, `Heart`, `LV` or `RV` is missing):
 
-- **Contractility and autonomic channels compound.** Because the autonomic channel also acts on
-  contractility (it scales `ans_activity`, which drives `el_max`/`el_min`), hypoxia suppresses
-  contractility through **two** channels; the combined strength should be validated/tuned (via
-  `cont_factor_min` and `ans_factor_min`) against expected behaviour in the host app.
-- **O₂-debt handling freezes the pool.** When a step's consumption would drive `COR.to2` negative, the
-  whole coronary update is skipped (O₂ not floored to 0, no CO₂ added), so `COR.to2` cannot fall below
-  one step's consumption. Under extreme ischemia the hypoxia signal therefore plateaus rather than
-  reaching `to2_min`.
-- **Negative stroke work is not guarded.** If the filling-phase P·dV area exceeds the ejection-phase
-  area (`stroke_work_total < 0`), `sw_vo2` and hence `mob_vo2` can go negative, which would *add* O₂ to
-  the coronary pool. This does not occur for a normally ejecting ventricle.
-- **Model references are not null-guarded.** `AA`, `AA_COR`, `COR`, `Heart`, `LV`, `RV` and the
-  Heart's `_lv`/`_rv`/`_la` are dereferenced directly; a configuration lacking any of them throws.
+1. **Basal:** `bm_vo2 = bm_vo2_per_g · hw`.
+2. **Stroke work.** Each step adds the trapezoidal P·dV of LV and RV, split into filling and ejection areas. At each new beat (rising edge of `Heart.cardiac_cycle_running`) the loop area of the finished beat is stored and the beat interval measured:
+   ```
+   O2 per beat = max(SW_lv + SW_rv, 0) · 0.133322 J/(mmHg·L) / (mech_efficiency · 20.1 J/mL) / 22.414
+   sw_vo2      = O2 per beat / beat_interval
+   ```
+   Before the first beat after a build or load, `60 / Heart.heart_rate` stands in for the interval. A pause longer than the last interval stretches it, so an arrested heart stops paying for its last beat.
+3. **Coronary pool.** The step's demand `mob_vo2 · dt` is taken from `COR` as far as it holds O2; CO2 is added at `resp_q` for the O2 used; the shortfall is `o2_deficit`.
+4. **Hypoxia effects.** The activation is `min(COR.to2, to2_ref) − to2_ref` (≤ 0, floored at `to2_min − to2_ref`). It is smoothed per channel and mapped linearly so the factor is 1 at `to2_ref` and `*_min` at `to2_min`:
+   - `Heart.hr_mob_factor` = `hr_factor` (heart-rate sum);
+   - each chamber's `el_max_mob_factor` = `cont_factor` (LV, RV, LA and the right-atrial halves);
+   - `Heart.ans_activity_factor` = `ans_activity_factor` (scales the sympathetic drive the Heart passes to the chambers).
+
+## Factor system
+
+None of its own; it writes the hypoxia channels above. `el_max_mob_factor` is one of HeartChamber's additive `el_max` layers.
+
+## Inputs and outputs
+
+- **Reads:** `COR` (`to2`, `tco2`, `vol`), `AA.to2`, `AA_COR.flow`, `LV`/`RV` (`vol`, `pres`), Heart (`cardiac_cycle_running`, `heart_rate`); `model.weight`.
+- **Writes:** `COR.to2`, `COR.tco2`; `Heart.hr_mob_factor`, `Heart.ans_activity_factor`; the chambers' `el_max_mob_factor`.
+- **Read by:** Heart and the chambers (the channels); `DataCollector` watchers and the probes.
+
+## Assumptions and limitations
+
+- **Behaviour at rest** (30 s averages, after the beat-interval fix):
+
+  | Scenario | Heart weight | Basal + stroke work | Per 100 g | Coronary flow | `COR` / arterial to2 |
+  |---|---|---|---|---|---|
+  | term_neonate | 23.0 g | 1.15 + 1.39 mL/min | 11.0 mL/min | 40 mL/min (174 per 100 g) | 6.9 / 9.6 mmol/L |
+  | preterm_25wk | 10.8 g | 0.54 + 0.20 | 6.8 | 9.0 (83 per 100 g) | 3.9 / 7.5 |
+  | fetus_term | 23.0 g | 1.15 + 1.73 | 12.5 | 32.6 (141 per 100 g) | 1.9 / 5.7 |
+
+- **The coronary flow is high for the heart's O2 use.** At term the heart extracts only ~30–35 % of its arterial O2, against ~70 % in vivo. Aburawi's neonatal LAD flow of 8.2 mL/min points to a total coronary flow of roughly 20–30 mL/min, not 40. Listed for the scenario re-validation (retune `AA_COR` per scenario and check the extraction).
+- **The hypoxia effects start only at a very low `COR.to2`** (0.2 mmol/L, ~2 % saturation). At rest they are inactive, and they engage only in profound coronary hypoxia.
+- **Contractility is depressed twice** under hypoxia: `cont_factor` lowers `el_max`, and `ans_activity_factor` lowers the sympathetic inotropy. Their combined strength is set by `cont_factor_min` and `ans_factor_min`.
+- **Heart weight follows body weight only** (no hypertrophy).
+
+### History (v1.0)
+
+- **The stroke-work cost was spread over the contraction** (`Heart.cardiac_cycle_time`) instead of the beat, overstating it by RR / contraction time (×1.41 at term). The O2 the heart no longer uses moved to `Metabolism.vo2` in every scenario, so whole-body VO2 and the gases are unchanged (`scripts/_fix_mob_beat_interval.mjs`).
+- **An O2 shortfall used to skip the whole step's uptake**, so the heart consumed nothing in ischaemia.
 
 ## Example definition (JSON)
 
-From `term_neonate.json` (coronary sub-components abbreviated):
+From `term_neonate.json`, `models.Mob` (trimmed to the config props; `components` holds `COR`, `AA_COR`, `COR_RAIVCI`, `COR_RASVC`):
 
 ```json
 {
   "name": "Mob",
-  "description": "myocardial oxygen balance v2 (basal + stroke-work, mmol O2/g)",
-  "is_enabled": true,
   "model_type": "Mob",
-  "components": {
-    "COR":        { "model_type": "BloodTimeVaryingElastance", "u_vol": 0.00028, "el_min": 30000, "el_max": 90000, "...": "..." },
-    "AA_COR":     { "model_type": "Resistor", "comp_from": "AA",  "comp_to": "COR", "r_for": 75000, "...": "..." },
-    "COR_RAIVCI": { "model_type": "Resistor", "comp_from": "COR", "comp_to": "RAIVCI", "...": "..." },
-    "COR_RASVC":  { "model_type": "Resistor", "comp_from": "COR", "comp_to": "RASVC",  "...": "..." }
-  },
+  "is_enabled": true,
   "mob_active": true,
-  "to2_min": 0.0002,
-  "to2_ref": 0.2,
-  "resp_q": 0.8,
   "bm_vo2_per_g": 3.7e-5,
-  "mech_efficiency": 0.35,
-  "caloric_equiv_o2": 20.1,
   "hw_intercept": 7.799,
   "hw_slope": 0.004296,
-  "hr_factor_max": 1, "hr_factor_min": 0.01, "hr_tc": 5,
-  "cont_factor_max": 1, "cont_factor_min": 0.01, "cont_tc": 5,
-  "ans_factor_max": 1, "ans_factor_min": 0.01, "ans_tc": 5
+  "mech_efficiency": 0.35,
+  "caloric_equiv_o2": 20.1,
+  "resp_q": 0.8,
+  "to2_ref": 0.2,
+  "to2_min": 0.0002,
+  "hr_factor_min": 0.01, "hr_factor_max": 1, "hr_tc": 5,
+  "cont_factor_min": 0.01, "cont_factor_max": 1, "cont_tc": 5,
+  "ans_factor_min": 0.01, "ans_factor_max": 1, "ans_tc": 5
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- One Mob instance per scenario carrying a heart; it is the only consumer of coronary-pool O₂ and the
-  sole source of myocardial hypoxia feedback.
-- The coronary network it owns (`COR` + connecting resistors) is *not* listed in
-  [`Metabolism`](./Metabolism.md)'s `metabolic_active_models` — the heart's O₂ economy is handled
-  exclusively here.
-- Its hypoxia channels reach the `Heart`/`HeartChamber` physics through `hr_mob_factor`,
-  `el_max_mob_factor` and `ans_activity_factor` (see above).
+One instance in every scenario, with the defaults above, owning the coronary bed (`AA` → `AA_COR` → `COR` → right atrium).
+
+## References
+
+- Aburawi EH, Malcus P, Thuring A, Fellman V, Pesonen E. Coronary flow in neonates with impaired intrauterine growth. *J Am Soc Echocardiogr* 2012;25(3):313–8. doi:10.1016/j.echo.2011.11.019 (healthy controls: LAD flow 8.2 ± 3.0 mL/min at 1 week).
+
+````
+
+### FILE: explain-engine/docs/ModelRegistry.md
+
+````markdown
+# ModelRegistry
+
+`helpers/ModelRegistry.js` is a two-function lookup table from `model_type` to model class. It lets `BaseModelClass` instantiate a sub-model by its `model_type`, built-in or custom, without importing the model barrels. Importing them would create an import cycle.
+
+## API
+
+| Function | Arguments | Returns | Description |
+|---|---|---|---|
+| `set_model_registry(model_map)` | `{ model_type: class }` | – | Replaces the table. `ModelEngine` calls it once at startup with the merged map: every `ModelIndex.js` export, then every `CustomModelIndex.js` export (a custom class with the same `model_type` replaces the built-in one, with a `console.warn`). |
+| `get_model_class(model_type)` | string | class or `undefined` | Looks a class up. |
+
+## Where it is used
+
+`BaseModelClass.init_model` instantiates each entry of `this.components` that doesn't exist yet. It resolves the class as:
+
+```js
+get_model_class(model_type) ?? BuiltinModels[model_type]
+```
+
+The fallback is the `ModelIndex.js` namespace, keyed by export name. It only matters when the classes are used without `ModelEngine`, which is what fills the registry. Every built-in export name equals its `model_type` (all 46 checked), so the fallback finds the same class, but it doesn't know custom models.
+
+Since `build()` pre-creates every declared sub-model from the same merged map (see [BaseModelClass](./BaseModelClass.md#composite-models-components)), this lookup only runs for models added at runtime (`add_model_to_engine`).
+
+## Why it exists
+
+Every model extends `BaseModelClass`. If `BaseModelClass` imported `CustomModelIndex.js` directly, then `CustomModelIndex → custom model → BaseModelClass` would be evaluated while `BaseModelClass` is still initializing, and the import would fail with "Cannot access 'BaseModelClass' before initialization". The registry breaks the cycle: `BaseModelClass` imports only this tiny module, and `ModelEngine`, which imports everything, fills it once the module graph is complete. The `ModelIndex.js` fallback import in `BaseModelClass` is safe because its bindings are only read lazily, inside `init_model`.
+
+Don't replace it with a top-level import or spread of the barrels: both fail at module-evaluation time, not at build time.
+
+## Notes
+
+- The table is module state, one per worker. A second `set_model_registry` call replaces it entirely.
+- Adding a custom model: see [`custom_models/README.md`](../custom_models/README.md) and [ARCHITECTURE §8](./ARCHITECTURE.md#8-how-to-add-a-new-model).
 
 ````
 
@@ -9304,81 +8510,116 @@ From `term_neonate.json` (coronary sub-components abbreviated):
 ````markdown
 # ModelScaler
 
-`ModelScaler` (`explain/helpers/ModelScaler.js`) is **engine infrastructure**, not a physiological model. It provides granular, factor-based scaling of model parameters by subsystem — blood, heart, lung, airways, and the thorax/pericardium containers — plus a single-call weight scaler (linear, volume-only — see `scale_to_weight`). A factor of `1.0` means no change, `0.5` halves the value, `2.0` doubles it. Each scaling group targets an explicit, predefined list of component names (read from a config object) rather than scanning every model by type, which keeps scaling predictable.
+`ModelScaler` (`helpers/ModelScaler.js`) is engine infrastructure, not a physiological model. It scales whole groups of components at once: blood volumes, systemic or pulmonary resistances and elastances, heart contractility and stiffness, lungs and airways, the thorax and pericardium, and the patient's weight. A factor of 1.0 means no change. Each group targets an explicit list of components from the scenario's `scaler_config`.
 
-It is instantiated once per build in `ModelEngine.build()`:
+It is created once per build (`model.ModelScaler = new ModelScaler(model, model.scaler_config)`) and driven by `scaleModel(group, factor)` (main thread) → `POST "scale"` → `ModelEngine.scale_model`, which dispatches on the group name.
 
-```js
-model["ModelScaler"] = new ModelScaler(model, model.scaler_config);
+## Who uses it
+
+- **The app's common tasks:** SVR (`systemic_resistances`), PVR (`pulmonary_resistances`), venous capacity (`systemic_u_vol`), contractility (`heart_el_max`), diastolic stiffness (`heart_el_min`), lung compliance (both lung-elastance groups), lower airway resistance (`airway_lower_resistances`), blood volume (`blood_volume`). They read the current factor from the state and multiply it.
+- **The bot** (`op: "scale"`) and **lessons** (`scale` steps), with an absolute factor (1.0 = the scenario as loaded).
+- **The scenario generators and the patient builder:** `weight_scale` sizes a patient from its source scenario, and the resistance and heart groups are calibration levers. They end with `incorporate`.
+- The **Scaler panel** of the app (hidden as unfinished).
+
+## Two kinds of groups
+
+**Volume groups** change the stored volumes directly, by the ratio to the last factor (`_prev`):
+
+| Group | Method | Components |
+|---|---|---|
+| `blood_volume`, `heart_volume`, `lung_volume`, `thorax_volume`, `pericardium_volume` | `scale_*_volume` | `vol` and `u_vol` of `config.blood.volume`, `config.heart.volume`, `config.lung.volume`, `config.thorax`, `config.pericardium` |
+
+**Factor groups** set the scaling layer `*_factor_scaling_ps` of their components **absolutely** to the factor:
+
+| Subsystem | Groups | Layer |
+|---|---|---|
+| Blood (all) | `blood_elastances`, `blood_resistances` | `el_base_…`, `r_…` |
+| Systemic | `systemic_elastances`, `systemic_resistances`, `systemic_u_vol` | `el_base_…`, `r_…`, `u_vol_…` |
+| Pulmonary | `pulmonary_elastances`, `pulmonary_resistances`, `pulmonary_u_vol` | same |
+| Airway | `airway_elastances`, `airway_u_vol`, `airway_upper_resistances`, `airway_lower_resistances` | |
+| Lungs | `left_/right_lung_elastances`, `_resistances`, `_u_vol` | |
+| Heart | `heart_el_min`, `heart_el_max`, `heart_resistances` (valves); `left_/right_heart_el_min`, `_el_max`, `_u_vol` | `el_min_…`, `el_max_…`, `r_…`, `u_vol_…` |
+| Containers | `thorax_elastances`, `pericardium_elastances` | `el_base_…` |
+
+Each method skips a name the scenario lacks or a component without that property.
+
+## Utility groups
+
+| Group | Effect |
+|---|---|
+| `weight_scale` | `scale_to_weight(kg)`: the five volume groups by `kg / _baseline_weight`, then `model.weight = kg`. Volumes only: elastances, resistances, heart rate and VO2 are not scaled (the inverse-scaling lines are deliberately commented out); the generators calibrate those separately. The placenta is not in any group. |
+| `weight` | Sets `model.weight` only. |
+| `add_volume` | Adds litres to `IVCI.vol`. |
+| `incorporate` | Bakes every scaling layer into the base values (below). |
+| `reset` | Every group back to 1.0 and `model.weight = _baseline_weight`. |
+
+## `incorporate()`: baking the layer
+
+For every component named anywhere in `scaler_config`:
+- `u_vol`, `el_base`, `el_min`, `el_max` are multiplied by their scaling factor;
+- `r_for` and `r_back` by `r_factor_scaling_ps`;
+- the layer returns to 1.0, and `_prev` to 1.0.
+
+Three rules keep the baked model exactly as it was:
+- **BloodVessel R→E coupling.** A vessel's elastance includes `r_total_factor^alpha`, so a baked resistance factor `f` also multiplies `el_base` by `f^alpha`.
+- **HeartChamber `el_k`.** A chamber's diastolic modulation, which contains the `el_min` scaling, also scales its non-linear `el_k`, so `el_k` is multiplied by the `el_min` factor.
+- **Additive models** (all but BloodVessel). Their persistent layer acts as a fraction of the base, so `*_factor_ps` becomes `1 + (ps − 1)/f` and keeps its absolute effect.
+
+What the bake cannot preserve exactly is the heart chambers' ANS term, which is additive as a fraction of the base. Once baked it acts on the actual contractility rather than the unscaled base, so after a bake the sympathetic inotropy and lusitropy are proportional.
+
+**Why the shipped scenarios are baked.** The factor groups write the layer absolutely, so a calibration left in it is overwritten by the first `scale` command. Before v1.0 the non-term scenarios carried their size calibration there (preterm_25wk: systemic resistances ×2–3.96, `el_max` ×4.86, lung elastance ×7.1). As a result:
+- "scale systemic_resistances 1.2" *lowered* its MAP (36.7 → 31.5 mmHg);
+- `reset` dropped it to 30 mmHg.
+
+`scripts/_bake_scaling.py` baked the nine non-term scenarios; the same command now raises MAP (35.6 → 37.5) and `reset` is a no-op. The generators and `build_patient.mjs` end with `incorporate`.
+
+## Methods
+
+Each group `<g>` calls `scale_<g>(factor)`, apart from the utility groups. The methods: `scale_blood_volume`, `scale_heart_volume`, `scale_lung_volume`, `scale_thorax_volume`, `scale_pericardium_volume`, `scale_blood_elastances`, `scale_blood_resistances`, `scale_pulmonary_elastances`, `scale_pulmonary_resistances`, `scale_pulmonary_u_vol`, `scale_systemic_elastances`, `scale_systemic_resistances`, `scale_systemic_u_vol`, `scale_airway_elastances`, `scale_airway_u_vol`, `scale_airway_upper_resistances`, `scale_airway_lower_resistances`, `scale_left_lung_elastances`, `scale_left_lung_resistances`, `scale_left_lung_u_vol`, `scale_right_lung_elastances`, `scale_right_lung_resistances`, `scale_right_lung_u_vol`, `scale_heart_el_min`, `scale_heart_el_max`, `scale_left_heart_el_min`, `scale_left_heart_el_max`, `scale_left_heart_u_vol`, `scale_right_heart_el_min`, `scale_right_heart_el_max`, `scale_right_heart_u_vol`, `scale_heart_resistances`, `scale_thorax_elastances`, `scale_pericardium_elastances`, `scale_to_weight`; `incorporate`, `reset`, `add_volume`.
+
+Private helpers:
+- `_apply(names, prop, factor)` sets a layer on a list of components;
+- `_scale_vol(names, delta)` multiplies `vol` and `u_vol`;
+- `_bake(names, base, layer)` and `_bake_resistance(names)` implement `incorporate`.
+
+## Factor system
+
+ModelScaler owns the `*_factor_scaling_ps` layer of the components in `scaler_config`. Other writers of that layer:
+- **the Calibrator:** `IPSL`/`IPSR` `r_factor_scaling_ps`;
+- **the archived Uterus and MaternalPlacenta:** pregnancy.
+
+Volume scaling and `add_volume` change the base volumes instead.
+
+## Assumptions and limitations
+
+- **Absolute factor groups, delta-based volume groups.** `_prev` is not saved, so after a reload the volume groups start again from 1.0 (the loaded volumes); the factor groups read their state from the components.
+- **Weight scaling is linear and volume-only.**
+- **Groups are fixed lists per scenario** (`scaler_config`); components outside them are never scaled.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `model_definition.scaler_config` (trimmed):
+
+```json
+{
+  "blood_systemic": {
+    "el_base": ["AA", "AAR", "AD", "INT_ART", "KID_ART", "..."],
+    "resistance": ["AA", "AAR", "AD", "INT_ART", "KID_ART", "..."]
+  },
+  "heart": {
+    "volume": ["LA", "LV", "RAIVCI", "RASVC", "RV", "COR"],
+    "el_min": ["LA", "LV", "RAIVCI", "RASVC", "RV", "COR"],
+    "el_max": ["LA", "LV", "RAIVCI", "RASVC", "RV", "COR"],
+    "resistance": ["LA_LV", "LV_AA", "RV_PA", "RAIVCI_RV", "RASVC_RV", "LV_PA", "RV_AA", "COR_RAIVCI", "COR_RASVC"]
+  },
+  "thorax": ["THORAX"],
+  "pericardium": ["PERICARDIUM"]
+}
 ```
 
-and driven from the public API via `scaleModel(group, factor)` (main thread) → `scale_model` message → the big `switch` in `ModelEngine.scale_model`. See [ARCHITECTURE](./ARCHITECTURE.md) for the build flow and the worker message wire protocol.
+## References
 
-## Role in the engine
-
-`ModelScaler` is the engine's mechanism for adjusting a whole patient's size or subsystem characteristics in one call, without editing the scenario JSON or rebuilding. It is the main writer of the **`*_factor_scaling_ps` scaling layer** (the third tier of the factor/`_eff` pattern documented in [ARCHITECTURE](./ARCHITECTURE.md)) — it never touches the transient `*_factor` or the user/scenario `*_factor_ps` layers, so its scaling composes with interventions and live tuning instead of clobbering them. It is not the only writer: the [Calibrator](./Calibrator.md)'s PAP lever writes `r_factor_scaling_ps` on the intrapulmonary shunts `IPSL`/`IPSR` (Surfactant owns their `r_factor_ps`). (Note: volume scaling and `add_volume` are the exception on the ModelScaler side — they mutate raw `vol`/`u_vol` directly; see below.)
-
-It is constructed with a reference to the whole engine `model` object and a `config`. All its group methods resolve component names against `this._model.models[name]` and silently skip names that are absent or lack the targeted property, so a config can list components that not every scenario contains.
-
-## Key state / configuration it reads
-
-- **`scaler_config`** — passed in as the constructor's second argument (defaults to `{}` in the engine's initial state, populated from the scenario's `scaler_config`). It is a nested map of group → property-role → list of component names, e.g. `config.blood.volume`, `config.blood.el_base`, `config.blood.resistance`, `config.blood_pulmonary.el_base`, `config.blood_systemic.resistance`, `config.airway.resistance_upper`, `config.left_lung.u_vol`, `config.heart.el_min`/`el_max`/`resistance`/`volume`, `config.heart_left`/`heart_right`, `config.thorax`, `config.pericardium`. Each group method reads the specific list it needs from this object.
-- **`this._prev`** — an internal table of the last factor applied per group (`blood_vol`, `heart_el_min`, etc., all seeded to `1.0`). Volume scaling uses it to compute a **delta** (`factor / prev`) so repeated absolute factors are applied multiplicatively against the raw volume rather than re-multiplying from the original. `incorporate()` and `reset()` return these entries toward `1.0`.
-- **`model._baseline_weight`** — read by `scale_to_weight`; frozen at build time. `reset` (in the engine) restores `model.weight = model._baseline_weight`.
-
-## Key methods / exports
-
-`ModelScaler` is a default-exported class. Its public surface is a large family of `scale_*` methods, each scaling one role on one subsystem, plus a few utilities. `scaleModel(group, factor)` does not call these directly — `ModelEngine.scale_model(payload)` switches on `payload.group` and dispatches to the matching method with `payload.factor`.
-
-**Volume scaling** (mutates raw `vol` and `u_vol` by the computed delta):
-`scale_blood_volume`, `scale_heart_volume`, `scale_lung_volume`, `scale_thorax_volume`, `scale_pericardium_volume`.
-
-**Elastance / resistance / unstressed-volume scaling** (write the `*_factor_scaling_ps` layer):
-
-| Subsystem | Methods |
-|---|---|
-| Blood (global) | `scale_blood_elastances`, `scale_blood_resistances` |
-| Pulmonary | `scale_pulmonary_elastances`, `scale_pulmonary_resistances`, `scale_pulmonary_u_vol` |
-| Systemic | `scale_systemic_elastances`, `scale_systemic_resistances`, `scale_systemic_u_vol` |
-| Airway | `scale_airway_elastances`, `scale_airway_u_vol`, `scale_airway_upper_resistances`, `scale_airway_lower_resistances` |
-| Left lung | `scale_left_lung_elastances`, `scale_left_lung_resistances`, `scale_left_lung_u_vol` |
-| Right lung | `scale_right_lung_elastances`, `scale_right_lung_resistances`, `scale_right_lung_u_vol` |
-| Heart (both) | `scale_heart_el_min`, `scale_heart_el_max`, `scale_heart_resistances` |
-| Left heart | `scale_left_heart_el_min`, `scale_left_heart_el_max`, `scale_left_heart_u_vol` |
-| Right heart | `scale_right_heart_el_min`, `scale_right_heart_el_max`, `scale_right_heart_u_vol` |
-| Containers | `scale_thorax_elastances`, `scale_pericardium_elastances` |
-
-The properties written are `el_base_factor_scaling_ps`, `r_factor_scaling_ps`, `u_vol_factor_scaling_ps`, `el_min_factor_scaling_ps`, and `el_max_factor_scaling_ps`. (The `*_u_vol` heart methods write `u_vol_factor_scaling_ps` onto the components listed in the heart's `el_min` group.)
-
-**Utility / lifecycle:**
-
-- `scale_to_weight(new_weight)` — weight scaling from a single new weight. Despite its "allometric" history it is **linear and volume-only**: it computes `vol_factor = new_weight / baseline` (and an unused `inv_factor = baseline / new_weight`), scales the five volume groups (raw `vol` and `u_vol`) linearly with weight, and sets `this._model.weight = new_weight`. The elastance/resistance/unstressed-volume inverse-scaling calls are present but commented out, so only volumes (and `model.weight`) change. Nothing in it scales heart rate or VO₂ (no allometric exponents). No-ops if `_baseline_weight` or `new_weight` is missing/≤0. Reached via the `weight_scale` group.
-- `add_volume(vol_liters)` — adds liters directly to the `IVCI` compartment's `vol` (a bolus/bleed lever). Reached via the `add_volume` group.
-- `incorporate()` — **bakes** the scaling layer into the base properties for **every component named anywhere in the scaler config** (all groups, all roles), on every layer the component carries: `u_vol_factor_scaling_ps` → `u_vol`, `el_base_factor_scaling_ps` → `el_base`, `el_min_`/`el_max_factor_scaling_ps` → `el_min`/`el_max`, and `r_factor_scaling_ps` → `r_for`/`r_back`. Each baked factor is reset to `1.0` (a layer that is absent or already `1.0` is skipped, and a group the scenario's config does not define cannot throw); then it clears `this._prev`. Use to make current scaling permanent. Reached via the `incorporate` group.
-- `reset()` — calls every `scale_*` method with `1.0`, returning all scaling factors and volumes to baseline. The engine's `reset` case additionally restores `model.weight = model._baseline_weight`.
-
-The engine's `weight` group is handled inline (`model.weight = factor`) and does not call a `ModelScaler` method.
-
-## The scaling layer
-
-Core physics parameters are never used raw; each has three multiplier tiers that combine additively into an `*_eff` value (see [ARCHITECTURE](./ARCHITECTURE.md) for the full factor/`_eff` derivation):
-
-- `<p>_factor` — transient, reset to `1.0` every step.
-- `<p>_factor_ps` — persistent user/scenario adjustments.
-- `<p>_factor_scaling_ps` — persistent **scaling** layer.
-
-`ModelScaler` writes **only** the `*_factor_scaling_ps` tier (via its `_apply(names, prop, factor)` helper, which sets the property absolutely on each named component). It never reads or writes `_factor` or `_factor_ps`. That separation is deliberate: allometric/size scaling stays in its own lane so a loaded patient's baked scaling and any live user interventions or `tune` levers (which use `*_factor_ps`) remain independent and composable. The one place this layering is left behind is volume: `_scale_vol` and `add_volume` change raw `vol`/`u_vol` (and `incorporate`/`_bake_resistance` fold scaling into the raw base params), because those represent actual fluid quantities rather than a multiplier.
-
-Because `_apply` **sets** the scaling layer to an absolute value, calling a scaling group overwrites whatever scaling was already there. This is why the live `tune_model` path (see [Calibrator](./Calibrator.md)) deliberately avoids `ModelScaler` groups and uses `*_factor_ps` levers instead — so it composes with a preterm patient's baked SVR/PVR scaling rather than clobbering it.
-
-## Notes / caveats
-
-- **Volume groups bypass the scaling layer.** `scale_*_volume` and `add_volume` mutate raw `vol`/`u_vol`; only the elastance/resistance/u_vol-factor groups touch `*_factor_scaling_ps`. Volume groups also use the `_prev` delta so repeated absolute factors behave multiplicatively.
-- **Names are config-driven and skipped if missing.** A group only affects components listed in `scaler_config`; absent components or undefined target properties are silently ignored. An empty `scaler_config` (the engine default) means most groups are no-ops until a scenario supplies lists.
-- **COR is scaled once.** In `term_neonate`'s `scaler_config` the coronary compartment `COR` appears among the volumes only in `heart.volume` (it used to be in `blood.volume` as well, which scaled its volume by factor²). It is still listed in the `el_base`/`el_min`/`el_max` groups, which are different layers.
-- **`scale_to_weight` is volume-only.** Its elastance/resistance inverse-scaling lines are commented out in the source; do not assume pressures are held constant across body sizes without re-enabling them. Re-enabling `scale_systemic_elastances(inv_factor)` would be the wrong fix for small babies' arteries. That group also holds the capillaries, veins and vena cavae, and full inverse scaling (×3.3 at 1.08 kg) is beyond what the integrator tolerates on the aorta (unstable above ~×2). The patient builder applies a separate, arteries-only (W/W0)^-0.5 instead (see [Calibrator](./Calibrator.md)).
-- **`incorporate()` is destructive and irreversible** — once factors are baked into base params, `reset()` cannot recover the pre-bake values (it only zeroes the now-`1.0` factors).
-- **`_prev` is internal bookkeeping**, not persisted to scenario state; a rebuild creates a fresh `ModelScaler` with all `_prev` at `1.0`.
+None; engine infrastructure.
 
 ````
 
@@ -9405,16 +8646,20 @@ and venous) — and exposes everything else through three uniform, **JSON-config
 > compartment (e.g. `AD` for post-ductal ABP) to `minmax_targets`; the values then publish as the flat
 > keys `Monitor.minmax.<name>_pres_min` / `_pres_max` / `_pres_mean`.
 
+## Physiology
+
+A bedside monitor shows the vital signs a neonatal team watches: heart rate (from the ECG), pre- and post-ductal oxygen saturation (right hand and a foot; a difference signals right-to-left ductal shunting), blood pressures, respiratory rate, end-tidal CO2 and temperature. Its numbers are averaged over beats and breaths, so they lag fast changes by several seconds.
+
 ## Built-in read-outs
 
-| Output | How |
+| Property | How |
 |---|---|
 | `heart_rate` | rolling average of the beat-to-beat rate over the last **`hr_avg_beats`** beats (bpm) |
 | `resp_rate` | rolling average of the breath-to-breath rate over the last **`rr_avg_time`** seconds (breaths/min) |
 | `etco2` | end-tidal CO₂; mirrored from `Ventilator.etco2` while the ventilator is enabled, otherwise derived from the spontaneous breath (see below) |
 | `temp` | blood temperature (°C), mirrored each step from `AA.temp` (last value kept if AA is absent) |
 | `sao2_pre`, `sao2_post` | pre-/post-ductal arterial O₂ saturation, from `AA.so2` / `AD.so2` |
-| `svo2` | mixed-venous O₂ saturation, from the pulmonary artery (`PA.so2`). Falls back to `RAIVCI.so2` when there is no PA. The two RA halves are pressure-coupled but barely exchange blood, so `RAIVCI` holds IVC-side blood and misses the brain's extraction (in `term_neonate` 79 % vs 76 % mixed). |
+| `svo2` | mixed-venous O₂ saturation, from the pulmonary artery (`PA.so2`). Falls back to `RAIVCI.so2` when there is no PA; `RAIVCI` holds IVC-side blood, which misses the brain's extraction where the right-atrial halves don't mix (the fetal scenarios). In `term_neonate` the two agree (81.9 %). |
 
 **Heart rate** — on each ventricular beat (`Heart.ncc_ventricular === 1`), the beat-to-beat rate is
 `60 / interval` (interval = time since the previous beat). A running window of the last `hr_avg_beats`
@@ -9528,12 +8773,31 @@ it does not follow redistribution between the kidneys and the rest of the lower 
 
 ## Configuration
 
-`hr_avg_beats` (12), `flow_avg_beats` (1), `rr_avg_time` (20 s), `asystole_time` (6 s), `etco2_source`
-(`"DS"`), plus the three `*_targets` arrays. (`sat_avg_time` was removed — scenario files
-still carry the key, but nothing reads it; the saturations are mirrored every step without averaging.) Model references are resolved by name: `Heart` (beats), `Breathing` + `Ventilator`
-(breaths). The `flow_targets`/`minmax_targets`/`signal_targets` entries name their own models.
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `hr_avg_beats` | beats | 12 | Heart-rate averaging window. |
+| `flow_avg_beats` | beats | 1 | Flow averaging window. |
+| `rr_avg_time` | s | 20 | Respiratory-rate averaging window. |
+| `asystole_time` | s | 6 | No beat for this long reads as asystole. |
+| `etco2_source` | – | `"DS"` | Airway gas compartment for the spontaneous end-tidal CO2. |
+| `flow_targets`, `minmax_targets`, `signal_targets` | lists | `[]` | The configurable read-outs (above). |
 
-## Notes & caveats
+| Property | Unit | Description |
+|---|---|---|
+| `flows`, `minmax`, `signals` | dicts | The configurable read-outs (above). |
+| `fo_flow`, `do2_br`, `do2_lb` | L/min, mL O2/min | Derived metrics (above). |
+
+The saturations are mirrored every step without averaging. Model references are resolved by name at build: `Heart` (beats), `Breathing` and `Ventilator` (breaths), `AA`, `AD`, `PA`, `RAIVCI`. The target entries name their own models; one that doesn't resolve is dropped.
+
+**term_neonate** configures `flow_targets` lvo, rvo, cor_flow, svc_flow, ivc_flow, da_flow, brain_flow, kid_flow, ua_flow, uv_flow, fo_ivci_flow and fo_svc_flow; `minmax_targets` lv, rv, abp_pre, abp, pap, cvp and la; `signal_targets` ecg, sat_pre, sat_post, abp, resp and co2.
+
+## Inputs and outputs
+
+- **Reads:** Heart (`ncc_ventricular`), Breathing and Ventilator (breath onsets, `etco2`), `AA`, `AD`, `PA`, `RAIVCI`, `DS`, and every configured target.
+- **Writes:** nothing outside itself.
+- **Read by:** the app's monitor panel, `DataCollector` watchers, the [Calibrator](./Calibrator.md) (calibration targets).
+
+## Assumptions and limitations
 
 - **Observer.** The Monitor never writes to the models it samples; no model's physics depends on it.
   The `DataCollector` reads its outputs through the watchlist like any other model, and the
@@ -9549,162 +8813,59 @@ still carry the key, but nothing reads it; the saturations are mirrored every st
   (`AA.to2` / `AD.to2`); both references are resolved with a `?? null` fallback, so they hold their
   last value if those compartments are absent (asystole still zeroes them).
 
+## References
+
+None; standard bedside monitoring definitions.
+
 ````
 
-### FILE: explain-engine/docs/Pda-velocity.md
+### FILE: explain-engine/docs/Orifice.md
 
 ````markdown
-# Pda — Velocity Outputs
+# Orifice
 
-> **Update (quadratic stenosis element).** The trade-off this document analyses has since been
-> resolved at the source. The duct resistance is now the standard quadratic stenosis element
-> `ΔP = R·Q + B·Q²`, where `R·Q` is the viscous (Poiseuille) loss and `B·Q²` is the Bernoulli orifice
-> loss with `B = ρ/(2·A_eff²)`. Because `B·Q²` *is* the modified-Bernoulli relation, the single output
-> `velocity_doppler = sign(Q)·√(B·Q²/4)` is now identical to continuity `Q/A_eff` through the effective
-> orifice — the two formulas that used to disagree are the same number. The element separates viscous
-> loss (which does not accelerate fluid) from kinetic energy (the jet), so `velocity_doppler` is honest
-> across the whole closure trajectory, and the empirical jet-correction outputs (`velocity_*_jet`) and
-> `jet_exponent` were removed. The continuity bulk means `velocity_ao`/`velocity_pa` remain as anatomic
-> reference values. The historical analysis below is retained for background.
->
-> One caveat the new element makes explicit: a restrictive jet only forms in an **orifice-like (short)
-> throat**. A long, narrow duct is viscous-limited — low flow *and* low velocity even at a large
-> gradient — which is correct (the old `√(full gradient/4)` over-reported there). See `Pda.md` usage
-> notes; restrictive scenarios set a short `length` (~1–2 mm).
->
-> The duct is now a **single resistor** `AAR → PA` (the intermediate `DA` blood-capacitance, shown in
-> the figures below, was numerically vestigial and was removed). The "noisy Bernoulli" discussion
-> below — which was rooted in the `DA` node's pressure transients feeding the velocity calc — is moot:
-> `velocity_doppler` is now derived from the resistive flow (`sign(Q)·√(B·Q²/4)`), not from any node
-> pressure. The historical analysis is retained only for background.
+`helpers/Orifice.js` computes the Bernoulli (kinetic) pressure loss and the jet velocity of flow through a restrictive opening. [`Pda`](./Pda.md) (the ductus arteriosus) and [`Shunts`](./Shunts.md) (foramen ovale, VSD) share it, so the duct and the septal defects use one formula and one constant.
 
-The `Pda` model exposes several velocity properties at the pulmonary end of the duct. Two of them are computed by fundamentally different physics and behave in complementary ways: a modified-Bernoulli formulation, and a continuity (flow ÷ area) formulation. This document explains *why* each method behaves the way it does, when each one is right, and where they disagree.
+## Physiology
 
-## The properties
+Blood squeezing through a small hole speeds up into a jet. Accelerating the blood costs pressure, and that loss grows with the **square** of the flow, on top of the ordinary viscous (Poiseuille) loss, which grows linearly. A restrictive duct or defect therefore holds a large pressure difference across it, and the jet is fast. This is what Doppler echocardiography measures: the jet velocity *v*, from which clinicians estimate the gradient with the simplified Bernoulli equation ΔP ≈ 4·v².
 
-`Pda.calc_model` (in `src/explain/component_models/Pda.js`, lines 329–332) sets four velocity outputs:
+The jet is narrower than the anatomical opening (the *vena contracta*). The *discharge coefficient* Cd is the ratio of the jet's area to the hole's: about 0.6–0.65 for a sharp-edged hole, up to about 0.9 for a smooth funnel.
 
-- **`velocity_doppler`** — the raw modified-Bernoulli jet velocity at the pulmonary end: `v_jet_pa = sign(ΔP) · √(|ΔP|/4)`.
-- **`velocity_pa`** — that same jet velocity, scaled by continuity from the vena-contracta cross-section to the PA-end area: `v_jet_pa · (A_min / A_pa)`.
-- **`velocity_ao`** — the analogous quantity at the aortic end of the duct.
-- **`velocity_pa_area`** — the bulk mean velocity from the resistive flow: `Q_DA→PA / A_pa`.
+## API
 
-In what follows, "the Bernoulli path" means `velocity_pa` / `velocity_doppler`, and "the continuity path" means `velocity_pa_area`.
+| Name | Arguments | Returns | Description |
+|---|---|---|---|
+| `K_BERNOULLI` | – | 3.975·10⁻⁶ | `ρ · 3.75·10⁻⁹` with ρ = 1060 kg/m³: converts `Q²/A²` (Q in L/s, A in m²) to mmHg. |
+| `orifice_b(diameter_mm, cd)` | anatomic diameter (mm), discharge coefficient | B (mmHg·s²/L²) | `B = K_BERNOULLI / A_eff²` with `A_eff = cd · π·(d/2)²`. Returns 0 for a closed orifice (`A_eff = 0`); the caller decides what closed means. |
+| `jet_velocity(b, q)` | B, flow (L/s) | m/s, signed like `q` | `v = sign(q)·√(B·q² / (K_BERNOULLI·10⁶))`, exactly the vena-contracta velocity `Q / A_eff`. |
 
-## Observed trade-off
-
-| | Bernoulli path | Continuity path |
-|---|---|---|
-| Peak velocity rises as the duct constricts | ✓ matches clinical Doppler | ✗ peak *falls* — unphysiological |
-| Waveform shape resembles a real Doppler envelope | ✗ jagged / noisy | ✓ smooth |
-| Open-duct peak velocity is clinically realistic | ✗ tends to overshoot | ✓ ~1 m/s as expected |
-
-The rest of the doc explains each row.
-
-## The two formulas
-
-### Modified Bernoulli — `v = √(ΔP / 4)` (m/s, ΔP in mmHg)
-
-This is the standard simplification of `½ρv² = ΔP` for blood (ρ ≈ 1060 kg/m³). Converting ΔP from mmHg to Pa and solving for v in m/s gives `v ≈ 0.5015·√(ΔP_mmHg)`, which is conventionally reported as `v² = ΔP/4`.
-
-The formula assumes:
-- The fluid is inviscid (no viscous dissipation between the upstream and downstream pressure-measurement sites).
-- The proximal velocity is small enough to ignore.
-- All of the trans-ductal pressure energy is converted to kinetic energy at the vena contracta.
-
-In a *restrictive* lesion these assumptions are approximately true and the equation correctly reports the **jet peak velocity** at the vena contracta. In a *non-restrictive* segment the inviscid assumption fails (viscous drag is significant) and the equation over-estimates v.
-
-### Continuity — `v = Q / A`
-
-The bulk mean velocity at the chosen cross-section. In `Pda.js` it is evaluated at `A_pa`, the anatomic area at the PA end of the duct. `Q` is the resistive flow returned by the `DA_PA` `Resistor` instance (`src/explain/base_models/Resistor.js`, lines 204–254). The Resistor solves `Q = (p1 − p2) / R` each step — pure resistive, no inertance term.
-
-This gives the average velocity over the anatomic lumen. When the flow profile is smooth and fills the lumen (low Reynolds number, no jet), the bulk mean is close to the Doppler peak. When a jet forms inside a much-narrower vena contracta, the bulk mean across the anatomic lumen dramatically underestimates the jet peak.
-
-## Why the Bernoulli peak RISES as the duct constricts
-
-`Pda.calc_conical_resistance` (lines 364–394) is a Hagen–Poiseuille integration over a linearly tapered cone:
+### Derivation
 
 ```
-R = (8 · μ · L / 3π) · (r1² + r1·r2 + r2²) / (r1³ · r2³)
+ΔP_kinetic = ½·ρ·v²,      v = Q·10⁻³ / A_eff        (Q in L/s → m³/s)
+ΔP [mmHg]  = (½·ρ / 133.322) · (Q·10⁻³ / A_eff)²
+           = (ρ · 3.75·10⁻⁹) · Q² / A_eff²  =  B · Q²
 ```
 
-So `R ∝ 1/r⁴` (to leading order). As the duct constricts, R rises rapidly and the duct becomes the dominant resistance between the aorta and the pulmonary artery. Increasingly, the *systemic-pulmonary pressure difference itself* (roughly 30–60 mmHg after transition) is dropped across the duct, so ΔP across the duct approaches that systemic-pulmonary difference.
+`½·ρ/133.322` = 3.975 mmHg per (m/s)², the exact form of the clinical "4" in ΔP = 4·v². `jet_velocity` uses the exact 3.975, so the velocity and the pressure loss are consistent. With the clinical 4 the velocity would read 0.3 % low.
 
-`v = √(ΔP / 4)` with ΔP = 60 mmHg gives ~3.9 m/s — the textbook value for a restrictive PDA jet. As ΔP grows from a few mmHg (open) to tens of mmHg (constricted), v grows monotonically, matching clinical Doppler observations.
+## Where it is used
 
-## Why the continuity peak FALLS as the duct constricts
+| Caller | Orifice | Cd (default) | How |
+|---|---|---|---|
+| `Pda` | the narrowest (pulmonary) end of the duct, `diameter_pa` | `discharge_coeff` 0.9 | B is added to the duct resistor `AAR_DA` as a flow-dependent resistance `B·|Q_prev|`, on top of the conical Poiseuille resistance. `velocity_doppler` = `jet_velocity(B, Q)`. |
+| `Shunts` | foramen ovale `diameter_fo`, VSD `diameter_vsd` | `discharge_coeff_fo` 0.7, `discharge_coeff_vsd` 0.64 | B is added the same way to the FO and VSD resistors. `velocity_fo_doppler` and `velocity_vsd_doppler` come from `jet_velocity`. |
 
-Combine the network behavior:
+Shipped settings, for example:
+- **term_neonate:** duct closed (diameter 0), FO 1.5 mm, no VSD.
+- **bischoff_ltr_pda:** duct 2.1 mm with Cd 0.25, FO 0.5 mm.
 
-- `Q ∝ ΔP / R`, and `R ∝ 1/d⁴`, so `Q ∝ ΔP · d⁴`.
-- `A ∝ d²`.
+## Notes
 
-Therefore `v = Q / A ∝ (ΔP · d⁴) / d² = ΔP · d²`. The `d²` factor dominates the (bounded) rise in ΔP, so `v → 0` as `d → 0`.
-
-This is *not a bug*. The continuity formula reports the bulk mean velocity across the **anatomic** lumen. Real flow through a stenotic orifice does *not* fill the anatomic lumen smoothly — it forms a high-speed core jet through a vena contracta narrower than the anatomic opening, surrounded by separation/recirculation. The Doppler probe measures the **jet peak**, not the anatomic mean, so continuity-at-anatomic-area systematically underestimates the clinical Doppler value as the duct constricts.
-
-## Why the continuity waveform looks like a clean Doppler envelope
-
-`Q` comes from a Resistor whose only input each step is the instantaneous pressure difference between its two endpoints. Those endpoints are aortic-arch and pulmonary-artery node pressures filtered through the entire systemic and pulmonary circulation ODE — large reservoirs, slow compliances, smooth cardiac forcing. The resulting `Q` waveform inherits that smoothness: a clean systolic acceleration, a diastolic phase, no high-frequency content.
-
-`velocity_pa_area = Q · 0.001 / A_pa` is just `Q` rescaled by a constant, so it inherits the smooth shape directly. That is why this output looks like a real Doppler envelope.
-
-## Why the Bernoulli waveform looks noisier
-
-The code at lines 319–322 uses **local** gradients across each half of the duct:
-
-```js
-const dp_ao = p_aa - p_da;
-const dp_pa = p_da - p_pa;
-v_jet_ao = Math.sign(dp_ao) * Math.sqrt(Math.abs(dp_ao) / 4.0);
-v_jet_pa = Math.sign(dp_pa) * Math.sqrt(Math.abs(dp_pa) / 4.0);
-```
-
-`p_da` is the pressure at the DA capacitance node (`src/explain/base_models/Capacitance.js`, lines 168–180: pressure is the instantaneous elastic recoil on `vol − u_vol`). The DA node holds a small volume of blood and its pressure swings transiently within each cardiac cycle around the mean of `p_aa` and `p_pa`. Those swings inject into `dp_ao` and `dp_pa` with opposite signs and produce cycle-by-cycle artifacts in `v_jet_*`.
-
-**Discrepancy worth flagging**: the comment block at lines 306–311 *claims* a single trans-ductal gradient `p_aa − p_pa` is used "to keep the sign of all three outputs consistent during flow reversal (PHT / bidirectional shunting); using the local p_da would let the DA capacitance's transient pressure swings flip the sign of one half independently of the other." That comment describes the *intent*, but the code uses local gradients. Either the code or the comment is stale — this is the most likely source of the "noisy Bernoulli" observation, and resolving it would meaningfully clean up the Bernoulli waveform.
-
-## Why Bernoulli OVER-estimates at baseline
-
-`v = √(ΔP/4)` assumes *all* of ΔP converts to kinetic energy at the orifice. In an open duct with low Reynolds number, a meaningful fraction of ΔP is instead dissipated viscously along the length of the duct — that fraction does not accelerate fluid. The Bernoulli formula over-states v by exactly that fraction. The equation only becomes accurate once viscous loss is small relative to jet kinetic energy, i.e., once the orifice is restrictive enough that flow detaches and forms a jet.
-
-## Why continuity is realistic at baseline
-
-Open PDA carries roughly 0.5–1.5 L/min through a 2–4 mm lumen, putting Reynolds number well below the turbulent threshold (~2300). Flow is laminar/transitional, the profile fills the lumen, and the bulk mean velocity is a good approximation of the Doppler envelope peak (≈ 0.5–1.5 m/s). This matches what clinicians see on echo for non-restrictive PDA.
-
-## Doppler reality check
-
-Echo Doppler reports the highest velocity in the sample volume — physically that is the vena contracta jet peak.
-
-- **Non-restrictive PDA**: jet peak ≈ bulk mean. Continuity is right; Bernoulli over-shoots.
-- **Restrictive PDA**: jet peak ≫ bulk mean. Bernoulli is right; continuity from anatomic area is wrong.
-
-Neither single formula is correct across the whole closure trajectory.
-
-## Summary
-
-| Regime              | v = Q/A (continuity)         | v = √(ΔP/4) (Bernoulli)        |
-|---------------------|------------------------------|--------------------------------|
-| Open duct (low R)   | ✓ realistic peak & shape     | ✗ overestimates (viscous loss) |
-| Restrictive duct    | ✗ underestimates (no jet)    | ✓ peak rises correctly         |
-| Waveform shape      | ✓ smooth (network-filtered)  | ✗ noisy (p_da transients)      |
-
-The user's empirical observations match the physics exactly: each formula is right in one regime and wrong in the other.
-
-## Path forward (not implemented)
-
-Two follow-up steps would resolve the trade-off without removing either existing output:
-
-1. **Hybrid output `velocity_pa_combined`**. Blend Bernoulli and continuity via a sigmoid weight in `R_total / R_open_total` (the same driver already used for the elastance coupling at `Pda.js` lines 294–301, which mirrors the `BloodVessel` α-pattern at `src/explain/component_models/BloodVessel.js` lines 4–17 and 353–366). Below a ratio of ~5 the weight favors continuity (open-duct regime, smooth and realistic); above ~20 it favors Bernoulli (restrictive regime, jet peak rises); the transition is smooth between. Keeping the existing outputs preserves backward compatibility with old preset charts.
-
-2. **Single trans-ductal gradient for Bernoulli**. Align the code at lines 319–322 with the comment block at lines 306–311 — drive both `v_jet_ao` and `v_jet_pa` from `p_aa − p_pa` rather than from the local gradients. This removes the spurious `p_da` transient artifacts and is independently worth doing even without (1).
-
-## Cross-references
-
-- Resistor flow equation: `src/explain/base_models/Resistor.js`, lines 204–254.
-- Capacitance pressure equation: `src/explain/base_models/Capacitance.js`, lines 168–180.
-- BloodVessel α-coupling (header + code): `src/explain/component_models/BloodVessel.js`, lines 4–17 and 353–366.
-- Prior art (Shunts uses continuity only): `src/explain/component_models/Shunts.js`, lines 240–245.
+- **Only the kinetic term.** `jet_velocity` uses the Bernoulli coefficient and the flow, not the total pressure drop, so the viscous loss along a long duct isn't attributed to the jet. Through an open, non-restrictive duct the jet velocity is low even when the total gradient isn't zero.
+- **Semi-implicit use.** Both callers fold B into the linear resistance using last step's flow (`B·|Q_prev|`), because the old turbulent `r_k` term of `Resistor` was unstable. `Resistor` now solves `r_k` exactly each step, so passing B as `r_k` is an option, to be reviewed with Pda and Shunts.
+- **Cd is a model constant**, not computed from the orifice geometry. The Bischoff scenarios use a low Cd (0.25) as a calibration lever for the ductal flow pattern.
 
 ````
 
@@ -9713,197 +8874,145 @@ Two follow-up steps would resolve the trade-off without removing either existing
 ````markdown
 # Pda
 
-A `Pda` (Patent Ductus Arteriosus) is a component model representing the ductus arteriosus — the fetal shunt between the aortic arch and the pulmonary artery. Unlike a typical `BloodVessel`, the `Pda` is a thin coordinator: it owns a single `Resistor` sub-model (`AAR_DA`, connecting `AAR` → `PA`) and drives its resistance from a set of geometric inputs (diameter, length, viscosity), implementing the **standard quadratic stenosis element** `ΔP = R·Q + B·Q²`.
+`Pda` is the ductus arteriosus: the connection between the aortic arch (`AAR`) and the pulmonary trunk (`PA`). Each step it turns the duct's size into a resistance (viscous loss along the duct plus a Bernoulli loss at its narrowest point), sets it on the duct resistor `AAR_DA`, and reports the shunt flow and the Doppler velocities a clinician would measure.
 
-See also: [Pda-velocity.md](./Pda-velocity.md) for the rationale behind the velocity outputs.
+## Physiology
+
+Before birth the duct carries most of the right ventricle's output past the fluid-filled lungs into the descending aorta. After birth, rising oxygen and falling prostaglandin E2 constrict it, functionally within days, starting at the pulmonary end. In preterm infants it often stays open: blood then runs left-to-right from the aorta into the lungs ("ductal steal"), flooding the lungs and draining the systemic circulation in diastole. When pulmonary pressure is high, flow becomes bidirectional or right-to-left and lowers the post-ductal saturation.
+
+The **size** of the duct sets how much flows, and its **shape** sets the Doppler picture:
+- **Large, unrestrictive duct:** low flow velocity, aortic and pulmonary pressures nearly equal, flow following the pressure difference over the cycle.
+- **Restrictive duct (narrow, short throat):** a fast continuous jet (2–3 m/s) over a large pressure difference.
+
+Prostaglandin E1 keeps a constricting duct open (duct-dependent heart disease).
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Pda    (coordinates the single resistor AAR_DA)
+  └── Pda
 ```
-
-The `Pda` does not extend `Capacitance` or `BloodVessel` itself. It steps once per cycle and writes the derived resistance onto its resistor.
-
-## What it models
-
-The ductus arteriosus is a short conical vessel (~2–3 cm) connecting the pulmonary trunk to the descending aorta. In utero it is held open by PGE₂; after birth, rising PO₂ and falling PGE₂ trigger smooth-muscle constriction that closes it functionally within 12–24 hours, followed by fibrotic remodeling over 2–3 weeks.
-
-The model represents the duct as a **linearly tapered cone**, wider at the aortic end and narrower at the pulmonary end. Closure scales both diameters together via `diameter_relative` from `1.0` (fully open) to `0.0` (closed). The whole duct is a **single resistor** carrying the quadratic stenosis element `ΔP = R·Q + B·Q²`:
-
-- `R·Q` — the **viscous** (Hagen-Poiseuille) loss integrated over the full tapered cone (`res`).
-- `B·Q²` — the **convective / Bernoulli orifice** loss at the narrowest (pulmonary) end, the vena contracta. `B = K_BERNOULLI / A_eff²` with `A_eff = discharge_coeff · A_pa`. This term *is* the modified-Bernoulli relation, so the jet velocity it produces is self-consistent with the flow and with continuity through the effective orifice.
-
-```
-AAR ──[AAR_DA: Resistor]── PA
-         r_for/r_back = res + B·|Q|
-         (quadratic stenosis element; r_k = 0)
-```
-
-There is **no intermediate compartment**: the duct was historically modeled as two resistors around a small `DA` blood-capacitance, but that capacitance was numerically vestigial (a 1000× change in its compliance moved shunt/velocity/gas by 0%, and it turned over ~2.5×/s so it neither delayed nor buffered transport), so the duct was collapsed to a single resistor between `AAR` and `PA`. Blood-gas composition propagates by the `Resistor`'s direct `volume_out`/`volume_in` mixing between the two compartments.
-
-**Numerical scheme.** The quadratic term is applied via a **semi-implicit linearization**: each step `AAR_DA.r_for/r_back` is set to `res + B·|Q_prev|` (and `r_k = 0`), so the resistor solves `Q = ΔP / (res + B·|Q_prev|)`. At steady state this reproduces `ΔP = res·Q + B·Q²` exactly, but it is unconditionally stable. The engine's native explicit quadratic term (`Resistor.r_k`, evaluating `flow = (ΔP − r_k·Q_prev²)/r_for`) is **not** used here: for an open duct the viscous resistance (~10³–10⁴) is far below `2·√(B·ΔP)` (~2×10⁴), so the explicit form diverges.
-
-## Calculation cycle (`calc_model`)
-
-**Closed-duct fast path.** When `diameter_relative === 0` (the postnatal steady state) the cone math,
-the Bernoulli √, and the continuity divisions all degenerate, so `calc_model` short-circuits: it
-forces `no_flow = true` and `r_for/r_back = 1e8` on the resistor (`r_k = 0`, `B = 0`), zeroes the
-velocities, and returns early. The full path below runs only while the duct is patent
-(`diameter_relative > 0`).
-
-Each open-duct step executes in this order:
-
-1. **Viscosity** — pulled from the upstream `AAR` compartment (tracks hematocrit).
-2. **Diameters** — `diameter_ao` and `diameter_pa` from the effective relative diameter `diameter_relative_eff = diameter_relative · diameter_drug_factor` (PGE1 patency) × their respective maxima, each capped at the anatomic max.
-3. **Flow gating** — set `no_flow` when the pulmonary end is fully constricted (`diameter_pa === 0`).
-4. **Viscous resistance** — `res = calc_conical_resistance(d_ao, d_pa, length, viscosity)` over the full cone.
-5. **Bernoulli orifice term** — compute `B = K_BERNOULLI / A_eff²` from the pulmonary effective orifice area, then set `AAR_DA.r_for/r_back = res + B·|Q_prev|` (semi-implicit quadratic stenosis element).
-6. **Velocities** — the honest Bernoulli jet (`velocity_doppler = sign(Q)·√(B·Q²/4)`) plus the anatomic continuity bulk means (`velocity_ao`, `velocity_pa`) for reference.
 
 ## Properties
 
-### Geometry (independent)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `diameter_ao_max` | mm | Maximum diameter at the aortic end (open duct) |
-| `diameter_pa_max` | mm | Maximum diameter at the pulmonary end (open duct) |
-| `diameter_relative` | 0..1 | Linear scale on both end diameters. 1 = fully open, 0 = closed |
-| `length` | mm | Total length of the cone |
-
-### Physics inputs (independent)
-
-| Property | Unit | Description |
-|---|---|---|
-| `discharge_coeff` | 0.3..1 | Effective vena-contracta contraction `Cd` of the pulmonary orifice. The Bernoulli coefficient uses `A_eff = Cd · A_pa`, so `B ∝ 1/Cd²`. The single tuning knob for peak jet velocity (lower `Cd` → tighter jet → higher velocity). Default `0.9` (smooth converging duct; a sharp-edged hole would be ~0.6) |
-| `diameter_drug_factor` | multiplier | Patency multiplier owned by the `Drugs` model (`1.0` = neutral). Prostaglandin E1 (alprostadil / PGE1) drives this above `1.0` to hold a constricting duct open in duct-dependent CHD; it multiplies `diameter_relative` (the product is capped at the anatomic max). **It does not reopen a fully-closed duct** — the `diameter_relative === 0` fast path stays keyed on the raw value (clinically the duct is maintained patent from birth on PGE1, never allowed to reach 0). Default `1.0` |
-
-### Dependent (recomputed each step)
-
-| Property | Unit | Description |
-|---|---|---|
-| `diameter_relative_eff` | 0..1 | Effective relative diameter after the drug factor (`diameter_relative · diameter_drug_factor`); the read-out that actually drives the geometry |
-| `diameter_ao` | mm | Current diameter at aortic end (= `min(diameter_relative_eff · diameter_ao_max, diameter_ao_max)`) |
-| `diameter_pa` | mm | Current diameter at pulmonary end (= `min(diameter_relative_eff · diameter_pa_max, diameter_pa_max)`) |
-| `viscosity` | cP | Blood viscosity pulled from the upstream `AAR` compartment |
-| `flow` | L/s | Shunt flow through the duct; +ve = L→R (aorta → pulmonary) |
-| `flow_ao`, `flow_pa` | L/s | Aliases of `flow` (single resistor now; kept for probe/back-compat) |
-| `res` | mmHg·s/L | Viscous resistance of the full cone (linear part, pushed to `AAR_DA.r_for/r_back`) |
-| `bernoulli_b` | mmHg·s²/L² | Orifice Bernoulli coefficient `B = K_BERNOULLI / A_eff²` (quadratic part, folded into `AAR_DA.r_for/r_back` as `B·|Q_prev|`) |
-
-### Velocity outputs (dependent)
-
-| Property | Unit | Description |
-|---|---|---|
-| `velocity_doppler` | m/s | Jet peak from the Bernoulli (kinetic) term: `sign(Q)·√(|B·Q²|/4)`. Equals continuity `Q/A_eff` through the effective orifice, so it is honest across both open and restrictive regimes and reverses sign cleanly during bidirectional / PHT shunting |
-| `velocity_ao` | m/s | Bulk mean velocity at the *anatomic* aortic end (continuity, `Q/A`) — for reference / open-duct flows |
-| `velocity_pa` | m/s | Bulk mean velocity at the *anatomic* pulmonary end (continuity, `Q/A`) — for reference / open-duct flows |
-
-`velocity_doppler` is now the single value to monitor. See [Pda-velocity.md](./Pda-velocity.md) for why the quadratic element makes one honest velocity possible (the old jet-correction outputs and `jet_exponent` were removed).
-
-## Closure
-
-The duct seals purely through its resistance: as `diameter_relative → 0`, the cone collapses and
-`res → ∞` (Hagen-Poiseuille `~1/d⁴`), and at exactly `diameter_relative === 0` the closed-duct fast
-path forces `no_flow = true` with `r_for/r_back = 1e8`. (The earlier model additionally stiffened a
-`DA` capacitance via a BloodVessel-style `el = el_base · (R/R_open)^alpha` coupling; with the duct
-collapsed to a single resistor and no intermediate compartment, that coupling — and the `el_base`/
-`alpha` parameters — were removed.)
-
-## Resistance formulas
-
-The two functions below compute only the **viscous** (`R·Q`) part of the stenosis element. The
-**Bernoulli** (`B·Q²`) part is computed inline in `calc_model` from the pulmonary effective orifice
-area: `B = K_BERNOULLI / A_eff²`, `A_eff = discharge_coeff · π·(d_pa/2)²`, with `K_BERNOULLI = ρ/(2·133.322)·1e-6 ≈ 3.976e-6` (mmHg·s²/L²·m², ρ ≈ 1060 kg/m³) — the prefactor that makes `B·Q² ≈ 4·v²`, the textbook modified-Bernoulli form.
-
-### Uniform cylinder — `calc_resistance(diameter, length, viscosity)`
-
-Standard Hagen-Poiseuille:
-
-```
-R = (8 · μ · L) / (π · r⁴)        in Pa·s/m³
-```
-
-then converted to `mmHg·s/L`.
-
-### Conical taper — `calc_conical_resistance(d1, d2, length, viscosity)`
-
-Hagen-Poiseuille integrated over a linearly tapered cone:
-
-```
-R = (8 · μ · L) / (3 · π) · (r1² + r1·r2 + r2²) / (r1³ · r2³)    in Pa·s/m³
-```
-
-then converted to `mmHg·s/L`. Reduces to the uniform cylinder when `r1 = r2`.
-
-Both functions return a large sentinel (`1e8`) when the geometry collapses (`d ≤ 0` or `L ≤ 0`).
-
-## Sub-model wiring
-
-The Pda references two models by name, cached in `init_model()`:
-
-| Reference | Looks up | Type | Role |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| `_aar_da` | `AAR_DA` | `Resistor` | AAR → PA, the duct; gets `r_for/r_back = res + B·|Q_prev|` (`r_k = 0`) and `no_flow` |
-| `_aar` | `AAR` | `BloodCapacitance` | upstream (aortic-arch) compartment, read-only viscosity source |
+| `diameter_ao_max` | mm | 3.0 | Fully open diameter at the aortic end. |
+| `diameter_pa_max` | mm | 2.0 | Fully open diameter at the pulmonary (narrowest) end. **Equal to `diameter_ao_max` in every shipped scenario**, so the duct is a cylinder there. |
+| `diameter_relative` | – | 0.0 | Patency fraction 0–1, scaling both ends together; 0 = closed. term 0, preterm 0.27–0.33, Bischoff L→R 0.7, fetal 1. |
+| `length` | mm | 20 | Length of the duct (the Poiseuille term). A restrictive jet needs a short throat (~1–2 mm). term 14, fetus 25 wk 7.9. |
+| `discharge_coeff` | – | 0.9 | Vena-contracta coefficient of the pulmonary-end orifice; lower = tighter jet. Bischoff patients 0.25 (calibration lever). |
 
-`AAR_DA` is declared in the Pda's `components` dictionary in the model definition JSON and instantiated
-by `BaseModelClass.init_model()` before `Pda.init_model()` caches the reference. `AAR` is a top-level
-circuit compartment (not owned by the Pda).
+### Set by other models
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `diameter_drug_factor` | – | 1.0 | Patency multiplier from `Drugs` (PGE1 > 1). Multiplies `diameter_relative`, capped at the anatomic maximum. It cannot reopen a fully closed duct (`diameter_relative` 0). |
+| `viscosity` | cP | 6 | Read from `AAR` every step (follows the haematocrit). |
+
+### Outputs
+
+| Property | Unit | Description |
+|---|---|---|
+| `diameter_relative_eff` | – | `diameter_relative · diameter_drug_factor`. |
+| `diameter_ao`, `diameter_pa` | mm | Current diameters at both ends. |
+| `res` | mmHg·s/L | Viscous resistance of the duct (conical Poiseuille). |
+| `bernoulli_b` | mmHg·s²/L² | Orifice coefficient at the pulmonary end (see [Orifice](./Orifice.md)). |
+| `flow` | L/s | Shunt flow; positive = left-to-right (aorta → pulmonary artery). |
+| `flow_ao`, `flow_pa` | L/s | Aliases of `flow` (kept for older probes). |
+| `velocity_doppler` | m/s | Jet velocity through the vena contracta, `Q / A_eff`: **the Doppler value to watch**. |
+| `velocity_ao`, `velocity_pa` | m/s | Mean velocity through the anatomic area at each end (`Q / A`). |
+| `velocity_pa_max`, `velocity_pa_min` | m/s | Per-beat extremes of `velocity_pa`, latched at each new ventricular activation. |
+| `velocity_doppler_max`, `velocity_doppler_min` | m/s | Per-beat extremes of `velocity_doppler` (min < 0 = right-to-left). |
+| `forward_fraction` | – | Fraction of the previous beat with left-to-right flow. |
+
+## Calculation
+
+Each step (skipped if `AAR_DA` is missing):
+
+1. **Closed duct** (`diameter_relative` exactly 0). `AAR_DA` is sealed (`no_flow`, resistance 10⁸) and the outputs are zeroed.
+2. **Geometry.**
+   ```
+   d_ao = min(diameter_relative · drug_factor · diameter_ao_max, diameter_ao_max)
+   d_pa = likewise with diameter_pa_max
+   ```
+3. **Viscous resistance** over a linearly tapered cone (Hagen–Poiseuille integrated along the length):
+   ```
+   res = 8·η·L / (3π) · (r₁² + r₁·r₂ + r₂²) / (r₁³ · r₂³)        (a cylinder when r₁ = r₂)
+   ```
+4. **Bernoulli loss** at the pulmonary end: `B = K_BERNOULLI / (Cd · π·r_pa²)²`.
+5. **Resistor:** `AAR_DA.r_for = AAR_DA.r_back = res + B·|Q_prev|`, with `r_k = 0`. The quadratic loss is linearised with the previous step's flow (semi-implicit, stable). It differs from the exact `res·Q + B·Q²` by about 1 % of the Bernoulli term per 0.5 ms step (see [Shunts](./Shunts.md#calculation)).
+6. **Velocities:**
+   - `velocity_doppler = jet_velocity(B, Q) = Q / A_eff`;
+   - `velocity_ao` and `velocity_pa` are `Q / A` at the anatomic areas;
+   - then the per-beat envelope is updated.
+
+**Doppler velocity.** Because `B·Q²` is the kinetic (Bernoulli) loss, `velocity_doppler` is the velocity through the vena contracta, consistent across the whole closure trajectory. The viscous loss along the duct doesn't accelerate the blood, so it isn't attributed to the jet. Two consequences:
+- a **long, narrow duct** is viscous-limited: low flow and low velocity even across a large gradient;
+- the jet can't exceed `√(gradient / 3.975)`: a faster jet needs a larger aorta–pulmonary pressure difference, not a different duct geometry.
+
+Earlier versions reported other velocity outputs (from a separate `DA` compartment and the old 4·v² rule); they were replaced by this single orifice velocity, consistent with [Shunts](./Shunts.md) and [Orifice](./Orifice.md).
+
+## Factor system
+
+None of its own. It writes the **base** `r_for`/`r_back`/`r_k`/`no_flow` of `AAR_DA` every step. `AAR_DA` is `implicit` in every scenario.
+
+## Inputs and outputs
+
+- **Reads:** `AAR.viscosity`, `AAR_DA.flow`, `Heart.ncc_ventricular` (beat boundary).
+- **Writes:** `AAR_DA.r_for`, `r_back`, `r_k`, `no_flow`.
+- **Written by:** `Drugs` (`diameter_drug_factor`); the user and the scenario generators (diameters, length, `discharge_coeff`).
+- **Read by:**
+  - `probe_vitals` (duct shunt), and `Monitor` through its configurable `flow_targets`;
+  - `scripts/probe_pda.mjs`, `probe_term_reference.mjs` and the P1 paper scripts (Doppler envelope);
+  - `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **No closure physiology.** Constriction by oxygen and falling PGE2, closure from the pulmonary end first, and the wall's passive and active elastance aren't computed. The duct's size is a scenario or user setting.
+- **Symmetric patency.** `diameter_relative` scales both ends together. The shipped scenarios also set both ends equal, so the duct is a cylinder.
+- **Absolute millimetres.** The diameters and `length` aren't scaled with body size; each scenario sets them (the fetal scenarios use Szpinda's gestational regressions, see [fetal_circulation](./fetal_circulation.md)).
+- **PGE1 cannot reopen a closed duct** (`diameter_relative` 0 is a hard stop).
+- **Reopening transient.** On the first step after reopening, the Bernoulli term is 0 (no previous flow), so flow briefly overshoots for one step.
 
 ## Example definition (JSON)
+
+From `bischoff_ltr_pda.json`, `models.Pda` (trimmed to the config props; `components` holds `AAR_DA`):
 
 ```json
 {
   "name": "Pda",
-  "description": "ductus arteriosus model",
-  "is_enabled": true,
   "model_type": "Pda",
-  "components": {
-    "AAR_DA": {
-      "name": "AAR_DA",
-      "description": "ductus arteriosus (aorta-pulmonary) resistor",
-      "is_enabled": true,
-      "model_type": "Resistor",
-      "r_for": 100000000,
-      "r_back": 100000000,
-      "r_k": 0,
-      "comp_from": "AAR",
-      "comp_to": "PA",
-      "no_flow": true,
-      "no_back_flow": false
-    }
-  },
-  "diameter_ao_max": 3.0,
-  "diameter_pa_max": 2.0,
-  "diameter_relative": 0,
-  "length": 20,
-  "discharge_coeff": 0.9
+  "is_enabled": true,
+  "diameter_ao_max": 3,
+  "diameter_pa_max": 3,
+  "diameter_relative": 0.7,
+  "length": 14,
+  "discharge_coeff": 0.25,
+  "diameter_drug_factor": 1
 }
 ```
 
-## Usage notes
+## Usage in the scenarios
 
-- **`diameter_ao_max` / `diameter_pa_max` / `length` are absolute millimetres that no scaler
-  touches, and `diameter_relative` is a `[0..1]` patency fraction, not a size.** A scenario
-  scaled to a smaller body keeps a term-sized duct unless the millimetres are set explicitly.
-  The gestational regressions quoted above are what the fetal scenarios use for this; see
-  [fetal_circulation.md](./fetal_circulation.md).
-- **Closure is symmetric in this model.** Real PDA closure proceeds from the pulmonary end first, but the current implementation scales both `diameter_ao` and `diameter_pa` by the same `diameter_relative`. Asymmetric closure would require independent scaling factors.
-- **`velocity_doppler` is the value to monitor** — it is the honest jet peak across both open and restrictive regimes (it equals continuity `Q/A_eff` through the effective orifice). `velocity_pa`/`velocity_ao` remain as anatomic continuity bulk means for reference. Some older model definitions still watch `Pda.velocity_pa`; consider repointing the chart channel to `velocity_doppler`.
-- **A restrictive jet requires an orifice-like (short) throat `length`.** Because the viscous term scales with `length` (Poiseuille over the cone) while the Bernoulli term does not, a long, narrow duct is viscous-limited and will *not* jet — flow and velocity both stay low even at a large trans-ductal gradient (this is physically correct, and is what makes the new element honest where the old `√(full gradient/4)` over-reported). To model a restrictive/closing PDA, set `length` to the throat length (~1–2 mm) and tune `discharge_coeff` (lower → tighter jet). The `preterm_28wk_restrictive_pda` scenario uses `length = 1.5`, `discharge_coeff = 0.5` (≈2.5 m/s continuous L→R, low pulsatility).
-- **Velocity is gradient-limited.** Since `B·Q² = 4·v²` and `B·Q²` can at most equal the full trans-ductal gradient, the peak jet velocity cannot exceed `√(gradient/4)`. Raising peak velocity beyond that ceiling requires a larger systemic–pulmonary pressure difference (e.g. higher SVR / lower PVR), not duct geometry.
-- **Viscosity is dynamic.** `viscosity` is pulled from the upstream `AAR` compartment each step (which itself follows hematocrit), so `res` tracks viscosity changes automatically.
+One instance in every scenario, owning `AAR_DA` (`AAR` → `PA`, implicit):
 
-## Per-beat velocity envelope (paper companion read-outs)
+| Scenario | `diameter_relative` × max (mm) | `length` (mm) | `discharge_coeff` | Duct |
+|---|---|---|---|---|
+| term_neonate, bischoff_no_pda | 0 | 14 | 0.9 | closed |
+| preterm_25wk / 28wk / 30wk | 0.27 / 0.33 / 0.3 × 3 | 14 | 0.9 | small, open |
+| bischoff_ltr_pda / bidir_pda | 0.7 / 0.57 × 3 | 14 | 0.25 | haemodynamically significant (2.1 / 1.7 mm) |
+| fetus_25wk / 30wk / term | 1 × 3.9 / 4.6 / 6 | 7.9 / 10.1 / 14.4 | 0.9 | fetal, wide open |
 
-`velocity_pa_max` / `velocity_pa_min` (Eq. 12 continuity velocity at the pulmonary end),
-`velocity_doppler_max` / `velocity_doppler_min` (Bernoulli jet) and `forward_fraction` (fraction of
-the beat with left-to-right flow) are latched once per beat, at the restart of the Heart's
-ventricular counter. They exist so the ductal Doppler patterns of the cardiovascular paper can be
-compared from the slow stream (see `papers/p1/`); the instantaneous values are unchanged.
+The archived `pda_restrictive_ltr` uses a short throat (`length` 1.5 mm, `discharge_coeff` 0.35, `diameter_relative` 0.13) for a restrictive jet.
+
+## References
+
+- Szpinda M. Morphometric study of the ductus arteriosus during human development. 2007 (fetal diameter and length regressions).
+
+The orifice constant is derived in [Orifice](./Orifice.md). The Bischoff calibration is in [BischoffLtrPdaReference](./BischoffLtrPdaReference.md).
 
 ````
 
@@ -9912,199 +9021,114 @@ compared from the slow stream (see `papers/p1/`); the instantaneous values are u
 ````markdown
 # Placenta
 
-The `Placenta` model is a **coordinator** for the **fetal** placental circulation and gas exchange.
-Like [Pda](./Pda.md) and [Shunts](./Shunts.md), it owns no physics of its own — it drives a set of
-pre-built sub-models (umbilical and fetal-placental blood vessels, the maternal blood pool, and a
-blood-blood gas diffusor) from a single set of parameters, and switches the whole unit on or off.
+`Placenta` is the coordinator of the fetal placental circulation:
+- **the cord:** umbilical arteries from the descending aorta, umbilical vein back to the IVC;
+- **the fetal placenta:** arteries, villous capillaries, veins;
+- **the maternal blood pool** the villi exchange gases with.
 
-> **This is the FETAL placenta.** It exchanges gases against a **fixed-composition maternal pool**
-> (`PL_MAT`) whose O₂/CO₂ contents are held at constant scalars (`mat_to2`/`mat_tco2`) — i.e. an
-> idealized, infinite maternal reservoir. The *maternal* intervillous bed and uterine supply are
-> modelled separately by [MaternalPlacenta](./MaternalPlacenta.md) and [Uterus](./Uterus.md); when
-> those are active they take over the maternal pool (see `skip_mat_gas_write` below).
+It switches the unit on (fetal life) and off (after birth), clamps the cord, sets the resistances, the maternal gas content and the exchange constants. The blood and the gas transfer live in its sub-models.
+
+## Physiology
+
+In the fetus the placenta is the lung. About 40 % of the combined ventricular output leaves the descending aorta through the two umbilical arteries. It flows through the villous capillaries, where it takes up oxygen and gives off CO2 by diffusion with the mother's blood in the intervillous space, and returns oxygenated through the umbilical vein. That vein's blood reaches the IVC (in reality largely through the ductus venosus) and, by preferential streaming, crosses the foramen ovale to the left heart and the brain.
+
+At birth the cord is clamped: placental flow stops, the low-resistance placental bed is lost (systemic resistance rises), and gas exchange must move to the lungs.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Placenta   (group coordinator — no compartment of its own)
+  └── Placenta
 ```
-
-Extends `BaseModelClass` directly. `calc_model()` writes onto referenced sub-models; it has no
-`el_base`/`vol`/`r_for` of its own.
-
-## What it models
-
-Fetal blood leaves the descending aorta, runs through the umbilical arteries to the fetal side of the
-placenta, exchanges O₂/CO₂ with maternal blood across the placental membrane, and returns via the
-umbilical vein to the inferior vena cava.
-
-```
-DA ──[PL_UMB_ART]──► PL_FETAL_ART ─► PL_FETAL_CAP ─► PL_FETAL_VEN ──[PL_UMB_VEN]──► (PL_UMB_VEN_IVCI) ──► IVCI
-                                          │
-                                    [PL_GASEX: BloodDiffusor]
-                                          │
-                                       PL_MAT  (maternal pool, fixed composition)
-```
-
-| Reference | Model | Role |
-|---|---|---|
-| `_umb_art` / `_umb_ven` | `PL_UMB_ART` / `PL_UMB_VEN` | umbilical artery / vein (`BloodVessel`s) |
-| `_plf_art` / `_plf_cap` / `_plf_ven` | `PL_FETAL_ART/CAP/VEN` | fetal-placental arterioles / capillaries / venules (`BloodVessel`s) |
-| `_plm` | `PL_MAT` | maternal blood pool — a `fixed_composition` reservoir held at `mat_to2`/`mat_tco2` |
-| `_gas_exchanger` | `PL_GASEX` | `BloodDiffusor` exchanging O₂/CO₂ between fetal capillary and maternal pool |
-| `_umb_ven_ret` | `PL_UMB_VEN_IVCI` | standalone umbilical-vein → IVC return resistor (Placenta-owned) |
 
 ## Properties
 
-### Configuration (set in the model definition)
+### Config (set in the definition JSON)
 
-| Property | Default | Unit | Description |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| `placenta_running` | `false` | — | master on/off (drives `is_enabled` of all sub-models) |
-| `umb_clamped` | `true` | — | clamp the umbilical/fetal vessels (`no_flow`) while running |
-| `skip_mat_gas_write` | `false` | — | when true, do **not** write `PL_MAT` gases here (the Uterus coupling is authoritative) |
-| `umb_art_res` | `800` | mmHg·s/L | umbilical-artery resistance |
-| `umb_art_res_factor` | `1.0` | — | multiplier on `umb_art_res` |
-| `umb_ven_res` | `100` | mmHg·s/L | umbilical-vein resistance |
-| `umb_ven_res_factor` | `1.0` | — | multiplier on `umb_ven_res` |
-| `plf_res` | `2000` | mmHg·s/L | fetal-placental resistance (applied to art/cap/ven) |
-| `plf_res_factor` | `1.0` | — | multiplier on `plf_res` |
-| `mat_to2` | `6.85` | mmol/L | maternal total O₂ content held on `PL_MAT` |
-| `mat_tco2` | `23` | mmol/L | maternal total CO₂ content held on `PL_MAT` |
-| `dif_o2` | `0.0005` | mmol/mmHg·s | O₂ diffusion constant pushed to `PL_GASEX` |
-| `dif_co2` | `0.001` | mmol/mmHg·s | CO₂ diffusion constant pushed to `PL_GASEX` |
+| `placenta_running` | boolean | `false` | Enables the whole unit (flow and gas exchange). `true` in the fetal scenarios. |
+| `umb_clamped` | boolean | `true` | Stops flow in the cord and placenta (`no_flow`) while the unit stays enabled, e.g. cord occlusion. `false` in the fetal scenarios. |
+| `umb_art_res`, `umb_art_res_factor` | mmHg·s/L, – | 800, 1.0 | Resistance of the umbilical arteries `PL_UMB_ART`. |
+| `umb_ven_res`, `umb_ven_res_factor` | mmHg·s/L, – | 100, 1.0 | Resistance of the umbilical vein `PL_UMB_VEN`. |
+| `plf_res`, `plf_res_factor` | mmHg·s/L, – | 2000, 1.0 | Resistance of each fetal-placenta vessel (`PL_FETAL_ART`, `_CAP`, `_VEN`). |
+| `mat_to2`, `mat_tco2` | mmol/L | 6.85, 23 | Total O2 and CO2 content of the maternal pool `PL_MAT`. |
+| `dif_o2`, `dif_co2` | mmol/(mmHg·s) | 0.0005, 0.001 | Diffusion constants given to the exchanger `PL_GASEX`. |
+| `skip_mat_gas_write` | boolean | `false` | Leave `PL_MAT`'s gases alone (when `Uterus` drives the maternal pool, see [Uterus](./Uterus.md)). |
 
-### Read-outs
+The `*_factor` props are plain persistent multipliers; nothing resets them.
 
-The model has no read-outs of its own. Read umbilical flow from the vessels (`PL_UMB_ART.flow` /
-`PL_UMB_VEN.flow`). (Older scenario files still carry `umb_art_flow`/`umb_art_velocity`/
-`umb_ven_flow`/`umb_ven_velocity` keys from a removed, never-computed output set; the base
-`init_model` copies them onto the instance, where nothing reads them.)
+## Calculation
 
-### Local (internal)
+Every 15 ms, if all seven sub-models exist (otherwise skipped):
 
-`_update_interval` (0.015 s) / `_update_counter` throttle the loop; `_umb_art`/`_umb_ven`/`_plf_*`/
-`_plm`/`_gas_exchanger`/`_umb_ven_ret` cache the sub-model references resolved in `init_model`.
+1. `is_enabled` of all of them, and of the return resistor `PL_UMB_VEN_IVCI`, follows `placenta_running`. Stopping the placenta therefore stops flow *and* exchange.
+2. If running:
+   - `no_flow` of the cord and placenta vessels and of `PL_UMB_VEN_IVCI` = `umb_clamped`;
+   - base resistances: `PL_UMB_ART` = `umb_art_res·factor`, `PL_UMB_VEN` = `umb_ven_res·factor`, the three fetal-placenta vessels = `plf_res·factor` each;
+   - `PL_MAT.to2/tco2` = `mat_to2/mat_tco2` (unless `skip_mat_gas_write`);
+   - `PL_GASEX.dif_o2/dif_co2` = `dif_o2/dif_co2`.
 
-## Calculation cycle (`calc_model`)
+These are the levers. Writing `PL_GASEX.dif_o2`, `PL_MAT.to2` or the vessels' `r_for` directly is overwritten within 15 ms.
 
-Every `_update_interval` (0.015 s):
+## Factor system
 
-1. **Guard** — return if any required sub-model reference is missing.
-2. **Sync enabled state** — every sub-model's `is_enabled` (including the `_umb_ven_ret` return
-   resistor) is set to `placenta_running`. This runs on **every** tick (not only while running) so
-   that *stopping* the placenta actually disables flow and gas exchange.
-3. **Only while running:**
-   - **Clamp** — set `no_flow = umb_clamped` on the umbilical/fetal vessels and on the return
-     resistor (so a clamp stops flow on both sides).
-   - **Resistances** — `umb_art_res · factor`, `umb_ven_res · factor`, `plf_res · factor` onto the
-     `r_for`/`r_back` of the respective vessels (`plf_res` is applied to the fetal art/cap/ven trio).
-   - **Maternal gases** — unless `skip_mat_gas_write`, hold `PL_MAT.to2 = mat_to2`,
-     `PL_MAT.tco2 = mat_tco2` (the maternal pool is `fixed_composition`, so the diffusor draws from it
-     without depleting it).
-   - **Diffusion constants** — push `dif_o2`, `dif_co2` to the gas exchanger.
+None of its own. It writes the base `r_for`/`r_back` of its vessels; their own factor layers still apply (they compose multiplicatively, see [BloodVessel](./BloodVessel.md#factor-system)).
+
+## Inputs and outputs
+
+- **Writes:** its sub-models (above).
+- **Written by:** the user and the fetal scenario generators (`scripts/_make_fetus*.mjs`, from the per-gestation table in `scripts/_ga_tables.mjs`); `Uterus` sets `skip_mat_gas_write` when coupled.
+- **Read by:** nothing reads Placenta directly. The fetal oxygenation follows from its sub-models.
+
+## Assumptions and limitations
+
+- **No gestational age inside.** The constants in the code are term values (cord 55 cm, umbilical-artery cross-section 0.147 cm²). Fetal scenarios set the props per gestation (`_ga_tables.mjs`, see [fetal_circulation](./fetal_circulation.md)).
+- **Gas exchange runs at full equilibration.** At the shipped settings fetal capillary blood equilibrates completely with the maternal pool: umbilical-vein pCO2 equals `PL_MAT` pCO2. So `mat_to2`/`mat_tco2` are the effective gas setpoints, and `dif_o2`/`dif_co2` have little authority. Calibrate fetal gases through the maternal contents.
+- **The maternal pool is an infinite reservoir.** `PL_MAT` is `fixed_composition` with adult blood (`P50_0` 26.7). `mat_to2`/`mat_tco2` are contents (mmol/L), not partial pressures; they must be consistent with the pool's haemoglobin and P50.
+  - **term_neonate** ships haemoglobin 7.5 mmol/L with 3.825 / 24.29 mmol/L. The code defaults (6.85 / 23) date from a pool with neonatal blood.
+  - **`Blood` writes to `PL_MAT` too** (`set_solute`, `set_P50`). Changing a fetal haemoglobin changes the maternal pool as well; the generators snapshot and restore it.
+- **Not in any scaler group.** `ModelScaler.scale_to_weight` doesn't shrink the placenta; each fetal scenario sets its placental volumes explicitly.
+- **The return resistor stays a standalone `Resistor`.** `PL_UMB_VEN_IVCI` must **not** be an entry in `IVCI.inputs`. As a vessel-owned connector, `IVCI` would rewrite its `is_enabled`/`no_flow` every step, and stopping or clamping the placenta would leak placental blood into the fetal IVC. Its resistance (49 mmHg·s/L) is a scenario value that Placenta doesn't set, and it is the same in every fetal scenario. The ductus venosus isn't modelled separately.
+- **No placental transfusion.** At clamping, the blood in the cord and placenta (~83 mL at term) stays there; delayed cord clamping and cord milking can't be represented.
 
 ## Example definition (JSON)
 
-From `archive/term_fetus.json` (placenta running, cord unclamped):
+From `fetus_term.json`, `models.Placenta` (trimmed to the config props; `components` holds the sub-models):
 
 ```json
 {
   "name": "Placenta",
-  "description": "Placenta model",
   "model_type": "Placenta",
   "is_enabled": true,
   "placenta_running": true,
   "umb_clamped": false,
-  "skip_mat_gas_write": false,
-  "umb_art_res": 680,
-  "umb_art_res_factor": 1,
-  "umb_ven_res": 100,
-  "umb_ven_res_factor": 1,
-  "plf_res": 1500,
-  "plf_res_factor": 1,
-  "mat_to2": 7.4,
-  "mat_tco2": 21,
-  "dif_o2": 0.03,
+  "umb_art_res": 585,
+  "umb_ven_res": 115,
+  "plf_res": 1298,
+  "mat_to2": 5.4,
+  "mat_tco2": 21.6,
+  "dif_o2": 0.003,
   "dif_co2": 0.04
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- In **fetal** scenarios (e.g. `archive/term_fetus.json`) the placenta is the gas exchanger and the lungs are
-  inert; the open FO ([Shunts](./Shunts.md)) and ductus arteriosus ([Pda](./Pda.md)) complete fetal
-  circulation.
-- **Birth transition** is modelled by clamping (`umb_clamped = true`, flow stops) and then stopping
-  (`placenta_running = false`, the whole unit is disabled).
-- When the **maternal–fetal coupling** is active, [Uterus](./Uterus.md) / [MaternalPlacenta](./MaternalPlacenta.md)
-  drive `PL_MAT` instead; set `skip_mat_gas_write = true` so the maternal pool has exactly **one**
-  authoritative writer per step.
+One instance in every scenario. It owns `PL_UMB_ART`, `PL_FETAL_ART`, `PL_FETAL_CAP`, `PL_FETAL_VEN`, `PL_UMB_VEN` (BloodVessels), `PL_MAT` (BloodCapacitance) and `PL_GASEX` (BloodDiffusor). The return resistor `PL_UMB_VEN_IVCI` is a top-level resistor.
 
-## Notes & caveats
+| Scenario | Running | Resistances art / ven / placenta | `mat_to2` / `mat_tco2` | Fetoplacental blood |
+|---|---|---|---|---|
+| fetus_term | yes | 585 / 115 / 1298 | 5.4 / 21.6 | ~83 mL |
+| fetus_30wk | yes | 1095 / 160 / 2430 | 5.6 / 21.5 | ~46 mL |
+| fetus_25wk | yes | 2245 / 330 / 4980 | 6.0 / 21.0 | ~26 mL |
+| postnatal scenarios | no (clamped) | – | – | – |
 
-- **Gestational age is not a parameter of this model.** Every constant here is anchored at term
-  (the literature comments cite 37–39 week measurements: cord 55 cm, umbilical-artery CSA
-  0.147 cm²). Nothing in the engine reads `model.gestational_age`. Gestation-specific fetal
-  scenarios therefore set these props explicitly from a per-GA table in
-  [`scripts/_ga_tables.mjs`](../scripts/_ga_tables.mjs), applied by
-  [`scripts/_make_fetus.mjs`](../scripts/_make_fetus.mjs) — see
-  [fetal_circulation.md](./fetal_circulation.md).
-- **The coordinator props are the levers — not the sub-models.** While the placenta is running,
-  `calc_model` rewrites `PL_GASEX.dif_o2`/`dif_co2` from `this.dif_o2`/`dif_co2`, and
-  `PL_MAT.to2`/`tco2` from `mat_to2`/`mat_tco2`, on **every update interval** (0.015 s, not every
-  model step). Writing to `PL_GASEX.dif_o2` or `PL_MAT.to2` directly is
-  silently clobbered. Likewise the umbilical/fetal-placental resistors are rewritten from
-  `umb_art_res`/`umb_ven_res`/`plf_res` (times their `*_factor` multipliers, which are plain
-  persistent props — set once, never reset per step).
-- **Gas exchange sits on a full-equilibration plateau.** At the shipped fetal settings the exchanger
-  equilibrates fetal capillary blood essentially completely to the maternal pool (umbilical-vein
-  pCO₂ equals `PL_MAT` pCO₂ exactly). So `mat_to2`/`mat_tco2` are the *effective* gas setpoints and
-  `dif_o2`/`dif_co2` have little authority — raising them changes almost nothing. Calibrate fetal
-  oxygenation and pCO₂ through the maternal contents.
-- **`PL_*` compartments are outside every scaler group.** No placental compartment appears anywhere
-  in a scenario's `scaler_config`, so `ModelScaler.scale_to_weight` does **not** shrink the placenta.
-  A fetus scaled to a smaller weight keeps a term-sized placental blood volume unless it is trimmed
-  explicitly (at 30 wk that is the difference between 164 and 122 mL/kg of fetoplacental blood).
-- **`PL_MAT` holds the *mother's* blood, and `Blood` writes to it.** `Blood.set_solute()` and
-  `Blood.set_P50()` propagate to every registered blood component, `PL_MAT` included. Setting a
-  fetal haemoglobin or unmeasured-anion value therefore changes the maternal pool too — and because
-  `mat_to2` pins its O₂ *content*, lowering its haemoglobin below the implied carrying capacity
-  drives the pool to 100% saturation with a wildly unphysiological dissolved pO₂, which then
-  propagates down the umbilical vein. Snapshot and restore `PL_MAT.P50_0` and `PL_MAT.solutes`
-  after any such write (`_make_fetus.mjs` §E and `build_patient.mjs`'s `restoreMaternalPool()` do).
-- **`term_neonate` ships adult maternal blood in `PL_MAT`.** Its `PL_MAT` carries adult blood
-  (`solutes.hemoglobin` 7.5 mmol/L, `P50_0` 26.7 mmHg) with `mat_to2` 3.825 / `mat_tco2` 24.29 mmol/L.
-  The code defaults (`mat_to2` 6.85, `mat_tco2` 23) date from a pool that carried the neonatal
-  haemoglobin and P50, so they are not a consistent pair with adult blood — set `mat_to2`/`mat_tco2`
-  together with the pool's haemoglobin/P50. (The placenta is off in `term_neonate`; the values only
-  matter once it runs.)
-- **Diffusion constants: scenario vs code default.** `term_neonate` sets `dif_o2` = `dif_co2` = 0.01
-  mmol/(mmHg·s) on both the Placenta and `PL_GASEX`; the code defaults are 0.0005 / 0.001, and the
-  archived `term_fetus` uses 0.03 / 0.04. Because the exchanger sits on a full-equilibration plateau
-  (above), these differences have little effect on fetal gases.
-- **Two independent off-switches.** `placenta_running = false` disables every sub-model (flow *and*
-  gas exchange stop). `umb_clamped = true` stops flow only (via `no_flow`) while the placenta keeps
-  running — useful to model cord occlusion with the unit otherwise intact.
-- **Maternal pool is an infinite reservoir.** `PL_MAT` is `fixed_composition`, so the diffusor
-  exchanges gases with it without changing its composition; the Placenta also re-asserts
-  `mat_to2`/`mat_tco2` each update interval while running (unless `skip_mat_gas_write`).
-- **`mat_to2`/`mat_tco2` are total contents (mmol/L), not partial pressures** — the gas exchange
-  itself is partial-pressure driven inside `PL_GASEX`, which derives pCO₂/pO₂ from these contents.
-- **Sub-model references are required.** `calc_model` skips the tick if any is missing rather than
-  dereferencing null.
-- **The umbilical-vein → body return is an autonomous resistor under Placenta control.** The return
-  segment `PL_UMB_VEN → IVCI` is the resistor `PL_UMB_VEN_IVCI`, declared as a standalone `Resistor`
-  in the model definition — deliberately **not** an entry in `IVCI.inputs`. If it were an IVCI input,
-  `IVCI` (a `BloodVessel`) would auto-create and co-manage it, re-asserting its `is_enabled`/`no_flow`
-  every step and leaving it outside the placenta's two off-switches (a one-way leak of placental blood
-  into the fetal IVC whenever the unit was stopped or clamped). As a free resistor, nothing else owns
-  it: the `Placenta` resolves it by name in `init_model` (`_umb_ven_ret`) and drives its `is_enabled`
-  (= `placenta_running`) and `no_flow` (= `umb_clamped`) alongside the rest of the unit. Its
-  resistance is left at the scenario value, so running-unclamped hemodynamics are unchanged.
-  **When wiring a new placenta scenario, connect the umbilical vein to the IVC with a standalone
-  `PL_UMB_VEN_IVCI` resistor — do not add `PL_UMB_VEN` to `IVCI.inputs`,** or the off-switches break.
+## References
+
+- Umbilical artery cross-section at 37–39 weeks: doi:10.18203/2320-1770.ijrcog20183851.
+- Spurway J, Logan P, Pak S. The development, structure and blood flow within the umbilical cord with particular reference to the venous system. *Australas J Ultrasound Med* 2012;15(3):97–102. doi:10.1002/j.2205-0140.2012.tb00013.x.
+- Fetal placental (tissue) volume at term: doi:10.7863/jum.2008.27.11.1583.
 
 ````
 
@@ -11464,15 +10488,16 @@ its own reference doc; this page is the map.
 (two-thread design, message protocol, build/step loop, the cross-cutting patterns every model uses,
 and how to add a new model). Then dive into the per-class docs below.
 
-Each per-class doc follows the same house template (see the template section in
-[ARCHITECTURE](./ARCHITECTURE.md)): summary → inheritance → what it models → property tables →
-calculation/math → factor system → example JSON → usage. The exemplar is
-[BloodCapacitance](./BloodCapacitance.md).
+Each per-class doc follows the v1.0 house template (see the template section in
+[ARCHITECTURE](./ARCHITECTURE.md)): summary → physiology in plain language → inheritance → property
+tables (with defaults) → calculation → factor system → inputs and outputs → assumptions and
+limitations → example JSON → usage in the scenarios → references. Helpers and module functions use a
+short form. The exemplar is [BloodCapacitance](./BloodCapacitance.md). Pages marked *experimental*
+(MaternalPlacenta, Uterus, Resuscitation) describe models whose app panels are hidden as unfinished.
 
-> **Cross-cutting footgun:** the factor/effective-value scaling tier is **not uniformly named**.
-> The capacitance/resistor/time-varying-elastance family uses `*_factor_scaling_ps`, but the
-> diffusor/exchanger family (`GasDiffusor`, `GasExchanger`, `BloodDiffusor`) uses `*_factor_scaling`
-> (no `_ps`). See [ARCHITECTURE §cross-cutting patterns](./ARCHITECTURE.md).
+> **Factor layers:** every tunable has `*_factor` (per step), `*_factor_ps` (persistent) and
+> `*_factor_scaling_ps` (scaling) layers; the name is the same in every model family. See
+> [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern).
 
 ---
 
@@ -11501,7 +10526,6 @@ The reusable physical primitives every component model is built from.
 | [TimeVaryingElastance](./TimeVaryingElastance.md) | Compartment whose elastance varies over the cardiac cycle; basis for heart chambers. |
 | [Container](./Container.md) | Enclosing pressure container (thorax/pericardium); applies external pressure to members. |
 | [BloodDiffusor](./BloodDiffusor.md) | Diffusion of O₂/CO₂/solutes between two blood compartments. |
-| [GasDiffusor](./GasDiffusor.md) | Diffusion of gases between two gas compartments. |
 | [GasExchanger](./GasExchanger.md) | O₂/CO₂ transfer across the blood–gas (alveolar–capillary) barrier. |
 
 ## Blood side
@@ -11512,7 +10536,8 @@ The reusable physical primitives every component model is built from.
 | [BloodCapacitance](./BloodCapacitance.md) | Blood-filled compartment; `volume_in` mixes gases/solutes/drugs/temp/viscosity by volume fraction. **(template exemplar)** |
 | [BloodTimeVaryingElastance](./BloodTimeVaryingElastance.md) | Time-varying-elastance compartment carrying blood composition (pumping chamber). |
 | [BloodVessel](./BloodVessel.md) | Vessel segment with embedded resistor + ANS tone; **multiplicative** factor composition + α-coupling. |
-| [BloodPump](./BloodPump.md) | Active blood-pump compartment (flow source). |
+| [BloodMixing](./BloodMixing.md) | Blood composition mixing on inflow and exchange without net flow (`mix_blood_in`, `exchange_blood`). *(helper)* |
+| [Orifice](./Orifice.md) | Bernoulli orifice term and jet velocity shared by Shunts and Pda (`orifice_b`, `jet_velocity`). *(helper)* |
 | [BloodComposition](./BloodComposition.md) | Acid–base / oxygenation solver (`calc_blood_composition`): Stewart SID + O₂/CO₂ dissociation, Haldane/Bohr coupling. *(module function, not a model_type)* |
 
 ## Gas side
@@ -11521,7 +10546,8 @@ The reusable physical primitives every component model is built from.
 |---|---|
 | [Gas](./Gas.md) | Gas-phase manager: atmospheric pressure, humidity, gas composition init. |
 | [GasCapacitance](./GasCapacitance.md) | Gas-filled elastic compartment (lung/airway); tracks partial pressures/fractions. |
-| [GasComposition](./GasComposition.md) | Computes gas partial pressures/fractions from total pressure, humidity, temperature. *(module function)* |
+| [GasComposition](./GasComposition.md) | Builds a gas compartment's composition from a dry FiO2, temperature and humidity. *(module function)* |
+| [GasMixing](./GasMixing.md) | Gas exchange between two gas compartments without net flow (`exchange_gas`, used by `Resistor.mix_flow`). *(helper)* |
 
 ## Cardiac
 
@@ -11530,7 +10556,7 @@ The reusable physical primitives every component model is built from.
 | [Heart](./Heart.md) | Master cardiac driver: HR, conduction/cycle counters, activation, ECG, arrhythmias (AV block / escape / VT / PVC). |
 | [HeartChamber](./HeartChamber.md) | A single chamber (LA/LV/RA/RV); time-varying elastance with ANS, mob, drug, load & remodel factors. |
 | [HeartFunction](./HeartFunction.md) | Load-induced contractility compromise (afterload mismatch, wall-stress dilation, remodeling). |
-| [HeartValve](./HeartValve.md) | Cardiac valve — thin directional [Resistor](./Resistor.md) subclass. *(intentional stub)* |
+| [HeartValve](./HeartValve.md) | Cardiac valve: a one-way [Resistor](./Resistor.md) under its own type. |
 | [Mob](./Mob.md) | Myocardial oxygen balance / heart-muscle metabolism. |
 
 ## Vascular & circulatory
@@ -11539,19 +10565,18 @@ The reusable physical primitives every component model is built from.
 |---|---|
 | [Circulation](./Circulation.md) | High-level circulation orchestrator; wires/scales the systemic & pulmonary network. |
 | [Shunts](./Shunts.md) | Intracardiac/extracardiac shunts (foramen ovale, VSD, intrapulmonary). |
-| [Pda](./Pda.md) | Patent ductus arteriosus: single AAR→PA resistor with quadratic stenosis; drug-modulated diameter. |
-| [Pda-velocity](./Pda-velocity.md) | Design rationale for the PDA Doppler velocity output (+ retained historical analysis). |
-| [Placenta](./Placenta.md) | **Fetal** placenta as a gas exchanger to a fixed maternal pool. |
-| [MaternalPlacenta](./MaternalPlacenta.md) | **Maternal** intervillous-space bed / spiral-artery perfusion. |
-| [Uterus](./Uterus.md) | Uterine circulation + pregnancy adaptation + contractions/labor (IUP waveform, MVU). |
+| [Pda](./Pda.md) | Ductus arteriosus: viscous (cone) + Bernoulli resistance on `AAR_DA`, drug-modulated diameter, Doppler velocity envelope. |
+| [Placenta](./Placenta.md) | **Fetal** placenta: cord, villous circulation and exchange with a fixed maternal pool. |
+| [MaternalPlacenta](./MaternalPlacenta.md) | **Maternal** intervillous-space bed / spiral-artery perfusion. *(experimental)* |
+| [Uterus](./Uterus.md) | Uterine circulation + pregnancy adaptation + contractions/labor (IUP waveform, MVU). *(experimental)* |
 
 ## Control & regulatory
 
 | Doc | Models |
 |---|---|
 | [Ans](./Ans.md) | Autonomic nervous system controller; hub doc for the afferent→efferent baro/chemoreflex loop. |
-| [AnsAfferent](./AnsAfferent.md) | Afferent receptor pathway (sensor → firing rate). *(stub → [Ans](./Ans.md))* |
-| [AnsEfferent](./AnsEfferent.md) | Efferent effector pathway (firing rate → effect factor). *(stub → [Ans](./Ans.md))* |
+| [AnsAfferent](./AnsAfferent.md) | Afferent receptor (input → firing rate, piecewise linear with a time constant). |
+| [AnsEfferent](./AnsEfferent.md) | Efferent pathway (summed, clamped firing rate → effect factor on a target). |
 | [Hormones](./Hormones.md) | RAAS/ADH controllers acting on vascular tone & fluid balance. |
 | [Kidneys](./Kidneys.md) | Renal filtration (NFP/GFR autoregulation, reabsorption, urine, per-solute mass balance). |
 | [Brain](./Brain.md) | Cerebral autoregulation (CBF control) + ICP / Monro-Kellie. |
@@ -11571,9 +10596,9 @@ The reusable physical primitives every component model is built from.
 
 | Doc | Models |
 |---|---|
-| [Breathing](./Breathing.md) | Spontaneous breathing drive; muscle pressure on the active airway inlet (MOUTH_DS or VENT_ETTUBE). |
+| [Breathing](./Breathing.md) | Spontaneous breathing drive: chemoreflex minute volume split into rate and tidal volume, muscle pressure on the thorax. |
 | [Apnea](./Apnea.md) | Apnea of prematurity: episodic ventilation suppression (central/obstructive/mixed) → emergent desaturation + hypoxic bradycardia. |
-| [Respiration](./Respiration.md) | Respiratory subsystem orchestrator (lung mechanics / gas-exchange wiring & scaling). |
+| [Respiration](./Respiration.md) | Respiratory coordinator: lung, chest-wall, airway and exchange levers, series dead space, atelectasis (recruitment, resorption). |
 | [Surfactant](./Surfactant.md) | Dynamic RDS alveolar recruitment/derecruitment with hysteresis + surfactant therapy. |
 
 ## Devices (`device_models/`)
@@ -11584,7 +10609,7 @@ The reusable physical primitives every component model is built from.
 | [Sle6000](./Sle6000.md) | SLE6000 neonatal ventilator, the ventilator of every scenario up to 30 kg: the Ventilator driven through the device's modes, settings, circuits and monitored values, with the OxyGenie closed-loop O2 controller. |
 | [Ecls](./Ecls.md) | Extracorporeal life support (ECMO): pump, oxygenator, cannulae. |
 | [Monitor](./Monitor.md) | Patient monitor; derives displayed vitals from model state. |
-| [Resuscitation](./Resuscitation.md) | Resuscitation interventions (chest compressions). |
+| [Resuscitation](./Resuscitation.md) | CPR: chest compressions and ventilation cycles. *(experimental)* |
 
 ## Engine helpers (`helpers/`)
 
@@ -11594,14 +10619,16 @@ Infrastructure that the worker attaches to the live `model` object — not physi
 |---|---|
 | [DataCollector](./DataCollector.md) | Dual-rate (fast 0.005 s / slow 1.0 s) property watchlists + sample buffers. |
 | [TaskScheduler](./TaskScheduler.md) | Deferred/tweened prop mutations and scheduled model-function calls. |
-| [ModelScaler](./ModelScaler.md) | Subsystem scaling and linear (volume-only) weight scaling; writes the `*_factor_scaling_ps` layer (the Calibrator also writes it on IPSL/IPSR) and raw volumes. |
+| [ModelScaler](./ModelScaler.md) | Group scaling (absolute factor on the `*_factor_scaling_ps` layer), volume-only weight scaling and `incorporate` (bake). The shipped scenarios are baked, so 1.0 = the scenario as loaded. |
+| [ModelRegistry](./ModelRegistry.md) | Name → class registry that lets `BaseModelClass` build built-in and custom models as sub-components. |
+| [Units](./Units.md) | Shared constants: STPD O2 conversion, gas constant, water vapour pressure. |
 | [Calibrator](./Calibrator.md) | Closed-loop calibration controllers (shared by patient-build and live `tune_model`). |
 | [ChannelWriter](./ChannelWriter.md) | Worker→main realtime producer; writes samples into shared-memory ring buffers. |
 | [RealtimeChannels](./RealtimeChannels.md) | Shared constants/layout for the realtime channel protocol. |
 | [AnimationPacker](./AnimationPacker.md) | Packs per-component animation values (magnitude/tint) into the animation channel. |
 | [RealTimeMovingAverage](./RealTimeMovingAverage.md) | O(1) rolling-average smoother for realtime signals. |
 
-## Realtime read side (`explain/realtime/`, main thread)
+## Realtime read side (`realtime/`, main thread)
 
 The main-thread mirror of the `ChannelWriter`/`RealtimeChannels`/`AnimationPacker` write side.
 
@@ -11626,7 +10653,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 | [Preterm30wkReference](./Preterm30wkReference.md) | Literature reference values for a preterm neonate born at 30 weeks (~1.5 kg) at ~72 h on nasal CPAP 5 in room air without surfactant, with a small PDA (hemodynamics, heart, flows, shunts, breathing, gases, metabolism, blood, kidneys), graded by evidence, with the balance rules and the matching JSON for validating `preterm_30wk`. |
 | [Fetus25wkReference](./Fetus25wkReference.md) | Literature reference values for a human fetus in utero at 25 weeks (0.7 kg, as preterm_25wk), not in labour, graded by evidence (gases extrapolated, ovine values marked), with the balance rules and the matching JSON for validating `fetus_25wk`. |
 | [Fetus30wkReference](./Fetus30wkReference.md) | Literature reference values for a human fetus in utero at 30 weeks (~1.5 kg), not in labour (hemodynamics, heart, flow distribution, cordocentesis gases, blood, metabolism, kidneys), graded by evidence with ovine values marked, with the balance rules and the matching JSON for validating `fetus_30wk`. |
-| [TermFetusReference](./TermFetusReference.md) | Literature reference values for a human fetus in utero at 40 weeks (3.545 kg, as term_neonate), not in labour, graded by evidence with ovine values marked, with the balance rules and the matching JSON for validating `term_fetus`. |
+| [TermFetusReference](./TermFetusReference.md) | Literature reference values for a human fetus in utero at 40 weeks (3.545 kg, as term_neonate), not in labour, graded by evidence with ovine values marked, with the balance rules and the matching JSON for validating `fetus_term`. |
 | [chd_duct_fo_dependent](./chd_duct_fo_dependent.md) | Duct- & foramen-ovale-dependent CHD taxonomy, lesion catalog, engine-lever mapping, build roadmap, bibliography. |
 
 ```
@@ -11681,6 +10708,7 @@ Re-initializes the buffer (`values`, `count`, `writeIndex`, `sum`, `currentAvera
 
 - **Changing the window means a new instance.** There is no resize method; callers compare `windowSize` and construct a fresh `RealTimeMovingAverage` when it changes (as `Ecls` does).
 - **O(1) update via incremental sum.** Float rounding can accumulate over very long runs since `sum` is maintained additively rather than recomputed; for the signal magnitudes and window sizes used here this is negligible.
+- **A NaN never leaves.** One non-finite sample makes `sum` NaN, and subtracting it again when it leaves the window keeps it NaN; only `reset()` (or a new instance) recovers. Callers feed it finite values.
 - **Self-contained.** No imports, no SharedArrayBuffer, no worker messaging — purely a numeric helper that can be used anywhere in the engine.
 
 ```
@@ -11917,211 +10945,209 @@ All are pure helpers used to compute anim-frame geometry consistently on both si
 ````markdown
 # Resistor
 
-A `Resistor` moves volume between two compartments driven by their pressure difference. It is the
-**flow element** of the circuit and the canonical implementation of the factor / effective-value
-pattern for resistances; `HeartValve` is a thin subclass, and `BloodVessel` creates `Resistor`s
-internally.
+A `Resistor` moves blood or gas between two compartments, driven by the pressure difference between them. It is the flow element of every circuit in the model (vessels, valves, airways, ventilator and ECLS tubing) and the reference implementation of the additive factor pattern for resistances.
+
+## Physiology
+
+Blood flows from high to low pressure, and how much flows depends on the *resistance* of the path: flow = pressure difference / resistance. Narrow or constricted vessels have a high resistance. Resistance in mmHg·s/L is the same quantity as SVR or PVR, only in absolute units and for one connection.
+
+Some refinements are available:
+- **Valves.** A connection can let flow through in one direction only (heart valves, venous valves), or have a higher resistance backwards than forwards.
+- **Turbulence.** Through a narrow opening (a stenotic valve, a restrictive duct) the pressure loss grows with the *square* of the flow (Bernoulli). An optional non-linear term models this.
+- **Mixing without net flow.** Between two compartments that are really one continuous space (the two halves of the right atrium, the dead space and the alveoli), blood or gas also mixes by eddies or diffusion without any net flow.
+- **Occlusion.** A connection can be closed completely (a clamped cord, an obstructed airway, a closed duct).
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Resistor          (pressure-driven flow between two compartments)
-        └── HeartValve      (+ no_back_flow valve behaviour)
+  └── Resistor
+        └── HeartValve   (no code of its own: same class under its own model_type)
 ```
 
-See [BaseModelClass.md](./BaseModelClass.md) for the lifecycle contract and shared fields.
+A valve's one-way behaviour comes from `no_back_flow: true` in its definition, not from the class. Several plain Resistors are one-way too (`RAIVCI_RV`, `RASVC_RV`, `VLB_IVCI`, `VUB_SVC`, …).
 
-## What it models
+**Vessel-owned connectors.** A [`BloodVessel`](./BloodVessel.md) creates one Resistor per entry in its `inputs`, named `<input>_<vessel>` (e.g. `PA_PAAL`). Every step the vessel writes its own effective values into that connector:
 
-Flow from `comp_from` to `comp_to`, with separate forward/backward resistances and an optional
-non-linear (turbulent) term:
+- `r_for`, `r_back`, `r_k`;
+- `no_flow`, `no_back_flow`;
+- `p1_ext`, `p2_ext`;
+- `is_enabled`.
 
-```
-ΔP = (comp_from.pres + p1_ext) − (comp_to.pres + p2_ext)
-forward  (ΔP ≥ 0):  flow = (ΔP − r_k_eff · prev_flow²) / r_for_eff
-backward (ΔP < 0):  flow = (ΔP + r_k_eff · prev_flow²) / r_back_eff     (unless no_back_flow)
-```
-
-The resistor does not store volume itself — it reads the two compartments' pressures, computes a flow,
-and hands the volume across via their `volume_out`/`volume_in` methods.
+So set those on the vessel, not on the connector: a value written on the connector is overwritten. `implicit`, `mix_flow`, `no_flow_ext` and the connector's own factor layers are **not** overwritten. In term_neonate 42 of the 75 resistors are vessel-owned and 33 stand alone (valves, shunts, airways, devices).
 
 ## Properties
 
-### Config / independent (set in the definition JSON)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `r_for` | mmHg·s/L | Forward flow resistance |
-| `r_back` | mmHg·s/L | Backward flow resistance |
-| `r_k` | mmHg·s²/L² | Non-linear (turbulent) resistance coefficient |
-| `comp_from` | string | Name of the upstream compartment |
-| `comp_to` | string | Name of the downstream compartment |
-| `no_flow` | bool | When true, block all flow (set `flow = 0` and return) |
-| `no_flow_ext` | bool | Same effect as `no_flow`, for a controller that does not own the resistor (an owning BloodVessel re-copies its own `no_flow` every step and would overwrite a gate written there; e.g. MaternalPlacenta's drainage) |
-| `no_back_flow` | bool | When true, block backward flow (valve behaviour) |
-| `p1_ext` | mmHg | External pressure added at the inlet (non-persistent; cleared each step — but see the BloodVessel note below) |
-| `p2_ext` | mmHg | External pressure added at the outlet (non-persistent; cleared each step) |
-| `fixed_composition` | bool | Passed through to the endpoints' volume handling |
-| `mix_flow` | L/s | Exchange without net flow, blood or gas (default `0` = off); see [Dispersive mixing](#dispersive-mixing--mix_flow) |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `comp_from` | – | `""` | Upstream compartment (name). Positive flow goes from here to `comp_to`. |
+| `comp_to` | – | `""` | Downstream compartment (name). |
+| `r_for` | mmHg·s/L | 1.0 | Forward resistance (flow from `comp_from` to `comp_to`). |
+| `r_back` | mmHg·s/L | 1.0 | Backward resistance. |
+| `r_k` | mmHg·s²/L² | 0.0 | Turbulent (quadratic) coefficient: an extra pressure loss `r_k·flow²`. 0 in every shipped scenario. |
+| `no_flow` | boolean | `false` | Closes the connection. |
+| `no_flow_ext` | boolean | `false` | A second, independent closing gate for a model that does not own the resistor (an owning BloodVessel rewrites `no_flow` every step). Used by `MaternalPlacenta`. |
+| `no_back_flow` | boolean | `false` | One-way connection (valve). |
+| `implicit` | boolean | `false` | Numerical scheme for stiff pairs; see [Implicit flow](#implicit-flow-implicit). |
+| `mix_flow` | L/s | 0.0 | Exchange without net flow; see [Mixing without net flow](#mixing-without-net-flow-mix_flow). |
+| `r_factor`, `r_k_factor` | – | 1.0 | Non-persistent factors, reset to 1 every step. `r_factor` scales both `r_for` and `r_back`. |
+| `r_factor_ps`, `r_k_factor_ps` | – | 1.0 | Persistent factors. |
+| `r_factor_scaling_ps`, `r_k_factor_scaling_ps` | – | 1.0 | Persistent scaling factors. |
 
-Factor inputs (all default `1.0`) — see [Factor system](#factor-system):
-`r_factor`, `r_k_factor` (non-persistent); `r_factor_ps`, `r_k_factor_ps` (persistent);
-`r_factor_scaling_ps`, `r_k_factor_scaling_ps` (scaling). Note a **single** `r_factor` layer scales
-both `r_for` and `r_back`.
+### Outputs
 
-### Computed / dependent (engine outputs)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `flow` | L/s | 0.0 | Flow this step: positive forward, negative backward, 0 when closed. |
+| `r_for_eff`, `r_back_eff` | mmHg·s/L | 1000 | Effective resistances after the factor layers (and the implicit correction). |
+| `r_k_eff` | mmHg·s²/L² | 0 | Effective turbulent coefficient. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `flow` | L/s | Current flow (positive = forward, negative = backward) |
-| `r_for_eff` | mmHg·s/L | Effective forward resistance after the factor layers |
-| `r_back_eff` | mmHg·s/L | Effective backward resistance after the factor layers |
-| `r_k_eff` | mmHg·s²/L² | Effective non-linear coefficient after the factor layers |
-| `_comp_from` / `_comp_to` | ref | Resolved references to the up/downstream compartments |
-| `_prev_flow` | L/s | Flow from the previous step (used by the non-linear term) |
+### Set by other models
 
-## Calculation cycle (`calc_model`)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `p1_ext`, `p2_ext` | mmHg | 0.0 | Extra pressure on the inlet / outlet for this step, reset to 0 after use. On a vessel-owned connector the vessel copies its own `p1_ext`/`p2_ext` every step, so a value written on the vessel acts until it is set back to 0. |
 
-Each step: resolve `_comp_from`/`_comp_to` from `model.models`, then `calc_resistance()` →
-`calc_flow()`.
+### Internal
 
-### `calc_resistance`
+| Property | Description |
+|---|---|
+| `_comp_from`, `_comp_to` | Cached references to the two compartments. Re-resolved when `comp_from`/`comp_to` change (e.g. ECLS re-cannulation) or when the engine's `_models_version` changes (bumped at every `calculate()` call and realtime tick). |
 
-```
-r_for_eff  = r_for  + (r_factor − 1)·r_for   + (r_factor_ps − 1)·r_for   + (r_factor_scaling_ps − 1)·r_for
-r_back_eff = r_back + (r_factor − 1)·r_back  + (r_factor_ps − 1)·r_back  + (r_factor_scaling_ps − 1)·r_back
-r_k_eff    = r_k    + (r_k_factor − 1)·r_k   + (r_k_factor_ps − 1)·r_k   + (r_k_factor_scaling_ps − 1)·r_k
-```
+## Calculation
 
-Then resets the non-persistent factors `r_factor` and `r_k_factor` to `1.0`.
+`calc_model()` resolves the compartment references, then runs `calc_resistance()` → `calc_flow()` → the mixing exchange.
 
-### `calc_flow`
+1. **`calc_resistance`**
+   ```
+   r_for_eff  = r_for  · (1 + (r_factor − 1) + (r_factor_ps − 1) + (r_factor_scaling_ps − 1))
+   r_back_eff = r_back · (same three layers)
+   r_k_eff    = r_k    · (1 + (r_k_factor − 1) + (r_k_factor_ps − 1) + (r_k_factor_scaling_ps − 1))
+   ```
+   `r_factor` and `r_k_factor` are reset to 1. With `implicit`, `dt·(E_from + E_to)` is added to both effective resistances.
+2. **`calc_flow`**, with `p1 = comp_from.pres + p1_ext` and `p2 = comp_to.pres + p2_ext` (then `p1_ext`/`p2_ext` are reset):
+   - closed (`no_flow` or `no_flow_ext`): `flow = 0`;
+   - `p1 ≥ p2`: forward, `flow = f(p1 − p2, r_for_eff)`;
+   - `p1 < p2` and not `no_back_flow`: backward, `flow = −f(p2 − p1, r_back_eff)`;
+   - `p1 < p2` with `no_back_flow`: `flow = 0`;
+   - a non-positive effective resistance gives `flow = 0` (guard against Infinity/NaN).
 
-1. Compute inlet/outlet pressures including the non-persistent `p1_ext`/`p2_ext`, then clear those and
-   reset `flow` to `0`. **On a resistor owned by a [BloodVessel](./BloodVessel.md)** (one of its
-   `inputs`) the clearing is moot: the vessel keeps its own `p1_ext`/`p2_ext` and copies them onto the
-   resistor every step, so a value written on the *vessel* acts as persistent until a writer sets it
-   back to 0.
-2. If `no_flow` or `no_flow_ext`, set `_prev_flow = 0` and return.
-3. Pick the direction by the sign of `ΔP` (forward if `ΔP ≥ 0`, else backward unless `no_back_flow`),
-   guard against a non-positive effective resistance, and compute `flow` with the lagged non-linear
-   term.
-4. Move the volume across:
-   - `comp_from.volume_out(flow · Δt)` returns any volume it could not supply;
-   - `comp_to.volume_in(flow · Δt − un-supplied, comp_from)` adds the rest and mixes composition.
+   `f(Δp, R)` solves `Δp = R·f + r_k·f²` exactly for this step:
 
-   This `volume_out` → `volume_in` handshake conserves volume — a resistor never creates volume from
-   an empty compartment.
-5. Store `_prev_flow = flow` (or clear it to `0` when no flow occurred — no-flow or blocked backflow)
-   so the non-linear term stays consistent next step.
+   ```
+   f = 2·Δp / (R + √(R² + 4·r_k·Δp))        (= Δp / R when r_k = 0)
+   ```
+
+   This form has no cancellation for small `r_k`. Because the loss is solved in the same step, the flow can't lag, oscillate or reverse direction.
+3. **Volume transfer** (forward; mirrored for backward flow):
+   ```
+   not_removed = comp_from.volume_out(flow·dt)
+   comp_to.volume_in(flow·dt − not_removed, comp_from)
+   ```
+   The upstream compartment returns what it could not supply, so a resistor never creates volume out of an empty compartment. `volume_in` also mixes the incoming blood or gas composition.
+4. **Mixing**: if `mix_flow > 0` and the connection is open, an equal volume is swapped both ways (see below).
 
 ## Factor system
 
-The resistances are **never used raw**. Each parameter combines three multiplier layers **additively
-against the base** into an `*_eff` value:
+`r_for`/`r_back` (one shared family) and `r_k` carry the three layers, composed **additively** (see [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern)). Writers in the current code:
 
-| Layer | Persistence | Set by |
-|---|---|---|
-| `<p>_factor` | reset to `1.0` every step | transient interventions |
-| `<p>_factor_ps` | persistent | user / scenario / regulator models (ANS, Circulation…) |
-| `<p>_factor_scaling_ps` | persistent | `ModelScaler` (allometric/weight scaling) |
+| Layer | Writers |
+|---|---|
+| `r_factor` (reset every step) | `Respiration` (airways), `Uterus`, `Heart` (`AA_COR`, systolic coronary resistance) |
+| `r_factor_ps` | `Circulation`, `Brain`, `Kidneys`, `Hormones`, `Respiration`, `Surfactant`, the `Calibrator`; the user and scenarios via `setPropValue` |
+| `r_factor_scaling_ps` | `ModelScaler`; the `Calibrator` (PAP lever on `IPSL`/`IPSR`); `Uterus`, `MaternalPlacenta` |
 
-```
-p_eff = p + (factor − 1)·p + (factor_ps − 1)·p + (factor_scaling_ps − 1)·p
-```
+The factors of a vessel-owned connector multiply on top of the vessel's own effective resistance, which the vessel already composes from its own layers.
 
-`r_factor` / `r_factor_ps` / `r_factor_scaling_ps` apply identically to both `r_for` and `r_back`;
-`r_k` has its own `r_k_factor` family. This is the same pattern as [`Capacitance`](./Capacitance.md).
+## Inputs and outputs
 
-## Notes
+- **Reads:** `pres` of `comp_from` and `comp_to`; their elastances (`el_eff`, or `el_min_eff`/`el_max_eff`/`act_factor`) when `implicit`.
+- **Writes:** the volume of both compartments (`volume_out`/`volume_in`); their composition through `volume_in` and the mixing exchange.
+- **Written by:** an owning `BloodVessel` (see [Inheritance](#inheritance)); `Shunts`, `Pda`, `Placenta`, `MaternalPlacenta`, `Respiration`, `Apnea` and the devices (`no_flow`, resistances); the factor writers above.
+- **Read by:** `Heart` (the mitral and aortic flows mark end-diastole and end-systole), `Mob` (`AA_COR` coronary flow), `Monitor` (its `flow_targets` read-outs), `DataCollector` watchers (the UI's flow charts).
 
-- **Non-linear term.** It reads `_prev_flow`, not the just-reset `flow` — an explicit lagged scheme; at
-  steady state `prev_flow == flow`. (An earlier version used the zeroed `flow`, so `r_k` was inert.)
-- **Resistance guard.** A non-positive effective resistance is skipped (no flow) to avoid an
-  Infinity/NaN flow.
-- `r_k` is `0` in the standard scenarios, so the linear Poiseuille term dominates; the non-linear term
-  is available for turbulent/stenotic elements.
+## Assumptions and limitations
 
-## Example definition (JSON)
+- **Resistive, not inertial.** There is no inertance: flow responds instantly to the pressure difference. Flow waveforms are shaped only by the compartments' elastances and the resistances.
+- **Laminar unless `r_k` is set.** Every shipped resistor is linear (`r_k = 0`). The duct and septal shunts compute their orifice losses separately (see [Pda](./Pda.md), [Shunts](./Shunts.md), `helpers/Orifice.js`).
+- **Valves are ideal switches.** A `no_back_flow` connection closes instantly at zero pressure difference. There is no valve leaflet dynamics and no regurgitation unless `no_back_flow` is false with a finite `r_back`.
+- **Explicit volume update.** See [Implicit flow](#implicit-flow-implicit) for when that matters.
 
-```json
-{
-  "name": "PA_PAAL",
-  "description": "input connector for PAAL",
-  "model_type": "Resistor",
-  "is_enabled": true,
-  "r_for": 1493.7,
-  "r_back": 1493.7,
-  "r_k": 0,
-  "comp_from": "PA",
-  "comp_to": "PAAL",
-  "no_flow": false,
-  "no_back_flow": false,
-  "p1_ext": 0,
-  "p2_ext": 0,
-  "fixed_composition": false
-}
-```
+## Implicit flow (`implicit`)
 
-## Usage in the model
+`implicit` switches one resistor from the explicit `Δp / R` to the backward-Euler solution for the two compartments it joins, `Δp / (R + dt·(E_from + E_to))`. It does this by adding `dt·(E_from + E_to)` to `r_for_eff`/`r_back_eff` each step. `E` is the compartment's current **local** elastance: `el_eff`, or a time-varying elastance's instantaneous value, plus the slope `2·el_k_eff·S` of the non-linear term above the unstressed volume (for a time-varying elastance on its diastolic curve). It is a numerical scheme, not a change of the resistor law. Both forms are first-order accurate and agree when `R >> dt·ΣE`.
 
-- Every connection that carries flow between two compartments is a `Resistor` (a typical neonate
-  scenario has ~40 of them wiring the circuit together by `comp_from`/`comp_to`).
-- Set `no_back_flow` for valve-like behaviour (or use `HeartValve`).
-- `r_factor_ps` is the standard lever for vasoconstriction/dilation (PVR/SVR adjustments by ANS and
-  scenario tuning); `r_factor_scaling_ps` is written by `ModelScaler` for weight-based scaling.
+Explicit integration of two capacitances joined by a small resistance is stable only while `dt·(E_from + E_to)/R < 2`. For three equal capacitances in a row, as in the aorta (AA → AAR → AD, joined by `AA_AAR` and `AAR_AD`, R ≈ 70 mmHg·s/L), the limit is 4/3. Stiffening the large arteries, which a small infant's pulse pressure needs, crosses that limit at about ×2–3. Measured on the 0.72 kg Bischoff infant (AA pressure range, mmHg):
 
-## Implicit (backward-Euler) flow — `implicit`
-
-`implicit` (default `false`) switches the flow of one resistor from the explicit `Δp / R` to the
-backward-Euler solution for the two compartments it joins, `Δp / (R + dt·(E_from + E_to))`, by
-adding `dt·(E_from + E_to)` to `r_for_eff` / `r_back_eff` each step (`E` = the compartment's current
-`el_eff`, or a time-varying elastance's instantaneous value). It is a numerical scheme, not a
-change of the resistor law: both forms are first-order accurate and agree when `R >> dt·ΣE`.
-
-Why it exists: explicit integration of two capacitances joined by a small resistance is stable
-only while `dt·(E_from + E_to)/R < 2`, and for three equal capacitances in a row (the aorta AA →
-AAR → AD, joined by `AA_AAR`, `AAR_AD`, R ≈ 70 mmHg·s/L) only below 4/3. Stiffening the large
-arteries, which a small infant's pulse pressure needs, crosses that limit at about ×2–3. Measured
-on the 0.72 kg Bischoff infant (AA pressure range, mmHg):
-
-| stiffness | explicit | implicit `AA_AAR`, `AAR_AD` | explicit, half time step |
+| Arterial stiffness | Explicit | Implicit `AA_AAR`, `AAR_AD` | Explicit, half time step |
 |---|---|---|---|
 | ×1.8 | 23.6–35.7 | 23.6–35.8 | 23.7–35.7 |
 | ×3 | unstable | 21.4–39.8 | 21.5–39.6 |
 | ×5 | unstable | 18.4–44.7 | 18.2–44.4 |
 
-The patient builder and the live tuner set it on `AA_AAR` and `AAR_AD`; bundled scenarios do not
-(yet), so their numbers are unchanged.
+All 10 shipped scenarios set it on 13 resistors: the outflow valves (`LV_AA`, `RV_AA`), the aortic chain (`AA_AAR`, `AAR_AD`) and the aortic branches (`AA_COR`, `AA_BR_ART`, `AA_RUB`, `AAR_DA`, `AD_LS_ART`, `AD_KID_ART`, `AD_INT_ART`, `AD_RLB`, `AD_PL_UMB_ART`). The 8 scenarios with quadratic heart chambers also set it on `RAIVCI_RASVC`, the low-resistance (13 mmHg·s/L) link between the two right-atrial halves: their stiffness grows with filling, and the explicit scheme then flipped the flow's sign every step. The patient builder and the live tuner set it the same way on the aorta.
 
-## Dispersive mixing — `mix_flow`
+## Mixing without net flow (`mix_flow`)
 
-Flow through a resistor carries upstream blood downstream (advection). Between two compartments that are
-really one continuous pool — the two halves of the right atrium, say — real blood also mixes by eddies
-and vortex flow, even when the net and oscillating flow between them is close to zero. Molecular
-diffusion cannot stand in for it (O2 needs minutes to diffuse a millimetre).
+Flow carries upstream blood downstream (advection). Between two compartments that are really one continuous pool, blood also mixes by eddies and vortex flow, even when the net flow between them is close to zero. Molecular diffusion can't stand in for that: O2 needs minutes to diffuse a millimetre.
 
-`mix_flow` (L/s) adds that exchange. Each step an equal volume `dv = mix_flow · dt` is swapped both
-ways, with no net volume, using the pre-exchange concentrations
-([`helpers/BloodMixing.js`](../helpers/BloodMixing.js) `exchange_blood`):
+`mix_flow` (L/s) adds that exchange. Each step an equal volume `dv = mix_flow·dt` is swapped both ways, with no net volume change, using the pre-exchange concentrations:
 
 ```
-c_a += (c_b − c_a) · dv / V_a        c_b += (c_a − c_b) · dv / V_b
+c_a += (c_b − c_a)·dv / V_a        c_b += (c_a − c_b)·dv / V_b
 ```
 
-so `c_a·V_a + c_b·V_b` is conserved for to2, tco2, every solute and drug and temperature (viscosity follows the haemoglobin).
-`dv` is clamped to half the smaller volume; a `fixed_composition` end keeps its composition, and a
-`no_flow` connection does not exchange. It acts only when both ends carry blood (`to2`), and only on
-a plain `Resistor`/`HeartValve` (a `BloodVessel` overrides `calc_model`). The equilibration time
-constant between the two compartments is about `V_a·V_b / ((V_a + V_b) · mix_flow)`.
+So `c_a·V_a + c_b·V_b` is conserved:
+- **Blood:** for `to2`, `tco2`, every solute and drug, and temperature ([`helpers/BloodMixing.js`](../helpers/BloodMixing.js) `exchange_blood`). Viscosity follows the haemoglobin.
+- **Gas:** for the five species O2, CO2, N2, H2O and other ([`helpers/GasMixing.js`](../helpers/GasMixing.js) `exchange_gas`). This stands for molecular diffusion and cardiogenic mixing at the airway–alveolus junction, which go on without flow (in apnoea). It uses the composition at the connecting ends, so a series dead space exchanges through its distal sub-tank.
 
-**Gas.** Between two gas compartments the same swap runs on the five species (O2, CO2, N2, H2O,
-other) by [`helpers/GasMixing.js`](../helpers/GasMixing.js) `exchange_gas`. It stands for molecular
-diffusion and cardiogenic mixing at the airway–alveolus junction, which go on without flow (in
-apnoea). It uses the composition at the connecting ends, so a series dead space exchanges through its
-distal sub-tank, not its bulk.
+Further rules:
+- `dv` is clamped to half the smaller volume.
+- A `fixed_composition` end keeps its composition.
+- A closed connection doesn't exchange.
+- The equilibration time constant is about `V_a·V_b / ((V_a + V_b)·mix_flow)`.
 
+Shipped values (all 10 scenarios): `RAIVCI_RASVC` 0.01 L/s (right-atrial halves), `DS_ALL` and `DS_ALR` 0.001 L/s (dead space to alveoli).
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Circulation.components.PV_LA` (trimmed). The pulmonary venous inflow to the left atrium has a backward resistance 10× the forward one:
+
+```json
+{
+  "name": "PV_LA",
+  "model_type": "Resistor",
+  "is_enabled": true,
+  "comp_from": "PV",
+  "comp_to": "LA",
+  "r_for": 204.8,
+  "r_back": 2048.4,
+  "r_k": 0,
+  "no_flow": false,
+  "no_back_flow": false,
+  "implicit": false,
+  "mix_flow": 0
+}
+```
+
+## Usage in the scenarios
+
+Term_neonate has 75: 70 `Resistor` and 5 `HeartValve` (`LA_LV`, `RV_PA`, `RV_AA`, `LV_AA`, `LV_PA`; each `r_for` 55, one-way).
+
+- **Vessel-owned (42):** the connector into every `BloodVessel`.
+- **Stand-alone (33):**
+  - heart inflow (`RAIVCI_RV`, `RASVC_RV`, `PV_LA`, `IVCI_RAIVCI`, `SVC_RASVC`) and the valves;
+  - shunts (`AAR_DA`, `LA_RAIVCI`, `LA_RASVC`, `VSD`, `IPSL`, `IPSR`, `RAIVCI_RASVC`);
+  - coronaries (`AA_COR`, `COR_RAIVCI`, `COR_RASVC`);
+  - airways (`MOUTH_DS`, `DS_ALL`, `DS_ALR`);
+  - ventilator and ECLS circuit connections;
+  - the umbilical vein (`PL_UMB_VEN_IVCI`).
+
+## References
+
+No literature-derived values in this class. The resistances are scenario parameters (see the `*Reference.md` pages). The quadratic loss is the standard Bernoulli form (Δp ∝ Q²); the shipped orifice coefficients live in `helpers/Orifice.js`.
 
 ````
 
@@ -12130,130 +11156,89 @@ distal sub-tank, not its bulk.
 ````markdown
 # Respiration
 
-`Respiration` is a **coordinator**, not a physical compartment (the same pattern as
-[Circulation](./Circulation.md)). It groups the models of the respiratory tract by name and applies
-whole-system adjustments to their elastance, resistance and gas-exchange factors. It owns no volume,
-pressure or flow of its own.
+`Respiration` coordinates the respiratory system; it holds no gas itself. It groups the airway, lung, thorax and gas-exchange models by name and gives them system-wide levers: lung and chest-wall stiffness, upper and lower airway resistance, and gas-exchange capacity. It configures the airway dead space as a series (plug-flow) dead space, and it owns **atelectasis**: collapse of part of a lung, its recruitment and derecruitment with pressure, and resorption collapse behind a blocked bronchus.
 
-It is the *mechanical/structural* counterpart to [Breathing](./Breathing.md): `Breathing` generates
-the breath effort, while `Respiration` sets the lung/thorax stiffness, airway resistance and
-gas-exchange efficiency that the breath acts against.
+## Physiology
+
+The respiratory system is the airways (upper: nose, larynx, trachea; lower: bronchi down to the alveolar ducts), the lungs, and the chest wall around them. Disease acts on a few properties at once:
+- **compliance:** stiff lungs in RDS, a stiff or floppy chest wall;
+- **resistance:** bronchospasm, secretions, a narrow tube;
+- **exchange surface:** lost alveoli, oedema.
+
+**Atelectasis** is collapse of alveoli. A collapsed region loses its gas volume, its share of the lung's compliance and its exchange surface, but its blood keeps flowing past without picking up oxygen: an intrapulmonary shunt, partly limited by hypoxic pulmonary vasoconstriction. Collapsed units reopen above an *opening pressure* (a recruitment manoeuvre, a sustained inflation) and close again below a lower *closing pressure*. That hysteresis is why PEEP keeps a recruited lung open. Behind a blocked bronchus (mucus plug, a tube in the other main bronchus) the trapped gas is absorbed into the blood and the lung collapses: fast if the gas was oxygen, slowly if it was air, because nitrogen dissolves poorly.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Respiration   (group coordinator — no physics of its own)
+  └── Respiration
 ```
-
-Extends `BaseModelClass` directly; `calc_model()` iterates over named members and writes onto their
-persistent factor layers rather than computing any physics itself.
-
-## What it models
-
-A single set of system-wide multipliers over the respiratory tree:
-
-- **Lung / chest-wall stiffness** — `el_lungs_factor`, `el_thorax_factor`.
-- **Airway resistance** — `res_upper_airways_factor`, `res_lower_airways_factor`.
-- **Gas-exchange efficiency** — `gex_factor` (drives both O₂ and CO₂ diffusion).
-- **Atelectasis** — `atelectasis_left`, `atelectasis_right`: the collapsed fraction of each lung (see
-  [Atelectasis](#atelectasis)).
-
-Each multiplier is translated into a **delta** on the corresponding `*_factor_ps` of the grouped
-models, so it composes additively with other writers of that persistent layer.
 
 ## Properties
 
-### Group lists (set in the model definition)
+### Config: groups (names of models)
 
-| List | Default members | Role |
+| Property | Scenario value | Used by |
 |---|---|---|
-| `upper_airways` | `["MOUTH_DS"]` | mouth → dead-space resistor |
-| `lower_airways` (`_left`/`_right`) | `["DS_ALL", "DS_ALR"]` | dead-space → alveolar resistors |
-| `dead_space` | `["DS"]` | conducting-airway gas compartment |
-| `thorax` | `["THORAX"]` | chest-wall container |
-| `lungs` (`left_lung`/`right_lung`) | `["ALL", "ALR"]` | alveolar gas compartments |
-| `gas_exchangers` (`_left`/`_right`) | `["GASEX_LL", "GASEX_RL"]` | blood↔gas exchangers |
-| `pleural_space_left`/`_right` | `[]` | reserved (declared, not driven) |
-| `intrapulmonary_shunt` | `["IPS"]` (scenarios override, e.g. `["IPSL","IPSR"]`) | reserved (declared, not driven) |
+| `upper_airways` | `["MOUTH_DS"]` | `res_upper_airways_factor` |
+| `lower_airways` | `["DS_ALL", "DS_ALR"]` | `res_lower_airways_factor` |
+| `lower_airways_left`, `lower_airways_right` | `["DS_ALL"]`, `["DS_ALR"]` | bronchus obstruction |
+| `dead_space` | `["DS"]` | series dead space |
+| `thorax` | `["THORAX"]` | `el_thorax_factor` |
+| `lungs`, `left_lung`, `right_lung` | `["ALL", "ALR"]`, `["ALL"]`, `["ALR"]` | `el_lungs_factor`; atelectasis; the dead space's distal end |
+| `gas_exchangers`, `gas_exchanger_left_lung`, `gas_exchanger_right_lung` | `GASEX_LL`, `GASEX_RL` | `gex_factor`; atelectasis |
+| `intrapulmonary_shunt_left`, `intrapulmonary_shunt_right` | `["IPSL"]`, `["IPSR"]` | atelectasis perfusion |
+| `pulmonary_capillaries_left`, `pulmonary_capillaries_right` | `xL_ART_xL_CAP`, `xL_CAP_xL_VEN` | atelectasis perfusion |
 
-> Note: older definitions store this list under the misspelled key `gas_echangers`; `init_model`
-> maps it onto `gas_exchangers`.
+Older (archived) scenarios spell `gas_exchangers` as `gas_echangers`; `init_model` accepts it.
 
-### Factor inputs (set in the model definition)
+### Config: system levers
 
-| Property | Default | Method | Drives |
-|---|---|---|---|
-| `el_lungs_factor` | `1.0` | `set_el_lung_factor` | `el_base_factor_ps` on the lungs |
-| `el_thorax_factor` | `1.0` | `set_el_thorax_factor` | `el_base_factor_ps` on the thorax |
-| `res_upper_airways_factor` | `1.0` | `set_upper_airway_resistance` | `r_factor_ps` on the upper airways |
-| `res_lower_airways_factor` | `1.0` | `set_lower_airway_resistance` | `r_factor_ps` on the lower airways |
-| `gex_factor` | `1.0` | `set_gasexchange` | `dif_o2_factor_ps` **and** `dif_co2_factor_ps` on the exchangers |
+Multipliers around 1; a change is added as a delta to the members' persistent layer (see [Calculation](#calculation)).
 
-### Atelectasis inputs
-
-| Property | Default | Method | Drives |
-|---|---|---|---|
-| `atelectasis_left` / `_right` | `0.0` | `set_atelectasis_left` / `_right` | collapsed fraction of that lung, clamped `0..atelectasis_max` |
-| `atelectasis_max` | `0.9` | — | upper clamp (a fully collapsed lung has no aerated volume left to scale) |
-| `atelectasis_hpv` | `0.3` | — | share of the collapsed units' perfusion that hypoxic pulmonary vasoconstriction removes from the lung |
-| `atelectasis_recruitable` | `true` | — | pressure reopens and re-collapses the affected units; `false` = obstructive/resorption atelectasis |
-| `atelectasis_open_pressure` / `_open_sd` | `25` / `3` cmH₂O | — | opening pressures of the collapsed units (normal distribution, on the distending pressure) |
-| `atelectasis_close_pressure` / `_close_sd` | `8.5` / `1.5` cmH₂O | — | closing pressures of the affected units |
-| `atelectasis_tau_open` / `_tau_close` | `3` / `30` s | — | recruitment and derecruitment time constants |
-| `intrapulmonary_shunt_left` / `_right` | `["IPSL"]` / `["IPSR"]` | — | the lung's shunt resistors (art → ven) |
-| `pulmonary_capillaries_left` / `_right` | `["LL_ART_LL_CAP", "LL_CAP_LL_VEN"]` / `["RL_…"]` | — | the lung's gas-exchanging path, in series |
-
-### Series dead space (pushed to the `dead_space` compartments every update)
-
-| Property | Default | Drives |
+| Property | Default | Acts on |
 |---|---|---|
-| `dead_space_segments` | `32` | `series_segments` on each dead-space compartment (1 = classic well-mixed) |
-| `dead_space_dispersion` | `0.015` | `dispersion_coeff` (axial dispersion between the sub-tanks) |
-| `dead_space_diffusion` | `0` | `diffusion_rate` (L/s per interface: molecular diffusion along the dead space, also without flow) |
+| `el_lungs_factor` | 1.0 | lungs' `el_base_factor_ps` |
+| `el_thorax_factor` | 1.0 | thorax's `el_base_factor_ps` |
+| `res_upper_airways_factor` | 1.0 | upper airways' `r_factor_ps` |
+| `res_lower_airways_factor` | 1.0 | lower airways' `r_factor_ps` |
+| `gex_factor` | 1.0 | gas exchangers' `dif_o2_factor_ps` and `dif_co2_factor_ps` |
 
-Each update the loop also sets the dead space's `distal_models` to `lungs`, so gas leaves towards the
-alveoli from the distal end of the chain. See
-[GasCapacitance → Series dead space](./GasCapacitance.md#series-dead-space) for the model and its
-calibration.
+### Config: series dead space
 
-### Local (internal)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `dead_space_segments` | – | 32 | Composition sub-tanks of the dead space (1 = well mixed). |
+| `dead_space_dispersion` | – | 0.015 | Axial dispersion coefficient. |
+| `dead_space_diffusion` | L/s per interface | 0 | Molecular diffusion along the dead space; scenarios 1e-5. |
 
-`_update_interval` (0.015 s) / `_update_counter` throttle the loop; `_prev_*` shadow each factor so a
-change can be detected and applied as a delta.
+Written onto every `dead_space` compartment each update, with `distal_models = lungs` (see [GasCapacitance → Series dead space](./GasCapacitance.md#series-dead-space)).
 
-## Calculation cycle (`calc_model`)
+### Config: atelectasis
 
-One throttled loop (every 0.015 s). It first pushes the series-dead-space configuration onto the
-`dead_space` compartments (cheap, and keeps it live-editable). It then applies each factor **only when
-it changed** (guarded by a `_prev_*` comparison). Each changed input calls its `set_*` method, then stores the new value into
-`_prev_*`.
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `atelectasis_left`, `atelectasis_right` | fraction | 0 | Collapsed fraction of each lung (clamped to `atelectasis_max`). Setting it also defines the unstable region. |
+| `atelectasis_max` | fraction | 0.9 | Upper limit. |
+| `atelectasis_hpv` | fraction | 0.3 | Share of the collapsed units' blood that hypoxic vasoconstriction diverts away from the lung. |
+| `atelectasis_recruitable` | boolean | true | Pressure can reopen collapsed units. Off = obstructive/resorption atelectasis. |
+| `atelectasis_open_pressure`, `atelectasis_open_sd` | cmH2O | 25, 3 | Opening pressures (normal distribution). |
+| `atelectasis_close_pressure`, `atelectasis_close_sd` | cmH2O | 8.5, 1.5 | Closing pressures. |
+| `atelectasis_tau_open`, `atelectasis_tau_close` | s | 3, 30 | Recruitment and derecruitment time constants. |
+| `airway_obstructed_left`, `airway_obstructed_right` | boolean | false | A plug in the main bronchus. |
+| `atelectasis_resorb_tau_air`, `atelectasis_resorb_tau_o2` | s | 1800, 240 | Resorption time constant with trapped air and trapped oxygen. |
 
-## The `set_*` methods — delta application
+## Calculation
 
-Every target is a **persistent** factor (`*_factor_ps`) that accumulates contributions from several
-models, so `Respiration` applies the **delta** since its last call, not the absolute value:
+**Every step:** while a lung has atelectasis, its perfusion split is rewritten on the non-persistent `r_factor` of its shunt and capillary resistors (see [Atelectasis](#atelectasis)).
 
-```
-delta = new_factor − prev_factor
-for each model in the group:  factor_ps += delta   (clamped at 0)
-this.<factor> := new_factor          (prev_factor stored by calc_model after the call)
-```
+**Every 15 ms:**
+1. The series dead-space settings are pushed to the dead-space compartments.
+2. Each lever that changed since the last update is applied by its setter: the change `new − previous` is added to the members' persistent layer, clamped at 0. Several models share these layers, so Respiration only ever adds its own change. A set-and-clear round trip restores the start values.
+3. Changed atelectasis or obstruction settings are applied.
+4. Per lung: an obstructed lung resorbs; an open lung with an unstable region recruits or derecruits with its distending pressure.
 
-The delta is computed **once** so every model in the group gets the same change, and each factor is
-clamped at 0 (negative elastance/resistance/diffusion factors are non-physical). `set_gasexchange`
-applies the delta to both the O₂ and CO₂ diffusion factors, clamping each independently.
-
-## Factor system
-
-`Respiration` does not itself carry the three-tier `_factor`/`_factor_ps`/`_factor_scaling_ps` pattern
-(it has no base physics param). Instead it is one of the *writers* of the **persistent** `*_factor_ps`
-tier on the grouped models: `el_base_factor_ps` (lungs/thorax), `r_factor_ps` (airways) and
-`dif_o2/co2_factor_ps` (exchangers). It never touches the non-persistent (`_factor`) or scaling
-(`_factor_scaling_ps`) tiers — those belong to transient interventions and `ModelScaler` respectively.
-
-All factor inputs default to 1.0 (no effect). Disease scenarios raise lung/airway factors (e.g. RDS →
-stiff lungs, bronchospasm → high lower-airway resistance) or lower `gex_factor` (impaired diffusion).
+The setters (`set_el_lung_factor`, `set_el_thorax_factor`, `set_upper_airway_resistance`, `set_lower_airway_resistance`, `set_gasexchange`, `set_atelectasis_left/right`, `set_airway_obstructed_left/right`) can also be called directly; each records its new value, so a change is applied once either way. `set_tube_block(side, state)` is called by the Ventilator.
 
 ## Atelectasis
 
@@ -12290,7 +11275,7 @@ Each shunt resistor is scaled by `G_ips / (s'·G_tot')` and each capillary resis
 set from conductance ratios, the shunt share does not depend on the scenario's `Shunts.ips_res`
 (preterm 1600–4200, term 5000). With `c = 0` nothing is written.
 
-On `term_neonate`, right lung, room air (`scripts/probe_atelectasis.mjs`):
+On `term_neonate`, right lung, room air (`scripts/probe_atelectasis.mjs`, measured when atelectasis was introduced, 2026-10):
 
 | c | SaO₂ | PaO₂ | lung Qs | Qs/Qt | ALR ml | CMV 20/5: Vte | C (ml/mbar) |
 |---|---|---|---|---|---|---|---|
@@ -12344,7 +11329,7 @@ re-collapses most of it.
 The opening pressure is 25 cmH₂O (sd 3), the range of a neonatal sustained inflation. CMV 20/5
 recruits only a little (its peak sits in the tail), while PIP 28 or a sigh of 27 mbar opens most of it.
 
-Trace on `term_neonate`, right lung, set to 0.6 on SLE CMV 20/5 (`scripts/probe_atelectasis.mjs`):
+Trace on `term_neonate`, right lung, set to 0.6 on SLE CMV 20/5 (`scripts/probe_atelectasis.mjs`, 2026-10):
 
 | phase | c | SaO₂ | lung Qs | ALR ml |
 |---|---|---|---|---|
@@ -12392,54 +11377,62 @@ On term_neonate with a right-mainstem tube on CMV 20/5, the left lung's collapse
 0.26 on air and 0.67 on oxygen. A right bronchial plug in a spontaneously breathing baby takes SaO₂
 from 96 to 76 % in 5 minutes.
 
+## Factor system
+
+None of its own. It writes:
+
+| Target | Layer |
+|---|---|
+| lungs, thorax | `el_base_factor_ps` (levers, atelectasis); lungs' `u_vol_factor_ps` (atelectasis) |
+| airways | `r_factor_ps` (levers); `no_flow` (obstruction) |
+| gas exchangers | `dif_o2_factor_ps`, `dif_co2_factor_ps` (`gex_factor`, atelectasis) |
+| shunt and capillary resistors | `r_factor`, every step while there is atelectasis |
+
+## Inputs and outputs
+
+- **Reads:** the lungs' `pres_in`, `fo2`, `vol`, `u_vol_eff`, `el_eff`; the resistors' layers.
+- **Writes:** the layers above; the dead space's series settings; trapped-lung volume (`volume_out`) during resorption.
+- **Written by:** the user and bot (levers, atelectasis, plugs); the [Ventilator](./Ventilator.md#airway-events) (`set_tube_block`); scenario generators (`el_lungs_factor`, `gex_factor`).
+- **Read by:** `DataCollector` watchers and the probes (`atelectasis_left/right`).
+
+## Assumptions and limitations
+
+- **Levers add.** The persistent layers are shared, so simultaneous writers add their changes. A layer driven to the 0 clamp loses the part of the change below 0.
+- **Membership is by name.** Only models named in the lists are affected.
+- **Atelectasis is per lung, not regional,** and calibrated on the term lung. In preterm lungs, [Surfactant](./Surfactant.md)'s own whole-lung recruitment runs in parallel; their effects add.
+- **The perfusion split assumes the shunt and capillary paths share one pressure drop** (`xL_ART` → `xL_VEN`).
+
 ## Example definition (JSON)
 
-From `term_neonate.json`:
+From `term_neonate.json`, `models.Respiration` (trimmed: groups and atelectasis defaults left out):
 
 ```json
 {
   "name": "Respiration",
-  "description": "high level respiration model",
   "model_type": "Respiration",
   "is_enabled": true,
-  "upper_airways": ["MOUTH_DS"],
-  "lower_airways": ["DS_ALL", "DS_ALR"],
-  "lower_airways_left": ["DS_ALL"],
-  "lower_airways_right": ["DS_ALR"],
-  "dead_space": ["DS"],
-  "thorax": ["THORAX"],
   "lungs": ["ALL", "ALR"],
-  "left_lung": ["ALL"],
-  "right_lung": ["ALR"],
-  "gas_exchangers": ["GASEX_LL", "GASEX_RL"],
-  "intrapulmonary_shunt": ["IPSL", "IPSR"],
-  "el_lungs_factor": 1.0,
-  "el_thorax_factor": 1.0,
-  "res_upper_airways_factor": 1.0,
-  "res_lower_airways_factor": 1.0,
-  "gex_factor": 1.0
+  "thorax": ["THORAX"],
+  "el_lungs_factor": 1,
+  "el_thorax_factor": 1,
+  "res_upper_airways_factor": 1,
+  "res_lower_airways_factor": 1,
+  "gex_factor": 1,
+  "dead_space_segments": 32,
+  "dead_space_dispersion": 0.015,
+  "dead_space_diffusion": 1e-5,
+  "atelectasis_left": 0,
+  "atelectasis_right": 0
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- Disease models (RDS / surfactant, CDH, bronchospasm) set `el_lungs_factor`,
-  `res_lower_airways_factor` or `gex_factor` to impose stiff lungs, narrowed airways or impaired
-  diffusion without touching the individual compartment definitions.
-- Because the targets are the shared `*_factor_ps` layer, Respiration composes with whatever the
-  surfactant/recruitment model or `ModelScaler` is doing to the same compartments.
-- It is the structural partner of [Breathing](./Breathing.md) (effort generator) and the respiratory
-  analogue of [Circulation](./Circulation.md) (vascular-tree coordinator).
+One instance in every scenario, owning `MOUTH`, `DS`, `ALL`, `ALR`, `THORAX`, `GASEX_LL` and `GASEX_RL`. All ten scenarios use the defaults above for every lever (1) and for atelectasis (0); disease in the preterm and Bischoff scenarios is carried by the compartments' own values and by Surfactant (enabled there).
 
-## Notes & caveats
+## References
 
-- **Factors are cumulative and shared.** `*_factor_ps` is written by several models; `Respiration`
-  only adds its delta. A factor driven to the 0 clamp stops tracking further decreases until the
-  target rises again — inherent to the per-model persistent-factor scheme.
-- **Side- and space-specific lists.** The `left_lung`/`right_lung` and
-  `gas_exchanger_left_lung`/`_right_lung` lists are used by atelectasis; `pleural_space_left/right`,
-  `intrapulmonary_shunt` and the `_left`/`_right` airway lists are declared but not used by any method.
-- **Group membership is name-based** — a model is only affected if its name is in the relevant list.
+- Hickling KG. The pressure-volume curve is greatly modified by recruitment: a mathematical model of ARDS lungs. *Am J Respir Crit Care Med* 1998;158:194–202. doi:10.1164/ajrccm.158.1.9708049 (normally distributed opening and closing pressures).
 
 ````
 
@@ -12453,6 +11446,12 @@ ventilations, in the standard compression/ventilation cycles. It is a **coordina
 sinusoidal compression-pressure waveform and applies it to the circulation as an external pressure,
 and it commands the [`Ventilator`](./Ventilator.md) and [`Breathing`](./Breathing.md) models to
 deliver (or suppress) breaths.
+
+> **Experimental in the app:** the Resuscitation panel is hidden as unfinished; the model and its probe work.
+
+## Physiology
+
+In neonatal cardiac arrest (or a heart rate below 60/min despite effective ventilation) chest compressions are given at a 3:1 ratio with ventilation (90 compressions and 30 breaths a minute), or continuously with asynchronous ventilation once the airway is secured. Compressions squeeze the heart and the great vessels between sternum and spine and raise the intrathoracic pressure, driving blood forward; the valves keep it from flowing back. Effective CPR produces a fraction of the normal cardiac output, enough to perfuse the heart and brain while the cause is treated.
 
 ## Inheritance
 
@@ -12497,6 +11496,7 @@ BaseModelClass
 | Property | Unit | Description |
 |---|---|---|
 | `chest_comp_pres` | mmHg | Current compression pressure (the waveform value) |
+| `vent_settings_saved` | object or null | The ventilator settings CPR replaced (mode, pressures, rate, Ti, flow, synchronisation, trigger, FiO2), restored when CPR stops. Saved with the state, so the restore also works after a reload. |
 
 ### Internal (`_`-prefixed)
 
@@ -12573,7 +11573,7 @@ compartment type reads (blood vessels, heart chambers, the thorax `Container`, g
 is added (`+=`) so it composes with other external pressures and is consumed + reset by each
 compartment's `calc_pressure` every step.
 
-> Previously the force was written to `pres_cc`, which only `GasCapacitance` and `BloodPump` read — so
+> Previously the force was written to `pres_cc`, which only `GasCapacitance` (and the since-removed `BloodPump`) read — so
 > the compressions reached the lungs but **not** the heart chambers or vessels, and generated no
 > circulation. Writing `pres_ext` makes compressions actually drive forward flow. Because `pres_ext`
 > is reset each step, a compression can lag a given compartment by at most one step depending on model
@@ -12629,6 +11629,13 @@ From `term_neonate.json`:
 
 `cpr_enabled: false` is the resting state — CPR is started at runtime with `switch_cpr(true)`.
 
+## Inputs and outputs
+
+- **Reads:** the target compartments (names), `Ventilator.insp_flow`.
+- **Writes:** `pres_ext` of the `chest_comp_targets`; the Ventilator (`switch_ventilator`, `set_pc`, `set_fio2`, `vent_rate`, `synchronized`, `trigger_breath`); `Breathing.switch_breathing(false)`.
+- **Written by:** the user and bot (`switch_cpr`, the CPR settings).
+- **Read by:** `DataCollector` watchers.
+
 ## Usage in the model
 
 - One `Resuscitation` per scenario, enabled but with `cpr_enabled: false` at rest. Start CPR with
@@ -12637,7 +11644,10 @@ From `term_neonate.json`:
 - Compression force reaches the circulation through `pres_ext` on the targeted compartments, driving
   forward flow during arrest.
 
-## Notes & caveats
+## Assumptions and limitations
+
+- **Compressions are a pressure waveform, not a force on a chest model:** each target compartment gets a fixed fraction of the compression pressure. No thoracic pump versus cardiac pump distinction, no chest recoil or compression depth.
+- **The default ratio is 15:2** (`chest_comp_no` 15, `vent_no` 2), the paediatric two-rescuer ratio; the neonatal 3:1 ratio is set with `chest_comp_no` 3 and `vent_no` 1.
 
 - **Requires `Ventilator` and `Breathing`.** Both are resolved at init; all calls are null-guarded, so
   a missing ventilator no longer crashes at build (`set_fio2`) or during CPR — compressions still run,
@@ -12668,6 +11678,10 @@ actually drive circulation through `pres_ext`); exactly `vent_no` breaths are de
 and a `switch_cpr` off→on re-toggle restarts a clean cycle. Like every probe here it is interactive
 and **always exits 0** — read the table.
 
+## References
+
+- Neonatal resuscitation guidelines (ILCOR / ERC / AHA): compressions at 3:1 with ventilation, 120 events a minute.
+
 ````
 
 ### FILE: explain-engine/docs/Shunts.md
@@ -12675,259 +11689,144 @@ and **always exits 0** — read the table.
 ````markdown
 # Shunts
 
-The `Shunts` model is a thin coordinator (like [Pda](./Pda.md)) that drives the resistances of the
-**non-ductal shunts** from a small set of geometric inputs. It does not hold volume or pressure
-itself — it owns no sub-models of its own but writes each step onto five pre-existing `Resistor`s.
+`Shunts` sets the resistances of the cardiac and pulmonary shunt pathways other than the duct:
+- the **foramen ovale** (FO), from its diameter: viscous Poiseuille loss plus a Bernoulli orifice loss, with an optional flap-valve asymmetry;
+- the **ventricular septal defect** (VSD), the same way;
+- the base resistance of the **intrapulmonary shunts** (IPSL, IPSR).
 
-It covers three shunt families:
+It also reports the shunt flows and velocities. The ductus arteriosus is [Pda](./Pda.md).
 
-| Shunt | Resistors driven | Path |
-|---|---|---|
-| **Foramen ovale (FO)** | `LA_RAIVCI`, `LA_RASVC` | LA ↔ the two right-atrial streams (RAIVCI, RASVC) |
-| **Ventricular septal defect (VSD)** | `VSD` | LV ↔ RV |
-| **Intrapulmonary shunts (IPS)** | `IPSL`, `IPSR` | arterial → venous within each lung (LL_ART→LL_VEN, RL_ART→RL_VEN) |
+## Physiology
 
-(The ductus arteriosus is handled separately by the [Pda](./Pda.md) model.)
+- **Foramen ovale.** In the fetus it carries oxygenated IVC blood from the right atrium into the left heart. After birth left-atrial pressure rises, and the flap closes against the septum, functionally at first. Most term newborns still have a small, mostly left-to-right patent foramen ovale (PFO) in the first days. When right-sided pressures rise (pulmonary hypertension), it can shunt right-to-left and cause desaturation.
+- **VSD.** A hole in the ventricular septum. Flow through it is set by its size and by the pressure difference between the ventricles. A restrictive VSD keeps a high-velocity jet; a large one lets the ventricles equalise.
+- **Intrapulmonary shunt.** Blood that crosses the lungs without meeting ventilated alveoli. Mostly it is venous admixture from perfused but unventilated lung (atelectasis, RDS, meconium, pneumonia); true anatomical channels are small in a normal lung, but can open in BPD, alveolar capillary dysplasia, CDH or meconium aspiration (Galambos). It is a major cause of hypoxaemia in lung disease.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Shunts   (group coordinator — no compartment of its own)
+  └── Shunts
 ```
-
-Extends `BaseModelClass` directly. `calc_model()` computes Hagen-Poiseuille resistances and writes
-them onto the referenced `Resistor`s; it has no `el_base`/`vol`/`r_for` of its own.
-
-## What it models
-
-The FO and VSD are openings whose resistance follows the **Hagen-Poiseuille** law from their diameter,
-the septal thickness (length), and blood viscosity. Closure is expressed directly via `diameter_fo` /
-`diameter_vsd` (0 mm = closed → `no_flow`). The intrapulmonary shunts are a resistance, not
-diameter-driven, carrying pulmonary arterial blood to the pulmonary veins without passing ventilated
-alveoli (see "What the intrapulmonary shunt stands for" below).
 
 ## Properties
 
-### Configuration (set in the model definition)
+### Config (set in the definition JSON)
 
-| Property | Default | Unit | Description |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| `diameter_fo` | `2.0` | mm | foramen ovale diameter (0 = closed) |
-| `diameter_fo_max` | `10.0` | mm | FO diameter ceiling (clamp) |
-| `diameter_vsd` | `2.0` | mm | ventricular septal defect diameter (0 = closed) |
-| `diameter_vsd_max` | `10.0` | mm | VSD diameter ceiling (clamp) |
-| `atrial_septal_width` | `3.0` | mm | FO channel length |
-| `ventricular_septal_width` | `5.0` | mm | VSD channel length |
-| `fo_lr_factor` | `10.0` | — | left-to-right resistance multiplier on the FO (flap valve) |
-| `fo_svc_fraction` | `0.5` | 0–1 | share of the FO's area that opens onto the SVC part of the right atrium (`LA_RASVC`); the rest opens onto the IVC part (`LA_RAIVCI`). 0.5 = two equal halves; 0 = only IVC blood crosses the foramen (fetal crista dividens) |
-| `discharge_coeff_fo` | `0.7` | — | FO discharge coefficient for the Bernoulli term, `A_eff = Cd · A` (flap valve, between funnel and sharp edge) |
-| `discharge_coeff_vsd` | `0.64` | — | VSD discharge coefficient for the Bernoulli term, `A_eff = Cd · A` (sharp-edged hole) |
-| `ips_res` | `5000` | mmHg·s/L | intrapulmonary shunt resistance (before the resistors' own factor layers) |
-| `viscosity` | `6.0` | cP | blood viscosity used in the resistance formula; read each step from `LA.viscosity` (fallback 6.0), so it follows the blood like `Pda` |
+| `diameter_fo` | mm | 2.0 | Foramen ovale diameter; 0 = closed. term_neonate 1.5, term fetus 6.0, 25 wk 0.75, Bischoff 0.5. |
+| `diameter_fo_max` | mm | 10.0 | Upper clamp. |
+| `atrial_septal_width` | mm | 3.0 | Length of the FO channel in the Poiseuille law. |
+| `fo_lr_factor` | – | 10.0 | Left-to-right resistance multiplier (flap valve). **1 in every shipped scenario.** |
+| `fo_svc_fraction` | – | 0.5 | Share of the FO area opening onto the SVC half of the right atrium (`RASVC`); the rest opens onto `RAIVCI`. 0 in the fetal scenarios (crista dividens). |
+| `discharge_coeff_fo` | – | 0.7 | Discharge coefficient of the FO orifice (between funnel and sharp edge). |
+| `diameter_vsd` | mm | 2.0 | VSD diameter; 0 = closed (0 in every shipped scenario). |
+| `diameter_vsd_max` | mm | 10.0 | Upper clamp. |
+| `ventricular_septal_width` | mm | 5.0 | Length of the VSD channel. |
+| `discharge_coeff_vsd` | – | 0.64 | Discharge coefficient of the VSD (sharp-edged hole). |
+| `ips_res` | mmHg·s/L | 5000 | Base resistance of each intrapulmonary shunt resistor. term_neonate 20 400, 25 wk 10 500, fetal 10⁸ (closed). |
 
-### Computed / reported (outputs)
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `res_fo` | mmHg·s/L | computed FO resistance (the whole orifice, before `fo_lr_factor`; a resistor with area share `a` gets `res_fo / a`, i.e. `2·res_fo` each at the default `fo_svc_fraction` 0.5) |
-| `res_vsd` | mmHg·s/L | computed VSD resistance |
-| `flow_fo` | L/s | combined FO flow (`LA_RAIVCI.flow + LA_RASVC.flow`) |
-| `bernoulli_b_fo`, `bernoulli_b_vsd` | mmHg·s²/L² | orifice coefficient B of the whole FO / the VSD |
-| `velocity_fo_doppler`, `velocity_vsd_doppler` | m/s | modified-Bernoulli jet velocity (signed with the flow) |
-| `flow_vsd` | L/s | VSD flow |
-| `velocity_fo` | m/s | FO orifice velocity from combined flow |
-| `velocity_vsd` | m/s | VSD orifice velocity |
+| `flow_fo` | L/s | FO flow, both paths together; positive = left-to-right. |
+| `flow_vsd` | L/s | VSD flow; positive = LV to RV. |
+| `res_fo`, `res_vsd` | mmHg·s/L | Viscous (Poiseuille) resistance of the whole orifice. |
+| `bernoulli_b_fo`, `bernoulli_b_vsd` | mmHg·s²/L² | Orifice coefficient `B` (see [Orifice](./Orifice.md)). |
+| `velocity_fo`, `velocity_vsd` | m/s | Mean velocity through the anatomic area (continuity). |
+| `velocity_fo_doppler`, `velocity_vsd_doppler` | m/s | Jet velocity through the vena contracta, what Doppler measures. |
 
-### Local (internal)
+### Set by other models
 
-`_fo_ivci`, `_fo_svc`, `_vsd`, `_ipsl`, `_ipsr` cache the five resistor references;
-`_refs_resolved`/`_refs_warned` gate the one-time resolution and the single missing-wiring warning.
+| Property | Unit | Description |
+|---|---|---|
+| `viscosity` | cP | Read from the left atrium every step (it follows the haematocrit); 6.0 if no LA. |
 
-## Calculation cycle (`calc_model`)
+## Calculation
 
-1. **Resolve references once.** `_resolve_refs()` caches `LA_RAIVCI`, `LA_RASVC`, `VSD`, `IPSL`,
-   `IPSR`. If any is missing it logs a single warning and `calc_model` returns early every step (so a
-   partial wiring degrades gracefully instead of throwing).
-2. **Clamp diameters** to their `*_max`.
-3. **Flow gating** — set `no_flow = (diameter === 0)` on the FO (`LA_RAIVCI`, `LA_RASVC`) and VSD
-   resistors; an FO path whose area share is 0 (`fo_svc_fraction` 0 or 1) is closed as well.
-4. **Resistances** — `res_fo`, `res_vsd` from `calc_resistance(diameter, septal_width, viscosity)`.
-5. **Push resistances** to the resistors (see FO asymmetry below); IPS resistors get the constant
-   `ips_res`.
-6. **Read back flows** and compute orifice velocities (`Q/A`).
+Each step, after resolving its five resistors once (`LA_RAIVCI`, `LA_RASVC`, `VSD`, `IPSL`, `IPSR`; a missing one gives a single warning and the model skips):
 
-## Foramen ovale: flap-valve asymmetry and the split path
+1. **Gates.** A diameter of 0 sets the resistor's `no_flow`. An FO path whose area share is 0 is closed too.
+2. **Resistances.** For each orifice of diameter `d` and length `L`:
+   ```
+   res = 8·η·L / (π·r⁴)                      Poiseuille, converted to mmHg·s/L
+   B   = K_BERNOULLI / (Cd·π·r²)²            orifice loss, see Orifice
+   ```
+3. **Foramen ovale, split over two resistors.** The FO opens onto both halves of the right atrium, with area shares `a` (`fo_svc_fraction` and its complement). Each path gets
+   ```
+   r_back = res_fo / a + (B_fo / a²) · |Q_path,prev|        right → left
+   r_for  = r_back · fo_lr_factor                           left → right
+   ```
+   so the two paths together behave exactly as one orifice of `diameter_fo`.
+4. **VSD:** `r = res_vsd + B_vsd·|Q_prev|`, both directions.
+5. **Intrapulmonary shunts:** `r_for = r_back = ips_res` on `IPSL` and `IPSR`.
+6. **Outputs:** flows from the resistors, `velocity = Q / area`, `velocity_doppler = jet_velocity(B, Q)`.
 
-The FO is driven through **two** resistors (`LA_RAIVCI`, `LA_RASVC`) because the model splits the
-right atrium into an IVC-stream and an SVC-stream. The two resistors share the orifice's area:
-`a_svc = fo_svc_fraction` for `LA_RASVC` and `a_ivci = 1 − fo_svc_fraction` for `LA_RAIVCI`. A share `a`
-carries the viscous resistance `res_fo / a` and the Bernoulli coefficient `B / a²` (B scales with
-1/area²), so the pair together always equals one FO of `diameter_fo`:
+**The Bernoulli term is linearised with the previous step's flow** (`B·|Q_prev|` added to the resistance), as in Pda. This is semi-implicit and stable for restrictive defects. It differs from the exact quadratic only by the flow's change in one 0.5 ms step (~1 % of the Bernoulli term in a pulsatile shunt). `Resistor.r_k` could solve the quadratic exactly, but it has a single coefficient for both directions, so it couldn't carry the flap's left-to-right factor.
 
-```
-r_back = res_fo / a + (B / a²) · |Q|    (RA → LA, easy)
-r_for  = r_back · fo_lr_factor          (LA → RA, restricted)
-```
+## Factor system
 
-At the default 0.5 each resistor gets `2·res_fo` and `4·B`, the original two equal halves (bit-identical).
+None of its own. It writes the **base** `r_for`/`r_back` of its resistors every step. Other models modulate them through the resistors' layers:
+- `Surfactant`: `IPSL`/`IPSR.r_factor_ps` (derecruitment);
+- `Respiration`: `IPSL`/`IPSR.r_factor` (atelectasis and hypoxic vasoconstriction, non-persistent);
+- the `Calibrator`: `IPSL`/`IPSR.r_factor_scaling_ps` and `ips_res`.
 
-**Preferential streaming (`fo_svc_fraction` 0).** With the split atrium closed (`RAIVCI_RASVC`
-`no_flow`), the two right-atrial streams can still mix *in the left atrium*: SVC blood crossing
-`LA_RASVC` meets IVC blood from `LA_RAIVCI` there. In the first `fetus_30wk` build a third of the foramen
-flow came from the SVC part and the ascending aorta was only 0.9 saturation points above the pulmonary
-artery (54.3 vs 53.4 %). In the fetus the crista dividens lets almost no SVC blood cross the foramen.
-`fo_svc_fraction` 0 opens the whole foramen onto the IVC part: the AA − PA gap rose to 6.0 points
-(57.6 vs 51.6 %; reference ~8, 67 vs 59) with the pressures, the output and its distribution unchanged.
+## Inputs and outputs
 
-`fo_lr_factor` (default 10, often higher in scenarios — e.g. 25) makes left-to-right flow much harder
-than right-to-left, reproducing the **flap-valve** behaviour: in fetal/transitional physiology the FO
-shunts right-to-left, and reverses only under raised left-atrial pressure.
+- **Reads:** `LA.viscosity`; the flows of its five resistors.
+- **Writes:** `r_for`, `r_back`, `no_flow` of `LA_RAIVCI`, `LA_RASVC`, `VSD`; `r_for`, `r_back` of `IPSL`, `IPSR`.
+- **Written by:** the user and scenario generators (diameters, `ips_res`); the `Calibrator` (`ips_res`).
+- **Read by:** `Monitor` (`fo_flow`), `DataCollector` watchers, `scripts/probe_*` (Qp:Qs, Doppler).
 
-**Echo-measured diameters.** When `diameter_fo` comes from an echo, it is the colour-jet diameter of
-the opening that actually conducts. The flap's restriction is then already in the measured diameter,
-so the postnatal `term_neonate` (and patients built from it) use `fo_lr_factor` 1. With 25 an FO was
-almost a one-way valve: 5 mm gave Qp:Qs 0.99 and a Doppler peak of 0.2 m/s. Neonatal echo shows a
-predominantly left-to-right shunt in most term newborns (Hiraishi 1991, doi 10.1136/hrt.65.1.41) and a
-measurable Qp:Qs above ~3 mm (Evans & Iyer 1994, doi 10.1016/s0022-3476(94)70079-6). With 1, a 3 mm FO
-carries ~18 mL/kg/min (Qp:Qs 1.04, Doppler peak 0.66 m/s) and 5 mm ~32 mL/kg/min (Qp:Qs 1.14). Fetal
-and transitional scenarios keep a high factor.
+## Assumptions and limitations
 
-**term_neonate (calibrated assumption, 2026-10):**
-- `diameter_fo` 1.5 mm (was 0, closed): a small left-to-right PFO carrying ~6 mL/kg/min (Qp:Qs ~1.03)
-- the basis:
-  - a PFO is the rule in the first days (none closed by day 3 in He 2011)
-  - neonatal CMR measures RV output a few mL/kg/min above LV output with the duct closed (Jhaveri
-    2023, Groves 2011)
-- the open PFO lets the scenario shunt right-to-left at atrial level when right pressures rise
-- see `scripts/_fix_term_fo.mjs` and [TermNeonateReference](./TermNeonateReference.md)
-
-> **Modelling note.** Until the engine review, each of the two parallel resistors carried the full
-> `res_fo`, so the FO's effective resistance was `res_fo / 2`: twice the conductance its diameter
-> implies. Scenarios fitted before the fix were compensated by scaling `diameter_fo` by 2^(1/4) ≈ 1.19
-> (Poiseuille R ∝ d⁻⁴). `velocity_fo` is computed from the **combined** flow
-> (`LA_RAIVCI.flow + LA_RASVC.flow`) over the single-orifice area from `diameter_fo`.
-
-## Velocity outputs
-
-```
-area     = π · (diameter_mm · 1e-3 / 2)²          [m²]
-velocity = (flow_L/s · 1e-3) / area               [m/s]   (0 when area = 0)
-```
-
-`velocity_fo` uses the summed FO flow; `velocity_vsd` uses the VSD flow.
-
-## Resistance formula — `calc_resistance(diameter, length, viscosity)`
-
-Standard Hagen-Poiseuille for a uniform cylinder:
-
-```
-R = (8 · μ · L) / (π · r⁴)        in Pa·s/m³   →  × 0.00000750062  →  mmHg·s/L
-```
-
-with diameter/length in mm and viscosity in cP. Returns the sentinel `1e8` (no flow) when
-`diameter ≤ 0` or `length ≤ 0`. (This is a private copy of the same formula [Pda](./Pda.md) uses.)
-
-## Orifice (Bernoulli) loss
-
-A restrictive FO or VSD is limited by its orifice, not only by viscous friction: Doppler measures the
-gradient as ΔP = 4v². On top of the Poiseuille resistance each defect carries the same quadratic
-orifice term as [Pda](./Pda.md), from the shared [`helpers/Orifice.js`](../helpers/Orifice.js):
-
-```
-ΔP = R·Q + B·Q²,    B = K_BERNOULLI / A_eff²,   A_eff = Cd · π(d/2)²  (Cd: FO 0.7, VSD 0.64)
-```
-
-The quadratic term is linearised semi-implicitly as a flow-dependent resistance `B·|Q_prev|`
-(unconditionally stable). For the FO each of the two parallel resistors carries half the area, so
-it gets `2·res_fo + 4·B_fo·|q_i|`; the VSD gets `res_vsd + B_vsd·|q|`. `velocity_fo_doppler` /
-`velocity_vsd_doppler` give the jet velocity `√(B·Q²/4)` with the sign of the flow.
-
-Effect on `term_neonate` with a VSD opened (60 s):
-
-| VSD | Qp:Qs | peak LV−RV | peak jet (4v²) | before the orifice term |
-|---|---|---|---|---|
-| 3 mm | 1.34 | 26 mmHg | 2.5 m/s (25 mmHg) | Qp:Qs 1.98, peak gradient 14 mmHg |
-| 5 mm | 1.59 | 31 mmHg | 2.8 m/s (32 mmHg) | Qp:Qs 1.97, peak gradient 2 mmHg |
-
-Before, every VSD from 3 mm up behaved as unrestrictive; now the shunt depends on the defect size.
+- **Echo-measured diameter, no flap.** All scenarios use `fo_lr_factor` 1: a diameter from an echo colour jet already reflects the flap's restriction. With 25, an FO was almost one-way (5 mm: Qp:Qs 0.99, Doppler 0.2 m/s). With 1, a 3 mm FO carries ~18 mL/kg/min (Qp:Qs 1.04, Doppler 0.66 m/s) and 5 mm ~32 mL/kg/min (Qp:Qs 1.14). Hiraishi 1991 finds a predominantly left-to-right PFO in most term newborns; Evans & Iyer 1994 a measurable Qp:Qs above ~3 mm.
+- **The foramen is not the lever for the fetal ventricular split.** At fetal sizes `res_fo` is ~13× below the tricuspid valve's resistance, so the two ventricles draw on a common atrial pressure. 6 → 3 mm moves RV:LV by 0 points; only below 2 mm does it bite, and then violently (1 mm: 73:27). See [fetal_circulation](./fetal_circulation.md).
+- **Absolute millimetres, not scaled.** `diameter_*` and the septal widths are set per scenario; no scaler touches them. Leaving `atrial_septal_width` at term thickness in a small body makes the foramen restrictive.
+- **Intrapulmonary shunt behaviour.**
+  - Pulmonary hypertension on its own shouldn't raise it: the hypoxaemia of PPHN comes from right-to-left flow across the duct and foramen, and in pulmonary vascular disease inert-gas studies find little shunt (Dantzker & Bower 1979).
+  - Its vessels belong to the same bed, so a general change in pulmonary tone should move IPSL/IPSR with it; the builder's PVR lever does this.
+  - The blunting of hypoxic vasoconstriction at very high pulmonary pressure (Benumof & Wahrenbrock 1975) isn't modelled.
+- **References resolve once.** A resistor added or removed at runtime is not picked up.
 
 ## Example definition (JSON)
 
-From `term_neonate.json` (a healthy term neonate: small PFO, VSD closed):
+From `term_neonate.json`, `models.Shunts` (trimmed to the config props; `components` holds the five resistors):
 
 ```json
 {
   "name": "Shunts",
-  "description": "shunts (FO, ASD, VSD) model",
   "model_type": "Shunts",
   "is_enabled": true,
   "diameter_fo": 1.5,
-  "diameter_fo_max": 10,
-  "diameter_vsd": 0,
-  "diameter_vsd_max": 10,
   "atrial_septal_width": 3,
-  "ventricular_septal_width": 5,
   "fo_lr_factor": 1,
-  "viscosity": 6,
-  "ips_res": 25000
+  "fo_svc_fraction": 0.5,
+  "discharge_coeff_fo": 0.7,
+  "diameter_vsd": 0,
+  "ventricular_septal_width": 5,
+  "discharge_coeff_vsd": 0.64,
+  "ips_res": 20402.6
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- A healthy term neonate runs with `diameter_fo = 0` and `diameter_vsd = 0` (closed); transitional and
-  congenital scenarios open them (e.g. patent foramen ovale, muscular/perimembranous VSD).
-- The fetal scenario keeps the FO open with a high `fo_lr_factor` so it shunts right-to-left, matching
-  fetal circulation (see [Placenta](./Placenta.md) and the term-fetus scenario).
-- `IPSL`/`IPSR` carry the intrapulmonary shunt independent of the septal defects; raising/lowering
-  `ips_res` tunes the shunt fraction. The gestational-age seed and RDS bundles of the patient builder
-  set it (lower in sicker lungs), [Surfactant](./Surfactant.md) modulates it through the resistors'
-  `r_factor_ps`, and the builder's oxygen and pulmonary-resistance levers move it (see
-  [Calibrator](./Calibrator.md)).
+One instance in every scenario. It owns `LA_RAIVCI`, `LA_RASVC` (LA → right-atrial halves), `VSD` (LV → RV), `IPSL` (`LL_ART` → `LL_VEN`) and `IPSR` (`RL_ART` → `RL_VEN`).
 
-## What the intrapulmonary shunt stands for
+**term_neonate calibration (2026-10):**
+- **Foramen:** `diameter_fo` 1.5 mm, a small left-to-right PFO of ~6 mL/kg/min (Qp:Qs ~1.03). Basis: no PFO has closed by day 3 (He 2011), and neonatal CMR finds RV output a few mL/kg/min above LV output with the duct closed (Jhaveri 2023, Groves 2011). It also lets the scenario shunt right-to-left at atrial level when right-sided pressures rise. See `scripts/_fix_term_fo.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+- **Fetal scenarios:** `fo_svc_fraction` 0, the crista dividens. Before that, a third of the foramen flow came from the SVC half, and the aorta was only 0.9 saturation points above the pulmonary artery; with it the gap is 6.0 points (reference ~8). They also close the intrapulmonary shunts (`ips_res` 10⁸).
 
-Mostly **venous admixture from perfused but unventilated lung**: atelectatic, fluid- or
-meconium-filled units in RDS, meconium aspiration or pneumonia. Truly anatomic channels are small
-in a normal lung, but intrapulmonary arteriovenous anastomoses bypassing the capillaries can be
-open in BPD, alveolar capillary dysplasia, CDH and meconium aspiration
-([Galambos et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC3960909)).
+## References
 
-Consequences for how it should behave:
-
-- **Pulmonary hypertension on its own does not raise it.** The hypoxaemia of PPHN comes from
-  right-to-left flow across the duct and foramen ovale. In pulmonary vascular disease, inert-gas
-  measurements find little shunt despite very high resistance; hypoxaemia there comes mainly from low
-  mixed-venous oxygen ([Dantzker & Bower, JCI 1979](https://www.jci.org/articles/view/109542)).
-- **Its vessels belong to the same vascular bed and are, if anything, more constricted** (hypoxic
-  vasoconstriction, narrowed extra-alveolar vessels at low lung volume). That is why intravenous
-  vasodilators increase intrapulmonary shunt, while inhaled NO, which reaches only ventilated
-  units, lowers it. So a general change in pulmonary vascular tone should move `IPSL`/`IPSR` along
-  with the bed. The builder's pulmonary-resistance lever does this.
-- **A modest rise at very high pressure is plausible:** raised pulmonary vascular pressure blunts
-  hypoxic vasoconstriction (Benumof & Wahrenbrock, J Appl Physiol 1975). The model does not
-  represent that.
-
-## Notes & caveats
-
-- **`diameter_fo` is NOT the lever for the atrial split.** At fetal sizes `res_fo` is ~13x lower
-  than the tricuspid valve's resistance, so the foramen is a hole rather than a restriction and the
-  two ventricles draw from a common atrial pressure. Measured on the fetal scenarios, 6.0 -> 3.0 mm
-  moves RV:LV by 0 points; it only bites below 2 mm, where it swings violently (1 mm -> 73:27).
-  `fo_lr_factor` likewise has no effect on the split. What sets it is which ventricle ejects better
-  — see [fetal_circulation.md](./fetal_circulation.md).
-- **`diameter_fo` and `atrial_septal_width` are absolute millimetres that no scaler touches.**
-  `atrial_septal_width` is the length term in the foramen's resistance law, so leaving it at term
-  thickness in a scaled-down body makes the foramen artificially restrictive; see
-  [fetal_circulation.md](./fetal_circulation.md).
-- **References resolve only once.** After the five resistors are cached, they are never re-resolved; a
-  model added/removed at runtime would not be picked up. Missing wiring at first call is reported with
-  a single console warning.
-- **`viscosity` is a static input here** — unlike [Pda](./Pda.md) (which pulls it from its capacitance
-  each step), `Shunts.viscosity` is whatever the definition sets and does not track hematocrit.
-- **IPS resistance is fixed.** `IPSL`/`IPSR` always receive `ips_res`; there is no diameter or
-  flow-gating on them.
+- Hiraishi S, et al. *Heart* 1991. doi:10.1136/hrt.65.1.41 (PFO flow in term newborns).
+- Evans N, Iyer P. *J Pediatr* 1994. doi:10.1016/s0022-3476(94)70079-6 (atrial shunting and Qp:Qs).
+- Dantzker DR, Bower JS. *J Clin Invest* 1979, [jci.org/articles/view/109542](https://www.jci.org/articles/view/109542) (gas exchange in pulmonary vascular disease).
+- Benumof JL, Wahrenbrock EA. *J Appl Physiol* 1975 (pulmonary vascular pressure and hypoxic vasoconstriction).
+- Galambos C, et al. [PMC3960909](https://pmc.ncbi.nlm.nih.gov/articles/PMC3960909) (intrapulmonary arteriovenous anastomoses).
 
 ````
 
@@ -13003,6 +11902,54 @@ generic ventilator. The ranges, resolutions and defaults come from pp 163–169.
 
 **Parameter memory.** Settings persist across modes (p124). The CPAP level in CPAP is the PEEP of
 the other modes.
+
+## Other properties
+
+### Config
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `sle_mode` | – | `"Standby"` | Standby, CPAP, CMV, PTV, PSV, SIMV, HFOV or HFOV+CMV. |
+| `sle_o2_boost_inc` | % | 10 | O2 Boost increment (factory default, p128). |
+| `sle_spo2_on` | boolean | `true` | SpO2 monitoring (p104). |
+| `sle_spo2_target` | – | `"91-95"` | OxyGenie target range, one of `SLE_SPO2_TARGETS`. |
+| `sle_spo2_avg` | s | 8 | SpO2 averaging time (3 s while OxyGenie is on). |
+| `sle_oxy_high_o2` | % | 60 | "O2 > N %" message level while OxyGenie is on (p228). |
+| `spo2_probe_attached` | boolean | `true` | The sensor is on the patient (an event: off gives no signal). |
+| `oxy_kp`, `oxy_ki`, `oxy_kd` | % O2 per % SpO2, per %·s, per %/s | −1, −0.0125, −1 | OxyGenie PID gains (patent example embodiment). |
+
+### Outputs
+
+| Property | Unit | Description |
+|---|---|---|
+| `mon_dp`, `mon_dco2`, `mon_freq` | mbar, ml²/s, Hz | HFO monitored ΔP (peak to peak at the proximal airway), DCO2 (f · Vte², τ 3 cycles), frequency. |
+| `o2_boost_remaining` | s | Time left of an O2 Boost. |
+| `mon_spo2` | % or null | The ventilator's SpO2 (preductal, averaged; null = no valid signal). |
+| `oxy_state` | – | OxyGenie state: `off`, `auto`, `fallback`, `override`. |
+| `oxy_ref_o2` | % | Reference O2: the average requirement of the last hour. |
+| `oxy_override_remaining` | s | Time left of a manual override. |
+| `oxy_high_o2_flag` | boolean | "O2 > N %" shown. |
+
+## `sle6000_params.js`
+
+The device's settings table and helpers, shared with the UI replica:
+
+| Export | Description |
+|---|---|
+| `SLE_PARAMS` | Per setting: range, resolution steps, default, unit (pp 163–169). |
+| `SLE_MODES`, `SLE_MODE_NAMES`, `SLE_HFO_MODES` | Per mode the settings on the main and extra screens (and label overrides); the mode names; the oscillatory modes. |
+| `SLE_SPO2_TARGETS`, `SLE_SPO2_AVG` | OxyGenie target ranges; SpO2 averaging times. |
+| `sle_defaults()` | Default settings. |
+| `sle_resolution(name, value)`, `sle_step(name, value, dir)` | Resolution at a value; the next value up or down. |
+| `sle_clamp(name, value)` | Clamp to range and resolution. |
+| `sle_format(name, value, decimals)` | Display string. |
+| `sle_interlocks(settings, mode, changed)` | Apply the interlocks (Ti vs rate, rise ≤ Ti, PEEP ≤ PIP, …). |
+
+## Inputs and outputs
+
+- **Reads and writes:** everything [Ventilator](./Ventilator.md#inputs-and-outputs) does, through its settings; plus `AA.so2` (the SpO2 sensor); the O2 setting reaches the fresh gas through the generic `set_fio2`.
+- **Written by:** the app's SLE6000 replica (`sle_apply`, `sle_set`, `sle_start`, `sle_standby`, …), the bot, Resuscitation (through the inherited generic API), the scenario generators (`applyVentilator`).
+- **Read by:** the app's SLE6000 screens (`mon_*`, `oxy_*`), Monitor, `DataCollector` watchers.
 
 ## Control API
 
@@ -13342,7 +12289,11 @@ isn't either.
 preterm into the range, weaning a hyperoxic term neonate to air, the manual override and its bumpless
 restart, the fallback hold and drift, the "O2 > N %" flag and the interlocks.
 
-`node scripts/probe_sle6000.mjs` runs pass/fail checks on `term_neonate`:
+`node scripts/probe_sle6000.mjs` runs pass/fail checks on `term_neonate`. On 2026-10-24 it gives 87 pass, 2 fail; both failures are the same on engine main and are listed for the scenario re-validation:
+- **PSV leak 0.8 mm, flow-cycled:** 94 % of breaths end at Ti Max (limit 10 %). The leak-termination compensation does not engage, probably because the later term_neonate recalibration moved the leak percentage below its 10 % threshold.
+- **CMV breathing, no phantom leak:** 5.7 % (limit 5 %).
+
+The checks:
 - settings validation and interlocks
 - CMV pressures, timing and monitored values
 - PTV and PSV triggering
@@ -13371,129 +12322,153 @@ restart, the fallback hold and drift, the "O2 > N %" flag and the interlocks.
 ````markdown
 # Surfactant
 
-The `Surfactant` model turns the previously **static** preterm RDS lung phenotype — baked-in stiff
-alveoli, low FRC, reduced alveolar diffusion and an intrapulmonary shunt — into a **dynamic,
-treatable** process: pressure-driven alveolar **recruitment / derecruitment with hysteresis**, plus a
-**surfactant-therapy** response. It is a slow **process controller** in the same family as
-[`Hormones`](./Hormones.md) / [`Kidneys`](./Kidneys.md) / `Lactate`: it holds no compartment,
-resolves references to other models lazily, and is **neutral at rest**. A scenario that ships it keeps
-its calibrated RDS operating point unchanged and only diverges when PEEP/CPAP changes or surfactant is
-given.
+`Surfactant` turns the preterm lung's respiratory distress syndrome (RDS) into a dynamic, treatable process. The fraction of open alveoli rises and falls with the mean distending pressure, with hysteresis (recruitment above an opening threshold, derecruitment below a closing one). Giving surfactant lowers both thresholds, so the same CPAP or PEEP now opens the lung. The open fraction drives the lungs' compliance and FRC, the gas-exchange surface and the intrapulmonary shunt. It holds no compartment, and it is **neutral at rest**: a scenario keeps its calibrated operating point until PEEP changes or surfactant is given.
 
-It is the *pathophysiology/therapy* layer that sits on top of the lung mechanics owned by
-[`Respiration`](./Respiration.md), the alveolar gas exchange of [`GasExchanger`](./GasExchanger.md),
-and the venous admixture of [`Shunts`](./Shunts.md) — driven by the airway pressure that
-[`Breathing`](./Breathing.md) and the [`Ventilator`](./Ventilator.md) impose.
+## Physiology
 
-## Recruitment state
+Surfactant lowers the surface tension in the alveoli. Without it, as in a preterm infant before ~34 weeks, small alveoli collapse at end-expiration:
+- the lung is stiff and its functional residual capacity (FRC) low;
+- blood flows past collapsed alveoli unoxygenated;
+- the infant needs pressure (CPAP, PEEP) to keep the lung open.
 
-```
-SENSOR (lazy refs)                  STATE                         EFFECTORS (owned while running)
-ALL.pres_in ─┐ mean, smoothed                                     ALL/ALR.el_base_factor   1−el_gain·r   (compliance)
-ALR.pres_in ─┴─► P_tp ──► [ hysteresis dead zone ] ──► open_fraction ─► ALL/ALR.u_vol_factor 1+uvol_gain·r (FRC)
-                          TCP ····· TOP                            GASEX_*.dif_o2/co2_factor 1+dif_gain·r  (gas exchange)
-surfactant ───► lowers TOP/TCP                                    IPSL/IPSR.r_factor_ps    1+ips_gain·r   (less shunt)
-```
+A collapsed region reopens only above its opening pressure and recollapses below a lower closing pressure. Between the two, it holds. This hysteresis is why a recruited lung stays open on less pressure than it took to open it.
 
-`open_fraction` ∈ `[0,1]` is the fraction of alveoli that are open. It is driven by the mean
-(breath-averaged) **transpulmonary pressure** `P_tp` = alveolar recoil pressure (`GasCapacitance.pres_in`,
-averaged over both lungs `ALL`/`ALR` and smoothed first-order over `pres_tc` so tidal swings don't
-dominate):
+Exogenous surfactant, instilled into the trachea, works within minutes: compliance improves, FRC rises, oxygenation improves and the needed FiO2 falls. It doesn't change the lung's structural immaturity.
+
+## Inheritance
 
 ```
-dOpen = [ k_open·max(0, P_tp − TOP)·(1 − open)     recruit above the opening threshold
-        − k_close·max(0, TCP − P_tp)·open ] · dt   derecruit below the closing threshold
+BaseModelClass
+  └── Surfactant
 ```
 
-Between the closing threshold `TCP` and the opening threshold `TOP` there is a hysteresis **dead zone**
-(`open` holds) — the signature of lung recruitment.
+## Properties
 
-## Auto-centered thresholds (the robustness trick)
+### Config (set in the definition JSON)
 
-At warm-up (after `_warmup_delay` = 30 s, once the circuit has settled) the model captures the baseline
-mean `P_tp` (`P0`), `open_fraction` (`f0`) and `surfactant` level (`surf0`), then centers the dead zone
-on `P0`:
-
-```
-TOP = P0 + open_margin  − surf_open_gain ·(surfactant − surf0)
-TCP = P0 − close_margin − surf_close_gain·(surfactant − surf0)
-```
-
-So at the scenario's own baseline (`surfactant == surf0`, `P_tp == P0`) the operating pressure sits
-inside the dead zone → `open` holds at `f0` → the model is **neutral and stable at ANY scenario's
-operating point with no per-scenario threshold tuning**. Raising PEEP pushes `P_tp` above `TOP` →
-recruit; losing PEEP pushes it below `TCP` → derecruit; **surfactant lowers `TOP`/`TCP`** so the same
-prevailing airway pressure now recruits the lung. Recruitment is **gated off until seeded** (`open_fraction`
-holds at its init value during warm-up), so the `f0` (≈ 0.5) headroom is identical for every scenario
-regardless of the warm-up pressure transient.
-
-## Effectors
-
-All effects are referenced to `f0`, so each factor is exactly `1.0` at baseline. With
-`r = open_fraction − f0` (`+` = recruited above baseline, `−` = derecruited):
-
-| Channel | Target | Factor | Effect of recruitment |
+| Property | Unit | Default | Description |
 |---|---|---|---|
-| `el_lung_factor` | `ALL`/`ALR`.`el_base_factor` | `1 − el_gain·r` | lower elastance / more compliant |
-| `uvol_lung_factor` | `ALL`/`ALR`.`u_vol_factor` | `1 + uvol_gain·r` | higher FRC |
-| `dif_factor` | `GASEX_LL`/`GASEX_RL`.`dif_o2_factor` & `dif_co2_factor` | `1 + dif_gain·r` | more gas-exchange surface |
-| `ips_factor` | `IPSL`/`IPSR`.`r_factor_ps` | `1 + ips_gain·r` | higher shunt resistance → less venous admixture |
+| `surfactant_running` | boolean | `true` | Master switch. Off releases every effect to 1 once, then idles. |
+| `lung_models` | list | `["ALL", "ALR"]` | Alveolar compartments. |
+| `gasex_models` | list | `["GASEX_LL", "GASEX_RL"]` | Gas exchangers. |
+| `shunt_models` | list | `["IPSL", "IPSR"]` | Intrapulmonary shunt resistors. |
+| `surfactant` | 0–1 | 0.3 | Surfactant maturity: 0 = severe deficiency, 1 = mature or fully treated. Scenarios: 25 wk and Bischoff 0.2, 28 wk 0.25, 30 wk 0.3. |
+| `surfactant_target` | 0–1 or null | null | Therapy target the maturity ramps toward; null holds it. Set by `administer_surfactant`. |
+| `surfactant_tc` | s | 180 | Ramp time constant of the therapy response. |
+| `open_margin`, `close_margin` | mmHg | 2, 2 | Half-widths of the dead zone above and below the baseline pressure. |
+| `surf_open_gain`, `surf_close_gain` | mmHg per unit | 14, 12 | Fall of the opening and closing thresholds per unit rise in maturity. |
+| `k_open`, `k_close` | 1/(mmHg·s) | 0.5, 0.5 | Recruitment and derecruitment rates. |
+| `pres_tc` | s | 4 | Smoothing of the transpulmonary pressure (averages out tidal swings). |
+| `el_gain`, `uvol_gain`, `dif_gain`, `ips_gain` | per unit `r` | 0.7, 1.5, 2.0, 6.0 | Effect gains (see [Calculation](#calculation)). |
+| `el_factor_min`, `el_factor_max`, `uvol_factor_min`, `uvol_factor_max`, `dif_factor_min`, `dif_factor_max`, `ips_factor_min`, `ips_factor_max` | – | 0.2/3, 0.3/3, 0.1/5, 0.1/30 | Clamps on the effect factors. |
 
-Each factor is clamped (`el` `[0.2,3.0]`, `uvol` `[0.3,3.0]`, `dif` `[0.1,5.0]`, `ips` `[0.1,30.0]`).
+### Baseline (captured, saved with the state)
 
-**Which factor layer matters.** The first three use the **non-persistent** factor layer
-(`el_base_factor` / `u_vol_factor` / `dif_*_factor`) — reset to `1.0` each step by the compartment and
-**re-written here every step** — so they compose additively with the [`Respiration`](./Respiration.md)
-controller, which owns the persistent `*_factor_ps` layer (see the
-[factor / effective-value pattern](./Capacitance.md)). The shunt instead modulates the **persistent**
-`r_factor_ps` on `IPSL`/`IPSR` (those resistors carry their `r_for`/`r_back` from `Shunts.ips_res`);
-that channel is **owned by Surfactant** and released back to `1.0` on disable.
-
-## Surfactant therapy
-
-`surfactant` ∈ `[0,1]` is alveolar maturity: `0` = severe deficiency (RDS), `1` = mature / fully
-treated (default baseline `0.3`). The dosing API instills surfactant and ramps maturity up first-order:
-
-```
-administer_surfactant(target = 1.0)   // sets surfactant_target; callable via callModelFunction / TaskScheduler
-surfactant += dt·(1/surfactant_tc)·(surfactant_target − surfactant)   // surfactant_tc = 180 s
-```
-
-The acute compliance/recruitment response therefore develops over a few minutes. Setting
-`surfactant_target = null` holds maturity at its current value.
-
-## Read-outs
-
-| Read-out | Meaning |
-|---|---|
-| `open_fraction` | recruited alveolar fraction `[0,1]` |
-| `transpulmonary_pressure` | smoothed mean `P_tp` (mmHg) |
-| `open_pressure` / `close_pressure` | current `TOP` / `TCP` (mmHg) |
-| `surfactant` | current alveolar maturity `[0,1]` |
-| `el_lung_factor` / `uvol_lung_factor` / `dif_factor` / `ips_factor` | applied effector factors |
-
-## Configuration & calibration
-
-| Parameter | Default | Meaning |
+| Property | Unit | Description |
 |---|---|---|
-| `surfactant` / `surfactant_tc` | `0.3` / `180.0` s | baseline maturity / therapy ramp time constant |
-| `open_margin` / `close_margin` | `2.0` / `2.0` mmHg | dead-zone half-widths above/below `P0` |
-| `surf_open_gain` / `surf_close_gain` | `14.0` / `12.0` mmHg | drop in `TOP` / `TCP` per unit surfactant rise |
-| `k_open` / `k_close` | `0.5` / `0.5` (1/(mmHg·s)) | recruitment / derecruitment rates |
-| `pres_tc` | `4.0` s | smoothing of `P_tp` |
-| `el_gain` / `uvol_gain` / `dif_gain` / `ips_gain` | `0.7` / `1.5` / `2.0` / `6.0` | effect gains per unit `r` |
-| `_warmup_delay` | `30.0` s | delay before capturing `P0` / `f0` / `surf0` |
+| `baseline_captured` | boolean | The baseline has been captured (30 s after a fresh build). |
+| `baseline_ptp` | mmHg | P0: the smoothed transpulmonary pressure at capture. |
+| `baseline_open_fraction` | 0–1 | f0: the open fraction at capture, the neutral reference. |
+| `baseline_surfactant` | 0–1 | surf0: the maturity at capture. |
 
-> **Calibration note.** A spontaneously-breathing preterm runs at a **low** mean `P_tp` (~1–3 mmHg), so
-> the margins are deliberately small and the surfactant gains large: a therapeutic dose must clearly
-> pull the opening threshold below the prevailing airway pressure for recruitment to occur.
+### Outputs
 
-## Gating
+| Property | Unit | Description |
+|---|---|---|
+| `open_fraction` | 0–1 | Fraction of open alveoli (0.5 in every scenario at build). |
+| `transpulmonary_pressure` | mmHg | Smoothed mean alveolar recoil pressure (`pres_in` of the lungs). |
+| `open_pressure`, `close_pressure` | mmHg | Current opening and closing thresholds. |
+| `el_lung_factor`, `uvol_lung_factor`, `dif_factor`, `ips_factor` | – | Applied effect factors. |
 
-`surfactant_running` (default `true`) is the master gate. When set `false`, `_release_channels()` runs
-**once** — resetting `el_base_factor`/`u_vol_factor` on the lungs, `dif_o2_factor`/`dif_co2_factor` on
-the gas exchangers, and the persistent `r_factor_ps` on the shunts all back to `1.0` — then the model
-idles. This is the clean "off" switch that returns the lung to its underlying (static) phenotype.
+## Calculation
+
+Each step:
+
+1. **Therapy:** `surfactant += dt/surfactant_tc · (surfactant_target − surfactant)` while a target is set.
+2. **Pressure:** the lungs' mean `pres_in`, smoothed over `pres_tc`.
+3. **Baseline** (once, 30 s after a fresh build): P0, f0 and surf0 are captured. A loaded state that already has `baseline_captured` keeps its own.
+4. **Thresholds**, centred on the scenario's own baseline:
+   ```
+   TOP = P0 + open_margin  − surf_open_gain  · (surfactant − surf0)
+   TCP = P0 − close_margin − surf_close_gain · (surfactant − surf0)
+   ```
+   At baseline P0 sits inside the dead zone, so any scenario is neutral without per-scenario tuning.
+5. **Recruitment** (after the baseline is captured):
+   ```
+   d open / dt = k_open · max(0, P − TOP) · (1 − open)  −  k_close · max(0, TCP − P) · open
+   ```
+6. **Effects**, with `r = open_fraction − f0` (1.0 at baseline), each clamped:
+   ```
+   el_lung_factor   = 1 − el_gain · r      → ALL/ALR.el_base_factor     (stiffer when derecruited)
+   uvol_lung_factor = 1 + uvol_gain · r    → ALL/ALR.u_vol_factor       (FRC)
+   dif_factor       = 1 + dif_gain · r     → GASEX_*.dif_o2/co2_factor  (exchange surface)
+   ips_factor       = 1 + ips_gain · r     → IPSL/IPSR.r_factor_ps      (less shunt when recruited)
+   ```
+
+`administer_surfactant(target = 1.0)` sets `surfactant_target` (clamped 0–1); it is callable through `callModelFunction` or the TaskScheduler.
+
+**Example** (preterm_25wk, surfactant given): after 15 min the open fraction is 1.0, `el_lung_factor` 0.65, `ips_factor` 4. SaO2 rises 90.9 → 97.8 %, PaO2 55 → 89 and PaCO2 falls 48 → 43 mmHg; left alveolar volume 7.1 → 11.4 mL.
+
+## Factor system
+
+| Target | Layer | Note |
+|---|---|---|
+| lungs | `el_base_factor`, `u_vol_factor` (non-persistent) | rewritten every step; composes with Respiration's `*_factor_ps` |
+| gas exchangers | `dif_o2_factor`, `dif_co2_factor` (non-persistent) | |
+| IPSL, IPSR | `r_factor_ps` (persistent) | owned by Surfactant; reset to 1 on switch-off |
+
+## Inputs and outputs
+
+- **Reads:** the lungs' `pres_in`.
+- **Writes:** the layers above.
+- **Written by:** the user and the bot (`administer_surfactant`, `surfactant_running`, `surfactant`); the scenario generators.
+- **Read by:** Respiration's atelectasis perfusion (computes against IPSL/IPSR's `r_factor_ps`); `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **Whole-lung, one open fraction.** No regional or gravity-dependent collapse; both lungs share one state. [Respiration](./Respiration.md#atelectasis)'s per-lung atelectasis runs independently, and their effects add.
+- **Relative to the baseline.** Effects are deviations from the open fraction at capture (0.5 in every scenario), so the scenario's static RDS phenotype stays its baked values plus these deviations.
+- **Calibrated for a low operating pressure.** A spontaneously breathing preterm runs at a mean transpulmonary pressure of ~1–3 mmHg, so the margins are small and the surfactant gains large: a dose must pull the opening threshold clearly below the prevailing pressure to recruit.
+- **No surfactant kinetics.** Maturity only ramps toward the target. There is no inactivation (meconium, protein leak), no redosing decay, no effect on the airway.
+- **The first 30 s of a fresh build** hold the open fraction while the baseline is captured.
+
+## Example definition (JSON)
+
+From `preterm_25wk.json`, `models.Surfactant` (trimmed to the config props):
+
+```json
+{
+  "name": "Surfactant",
+  "model_type": "Surfactant",
+  "is_enabled": true,
+  "surfactant_running": true,
+  "lung_models": ["ALL", "ALR"],
+  "gasex_models": ["GASEX_LL", "GASEX_RL"],
+  "shunt_models": ["IPSL", "IPSR"],
+  "surfactant": 0.2,
+  "surfactant_target": null,
+  "surfactant_tc": 180,
+  "open_margin": 2,
+  "close_margin": 2,
+  "surf_open_gain": 14,
+  "surf_close_gain": 12,
+  "k_open": 0.5,
+  "k_close": 0.5,
+  "pres_tc": 4,
+  "el_gain": 0.7,
+  "uvol_gain": 1.5,
+  "dif_gain": 2,
+  "ips_gain": 6
+}
+```
+
+## Usage in the scenarios
+
+In the six preterm and Bischoff scenarios, with the defaults above and `surfactant` 0.2–0.3. Not in term_neonate or the fetal scenarios.
+
+## References
+
+No literature values; the gains and thresholds are calibrated on the preterm scenarios' response to CPAP and surfactant.
 
 ````
 
@@ -13591,7 +12566,7 @@ A probe is a self-contained `.mjs` that boots the engine, runs a scripted physio
 ```bash
 node scripts/probe_vitals.mjs term_neonate
 node scripts/probe_vitals.mjs preterm_28wk --profile preterm_28
-node scripts/probe_vitals.mjs adult_female --no-ans --seconds 90
+node scripts/probe_vitals.mjs term_neonate --no-ans --seconds 90
 node scripts/probe_brain.mjs --scenario term_neonate --bleed 0.3
 node scripts/probe_pda.mjs preterm_28wk --beats 6
 ```
@@ -13605,7 +12580,7 @@ Probes are **interactive verification tools, not pass/fail test cases.** They pr
 ## The respiratory validation suite
 
 `npm run validate:resp` (`scripts/validate_respiratory.mjs`) **is** a pass/fail gate: it exits `1` when a
-check fails. It runs a fixed battery on preterm_28wk, term_neonate and adult_female, one child process per
+check fails. It runs a fixed battery on preterm_28wk and term_neonate (adult_female is archived), one child process per
 scenario, and checks each result against clinical ranges per patient class in
 `scripts/_resp_targets.mjs` (each range carries its literature source; the ranges are not fitted to the
 model). The battery:
@@ -13654,9 +12629,10 @@ The remaining `scripts/*.mjs` support calibration, scenario authoring, and stead
 | Group | Scripts | Role |
 |---|---|---|
 | **Calibration** | `build_patient.mjs`, `probe_build_patient.mjs`, `probe_tune.mjs` | Closed-loop calibration via [`helpers/Calibrator.js`](../helpers/Calibrator.js) (see [Calibrator](./Calibrator.md)) — `build_patient.mjs` builds a new calibrated patient from target vitals; `probe_build_patient.mjs` runs it on a few SPECs, reloads each emitted scenario in a fresh engine and checks it against its own `build_report` (targets still within tolerance, FiO2 persisted, desaturation in room air, derived blood-pressure targets, solutes held after reload) and prints levers that ended on a bound; `probe_tune.mjs` exercises the same live tuner headlessly. |
-| **Reseeding** | `reseed_*.mjs` (e.g. `reseed_term_neonate`, `reseed_preterm`, `reseed_adult_female`, the CHD set) | Warm a scenario to steady state and serialize it back into `model_definition` (baking equilibrium seeds, clearing startup transients). Each shares `_serialize_state.mjs` (replicates `Model._processModelState`). **Default is a dry run to `/tmp`**; pass `--write` to overwrite the scenario file in place. |
-| **Scenario generation** | `_make_*.mjs` (e.g. `_make_preterm`, `_make_cdh_phenotypes`, `_make_dtga`, `_make_pda_patterns`, …) | Generate/derive a scenario JSON (usually from `term_neonate`) by applying phenotype-specific lever edits. Each sets the diagram TITLE from the key → title map in `_titles.mjs` (`setDiagramTitle`); add a new scenario's title there. |
-| **Gestational-age families** | `_make_preterm.mjs <ga>`, `_make_fetus.mjs <ga>`, `reseed_preterm.mjs <ga>`, `reseed_fetus.mjs <ga>` | Per-GA scenario families. The preterm levers live in `_make_preterm.mjs`; the fetal levers in `scripts/_ga_tables.mjs` (shared with `build_patient.mjs`). Generate → probe → iterate the table → reseed `--write`. |
+| **Validated scenario generators** | `_make_preterm_validated.mjs --profile <25\|28\|30\|bischoff…>`, `_make_fetus_validated.mjs --profile <25\|30\|40>` | Build the shipped preterm, Bischoff and fetal scenarios from `term_neonate` against their `*Reference.md` targets, then `incorporate` (bake) the scaling layer before serializing. Use these, not the older generators below, for the canonical set. |
+| **Reseeding** | `reseed_*.mjs` (e.g. `reseed_term_neonate`) | Warm a scenario to steady state and serialize it back into `model_definition` (baking equilibrium seeds, clearing startup transients). Each shares `_serialize_state.mjs` (replicates `Model._processModelState`). **Default is a dry run to `/tmp`**; pass `--write` to overwrite the scenario file in place. Only `reseed_term_neonate` remains here; the reseeders of the archived scenarios are in `scripts/archive/` (see below). |
+| **Archived generators** | `scripts/archive/` (`_make_preterm`, `_make_fetus`, `_make_cdh_phenotypes`, `_make_dtga`, `_make_pda_patterns`, …, and their `reseed_*`) | The scripts of the archived scenarios: they derive a scenario from `term_neonate` by phenotype-specific lever edits and read and write `model_definitions/archive/` only. Unvalidated against the current engine; see their README. New scenario titles still go in `_titles.mjs` (`setDiagramTitle`). |
+| **Gestational-age tables** | `scripts/_ga_tables.mjs`, `_preterm_profiles.mjs`, `_fetal_profiles.mjs` | The per-GA levers and reference profiles shared by the validated generators and `build_patient.mjs`. Generate → probe against the `*Reference.md` → adjust the profile → regenerate. |
 | **Feature patchers** | `_add_neonatal_core.mjs`, `_add_brain.mjs`, `_add_surfactant.mjs`, `_add_titles.mjs` | Patch a model/feature into many existing scenario JSONs at once (without reseeding, to preserve calibration). `_add_titles.mjs` re-applies the `_titles.mjs` diagram titles in place. |
 | **Shared internals** | `_harness.mjs`, `_probe.mjs`, `_serialize_state.mjs`, `_titles.mjs`, `resolve-extensionless.mjs` | `createEngine`; `measureVitals`/`RANGES`/`selectProfile`/`flagOf`; the `serializeState` baker; the scenario diagram-title map; the ESM `.js`-retry resolve hook. |
 
@@ -13720,6 +12696,7 @@ Each task carries a numeric `type` that decides how it is applied:
 | `add_task(new_task)` | Resolves `new_task.model` (a name) to a live instance and checks that `prop1`(`.prop2`) exists, infers `type` (0 numeric tween with `it > 0` / 1 instant write) and enqueues under a unique `task_<n>` key. Returns an error string (sent to the UI as an `error` message by `set_property`) for an unknown model or property, or a non-number target for a numeric property; nothing is queued then and no property is created. |
 | `add_function_call(new_function_call)` | Splits `func` (`"Model.method"`), checks that the model exists and the method is a function (else returns an error string, sent as an `error` message by `call_function`), keeps the model and method **names** (the task list must stay structured-cloneable), marks the task `type = 2`, and enqueues it to fire after `at` seconds. |
 | `run_tasks()` | When `_task_interval_counter > _task_interval`: resets the counter, iterates `_tasks`, decrements each task's `at` delay; once `at` elapses it starts type-0 tweens, performs type-1 swaps and type-2 calls immediately, and steps running tweens toward `t`. Completed tasks are deleted. Advances the counter by `_t` only while `is_enabled`. |
+| `_new_id()` *(private)* | Returns the next `task_<n>` key (a running counter, so ids never collide). |
 | `_set_value(task)` *(private)* | Writes `current_value` into `task.model[prop1]` or `task.model[prop1][prop2]`. |
 
 ### `setPropValue(prop, value, it, at)` semantics
@@ -13728,6 +12705,8 @@ Each task carries a numeric `type` that decides how it is applied:
 - `value` (`t` on the task) — the destination value.
 - `it` — interpolation time in seconds. `it > 0` on a numeric target tweens over that span (one increment per `_task_interval`); `it <= 0` writes instantly (type 1). Booleans/strings always write instantly.
 - `at` — delay in seconds before the task begins; decremented by `_task_interval` each evaluation until it elapses.
+
+**Example** (term_neonate): `add_task({model: "Heart", prop1: "heart_rate_ref", t: 150, it: 10, at: 2})` holds 120.3 for 2 s, then rises ~3 bpm per second and reaches 150 at 12 s. `add_function_call({func: "Breathing.switch_breathing", args: [false], at: 5})` switches breathing off at 5 s. A misspelled property returns `TaskScheduler: property 'Heart.no_such' not found`.
 
 ## Interaction with models
 
@@ -14270,249 +13249,164 @@ outside `model_definitions/`).
 ````markdown
 # Thermoregulation
 
-The `Thermoregulation` model is the **body-temperature process controller** for the neonate — a slow
-counterpart to [`Hormones`](./Hormones.md) (RAAS/ADH) and the [`Kidneys`](./Kidneys.md)
-autoregulation loop. It holds no compartment of its own, resolves references to other models lazily,
-runs on an `_update_interval` accumulator, and **owns its effector channels while enabled** (releasing
-them once on disable). It models a **single well-mixed core node** whose temperature is the running
-balance of heat produced against heat lost. Default config is **neutral**: thanks to the `_loss_trim`
-auto-seed the core sits exactly at `setpoint_temp` (37 °C) at rest, every owned factor is `1.0`, and
-baseline vitals/ABG are unchanged. The model only diverges when the thermal environment is perturbed
-(cold incubator, radiant warmer, evaporative loss) or when heat production changes.
+`Thermoregulation` is the body-temperature controller. It integrates a heat balance:
+- **production:** metabolic heat from the O2 consumption, plus brown-fat thermogenesis below the set-point;
+- **loss:** radiation, convection, evaporation, and the heat spent warming and humidifying inspired gas;
+- **exchange with the blood pool:** heat flows by perfusion between the body (tissue) and the blood.
 
-## Sensors → tissue node ⇄ blood pool → effectors
+From the resulting core temperature it drives:
+- the Q10 effect on O2 use (Metabolism);
+- the heart-rate change with temperature (Heart);
+- the temperature the blood and the airway gas warm toward (Blood, Gas).
 
-**Brown-fat O₂ cost.** Non-shivering thermogenesis burns oxygen: `brown_fat_heat / caloric_equiv_o2` mL O₂/s is added to [`Metabolism`](./Metabolism.md) through `vo2_bat_factor` (so CO₂ production rises with it via `resp_q`). The heat balance counts the brown-fat heat once, as `brown_fat_heat`. Released to `1.0` on disable. term_neonate at 28 °C for 20 min: VO₂ 8.2 → 9.1 mL/kg/min, SvO₂ 78.8 → 76.1 (without the cost VO₂ fell slightly, by Q10).
+It holds no compartment and is neutral at rest: a trim captured at warm-up balances the scenario's own environment.
 
-```
-SENSORS (lazy refs)              TISSUE NODE (heat balance)                   EFFECTORS (owned, default-neutral)
-Metabolism.vo2 · vo2_factor ──┐
-env_temp / radiant_temp ──────┼─► Q_prod (metabolic + brown fat)            Metabolism.vo2_temp_factor    (Q10 metabolic coupling)
-rel_humidity ─────────────────┼─► Q_loss (radiative+convective+evap +trim)  Heart.hr_temp_factor          (temperature → heart rate)
-weight (Meeh SA) ─────────────┘    − Q_perf (exchange with blood pool)       Blood.set_perfusion_target(core) (blood warms toward core)
-                                   dCore = (Q_prod − Q_loss − Q_perf)/C_t·dt  Gas.set_body_temperature(core)   (airway gas warms toward core)
-                                        ⇅ Q_perf = G_perf·(core − blood_mean)
-                                   BLOOD POOL (distributed; warms toward core via Blood's relaxation)
-```
+## Physiology
 
-## Heat balance (two-node: tissue + blood pool)
+A newborn loses heat quickly: a large surface for its mass, thin skin and little fat. The losses are:
+- **radiation** to cooler surroundings and **convection** to the air;
+- **evaporation**, very large in an extremely preterm infant in dry air;
+- **respiration:** warming and humidifying inspired gas.
 
-The body thermal mass is split into a **tissue node** (this model's integrated `core_temp`) and the
-**distributed blood pool** (every blood compartment's `temp`, warmed toward `core` by
-[`Blood`](./Blood.md)'s per-step relaxation and advected around the circuit). They exchange heat by
-perfusion. Every `_update_interval` (default **1 s** — temperature is slow), `_update_temperature(u)`
-runs, with `u` the exact elapsed time since the last update:
+The thermoneutral environment (32–36 °C, higher for smaller infants) minimises the energy spent keeping warm. Newborns cannot shiver: in the cold they burn brown fat (non-shivering thermogenesis), which raises O2 consumption. Hypothermia slows metabolism (Q10 ≈ 2–2.5) and the heart; fever does the reverse.
+
+## Inheritance
 
 ```
-Q_prod  = metabolic + brown_fat                                                  [W]
-  metabolic = (vo2_eff · weight / 60) · caloric_equiv_o2
-    vo2_eff = Metabolism.vo2 · Metabolism.vo2_factor · vo2_temp_factor           (mL O2/kg/min)
-  brown_fat = min( bat_gain · max(0, setpoint − core), bat_max_per_kg · weight ) [W]
-Q_loss_eff = SA·[ h_radiative·(core − radiant_eff) + h_convective·(core − env_temp) ]
-             + SA·evap_coeff·(1 − rel_humidity) + Q_resp + _loss_trim            [W]
-  SA = surface_area_k · weight^(2/3)              (Meeh surface area, m^2)
-  radiant_eff = radiant_temp if set, else env_temp
-  Q_resp = Gas.drain_respiratory_heat() / u       (airway gas conditioning, W)
-Q_perf  = G_perf · (core − blood_mean)                                           [W]  (NEW)
-  blood_mean = heat-capacity-weighted mean temperature over ALL blood compartments (Blood.get_thermal_state)
-  C_blood  = blood_volume_per_kg · weight · blood_density · cp_blood   (coupling mass = circulating volume)
-  G_perf   = C_blood / blood_temp_tc                  (perfusion conductance, W/K)
-C_tissue = weight · heat_capacity − C_blood
-dCore = (Q_prod − Q_loss_eff − Q_perf) / C_tissue · u                            [degC]
+BaseModelClass
+  └── Thermoregulation
 ```
 
-**The coupling is the point:** the blood pool absorbs exactly `Q_perf` via its relaxation (same
-`G_perf`), so energy is conserved. Cooling the blood — e.g. an [`Ecls`](./Ecls.md) heater-cooler on
-one compartment — lowers `blood_mean`, drives `Q_perf > 0`, and pulls the core down; rewarming
-reverses it. **Neutral at rest by construction:** with no blood sink, the blood pool relaxes to
-`core`, `blood_mean == core`, `Q_perf == 0`, and the balance reduces exactly to the former
-single-node form — so the `_loss_trim` seed keeps `dCore = 0` and baseline vitals/ABG are unchanged.
+## Properties
 
-> **Coupling mass = physiological circulating blood volume.** `blood_mean` is measured over *all*
-> blood compartments, but the sum of their volumes (~193 mL/kg) is ~2.4× real blood volume because it
-> includes organ vascular beds. Using that inflated mass for the perfusion coupling created an
-> oversized thermal buffer that damped the cold/warm response and would have forced unphysical
-> heat-transfer coefficients to compensate. So the coupling `C_blood` uses `blood_volume_per_kg`
-> (0.08 L/kg, real circulating volume); `h_radiative`/`h_convective` were then recalibrated (×1.75, to
-> 9.6/7.0 W/m²·K — still physical) so the cold response and brown-fat engagement match the former
-> single-node model. The small price is that the relaxation warms the full temperature field while the
-> core balance debits only the circulating mass — a bounded *transient* energy inexactness, zero at
-> rest. `blood_temp_tc` (shared with `Blood`) tunes both the pool relaxation and, via `G_perf`, how
-> fast the core follows the blood.
+### Config: environment and switches
 
-Neonates **cannot shiver**: below set-point they defend temperature by **non-shivering (brown-fat)
-thermogenesis** (`brown_fat_heat`), a linear deficit term capped at `bat_max_per_kg · weight`. The
-high neonatal surface-to-mass ratio (the Meeh `weight^(2/3)` term) is what makes them lose heat so
-fast. A read-out-only `skin_temp = core_temp − skin_gradient` is also exposed.
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `thermoregulation_running` | boolean | `true` | Switch. Off releases the owned channels once. |
+| `env_temp` | °C | 32 | Air temperature (term 32, preterm 34–36, fetus 37.3 for the amniotic fluid). |
+| `radiant_temp` | °C or null | null | Radiant warmer temperature; null = `env_temp`. |
+| `rel_humidity` | 0–1 | 0.5 | Ambient humidity (term 0.5, preterm 0.6–0.8, fetus 1). |
+| `respiratory_heat_loss` | boolean | `true` | Count the airway conditioning heat (off in the fetus). |
+| `resp_window` | s | 30 | Averaging window for the respiratory heat (must span several breaths). |
+| `metabolism_name`, `heart_name`, `blood_name`, `gas_name` | – | the model names | Wiring. |
 
-## The auto-seed neutrality idiom
+### Config: body and effectors
 
-A neonate at rest is not in raw radiative/convective balance with a 32 °C incubator — clothing,
-posture, nesting and insulation supply an offset the single-node geometry doesn't capture. Rather
-than tune coefficients per scenario, the model **auto-seeds** it: at the first update after
-`_warmup_delay` (5 s, to let the circuit settle), it sets
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `setpoint_temp` | °C | 37 | Hypothalamic set-point (fetus 37.5). |
+| `heat_capacity` | J/(kg·K) | 3470 | Specific heat of tissue. |
+| `surface_area_k` | – | 0.05 | Body surface = k · weight^(2/3) m² (Meeh). |
+| `h_radiative`, `h_convective` | W/(m²·K) | 9.6, 7.0 | Heat-transfer coefficients. |
+| `evap_coeff` | W/m² | 6.0 | Evaporative loss per unit dryness (1 − humidity). |
+| `caloric_equiv_o2` | J/mL O2 | 20.1 | Heat per mL O2 consumed. |
+| `blood_density`, `cp_blood` | kg/L, J/(kg·K) | 1.06, 3800 | Blood heat capacity. |
+| `blood_temp_tc` | s | 10 | Perfusion equilibration time constant (match `Blood.blood_temp_tc`). |
+| `blood_volume_per_kg` | L/kg | 0.08 | Circulating volume used for the perfusion coupling mass. |
+| `bat_gain`, `bat_max_per_kg` | W/°C, W/kg | 6, 4.5 | Brown-fat heat per °C below the set-point, and its ceiling (0 in the fetus). |
+| `q10` | – | 2.3 | Metabolic Q10. |
+| `vo2_temp_factor_min`, `vo2_temp_factor_max` | – | 0.5, 2.5 | Clamp on the Q10 factor. |
+| `hr_temp_gain` | 1/°C | 0.1 | Heart-rate factor change per °C. |
+| `hr_temp_factor_min`, `hr_temp_factor_max` | – | 0.6, 1.6 | Clamp on the heart-rate factor. |
 
-```
-_loss_trim = Q_prod − q_loss_raw      (evaluated at core == setpoint)
-```
+### Baseline (captured, saved with the state)
 
-so `Q_loss_eff == Q_prod` exactly and `dCore = 0`. The body is therefore **neutral at any baseline
-weight, VO2, or env_temp the scenario ships with**, and only the *subsequent* change of
-`env_temp` / `radiant_temp` / `rel_humidity` / VO2 moves the core. This is the same idiom as the
-Hormones setpoint anchoring and the Kidneys TGF seed.
-
-## Effectors (owned channels)
-
-On each update `_apply_effectors()` maps core temperature to four channels, all default-neutral and
-independent of `Ans` / `Drugs`:
-
-| Channel | Mapping | Notes |
+| Property | Unit | Description |
 |---|---|---|
-| `Metabolism.vo2_temp_factor` | `q10 ^ ((core − 37)/10)`, clamped `[vo2_temp_factor_min, vo2_temp_factor_max]` | Q10 metabolic coupling; folds into `vo2_eff` |
-| `Heart.hr_temp_factor` | `1 + hr_temp_gain·(core − setpoint)`, clamped `[hr_temp_factor_min, hr_temp_factor_max]` | drives a previously-dormant Heart channel (already summed into HR in `Heart.calc`) |
-| `Blood.set_perfusion_target(core)` | sets the target every blood compartment warms toward (via `Blood`'s relaxation), skipping device-controlled ones (`temp_ext_override`) | blood temperature feeds the (dT) term of the Stewart acid-base / O2-dissociation solver (`BloodComposition`), and the heat this exchange carries returns to the core balance via `Q_perf` |
-| `Gas.set_body_temperature(core)` | propagates core temp to the body-warmed airway gas compartments (`DS`/`ALL`/`ALR`) | alveoli target core directly, dead space holds its build-time offset (≈5 °C) below it; sets each `GasCapacitance.target_temp` — see [`GasCapacitance`](./GasCapacitance.md). `MOUTH` (inspired-air source) is excluded |
+| `loss_trim` | W | Heat-loss offset (insulation, posture) that balances production at the set-point in the scenario's environment. |
+| `loss_trim_seeded` | boolean | The trim has been captured. A fresh build starts at the set-point; a saved state keeps its own core temperature. |
 
-The master gate `thermoregulation_running` (default `true`), when set `false`, calls
-`_release_channels()` **once** — resetting `vo2_temp_factor`/`hr_temp_factor` to `1.0`,
-`Blood.set_perfusion_target(37.0)` and `Gas.set_body_temperature(setpoint)` (restoring the build-time gas
-targets) — then idles. This is the clean "off" switch; while enabled, manual edits to those channels
-are overwritten each tick.
+### Outputs
 
-All four channels are **neutral at rest by construction**: at `core == setpoint` the factors are
-`1.0`, blood is at set-point, and the gas targets equal their build values — so a scenario that ships
-thermoregulation has unchanged baseline vitals/ABG until the thermal environment is perturbed.
-
-## Respiratory heat loss (`Q_resp`)
-
-Conditioning inspired gas — warming it to body temperature and saturating it with water vapour —
-costs the body real heat. Rather than deriving that from minute ventilation, each
-[`GasCapacitance`](./GasCapacitance.md) **meters the energy it actually drew from its wall**:
-`add_heat` accumulates `n_gas · cp_molar · dT` into `_q_wall_sensible`, and `add_watervapour`
-accumulates `n_h2o · latent_h2o` into `_q_wall_latent`. `Gas.drain_respiratory_heat()` sums and
-clears both across the body-warmed compartments (`DS`, `ALL`, `ALR` — the keys of
-`Gas._body_temp_delta`) and returns joules since the last call; this class divides by `u` to get
-watts.
-
-Reading the gas physics instead of computing `MV · (T_alv − T_insp)` matters for three reasons:
-
-- It needs no spontaneous-vs-ventilated discrimination. `Breathing.minute_volume` is a per-breath
-  latch that reads `0` under mechanical ventilation and can be up to 60 s stale during apnea, and
-  `Breathing.exp_tidal_volume` is polluted by `VENT_ETTUBE.flow` during CPAP/PS — none of which can
-  mislead a term driven by the gas actually moved.
-- The drained total is **signed**, so heat and water recovered when expired gas cools and condenses
-  in the dead space are credited back. That is real countercurrent airway recovery, and it is why
-  the measured term (~0.87 W in `term_neonate`) sits below the ~1.24 W a bulk formula gives.
-- `fixed_composition` compartments skip both routines, and only body-warmed compartments are
-  drained, so the inspired-air source (`MOUTH`) and the device-heated `Ventilator`/`Ecls` gas lines
-  contribute nothing without being special-cased.
-
-**`Q_resp` is averaged over `resp_window` (30 s), not reported per update**, because
-`_update_interval` (1 s) is shorter than a breath. An adult at 13 breaths/min swings between −0.8 W
-and +19.4 W across the cycle about a true mean of 7.3 W. The running balance would be right on
-average either way, but `_loss_trim` is seeded from a **single snapshot** — landing that on an
-unlucky breath phase would bias resting core permanently (≈1 °C for an adult, since the trim error
-divides by only `SA·(h_radiative + h_convective)` ≈ 12.7 W/K). The seed therefore also waits on
-`_resp_ready`, set when the first full window closes, so it is always fed a breath-spanning mean.
-The cost is that the seed happens at ~30 s instead of 5 s; the extra unseeded drift is < 0.02 °C.
-
-`Q_resp` is folded into `q_loss_raw` **before** the `_loss_trim` auto-seed, so it is absorbed at
-warm-up and the model stays exactly neutral at rest — no scenario's baseline moves. The term shows
-up only when inspired conditions *change*. Measured on room air (20 °C / 50 % RH): **0.87 W of
-9.62 W heat production in `term_neonate` (9 %)**, **0.21 W of 2.71 W in `preterm_28wk` (8 %)**, ~83 %
-of it latent. A heated humidifier (37 °C / 100 % RH) drives it to ≈ 0 and the core rises accordingly
-— which is the thermal reason NICU ventilators heat and humidify, and it previously scored as no
-effect at all.
-
-**Expect a small core response.** Measured whole-model thermal gain is ≈ **0.043 °C per watt**, so
-abolishing the neonate's 0.94 W moves core only ≈ +0.04 °C, approached with a ~430 s time constant.
-That is far below the ≈ 0.5 °C/W a naive `1 / (SA·(h_radiative + h_convective))` estimate suggests,
-because most of the retained heat goes into `Q_perf` rather than into the tissue node. This is a
-property of the pre-existing two-node coupling, not of `Q_resp`: an environmental perturbation of
-the same size (`env_temp` +1.15 °C, which moves radiative *and* convective since `radiant_temp` is
-`null`) gives 0.043 °C/W as well, matching within 2 %.
-
-> Noted while verifying, **pre-existing and not changed here**: after either perturbation `Q_perf`
-> settles at a *sustained* non-zero value (≈1.17 W for the humidifier case) once the residual has
-> converged to ~0. The bullet below describes the coupling-mass inexactness as a *transient* that is
-> zero at rest; at a perturbed steady state it appears not to vanish. Worth a look before relying on
-> absolute core-temperature excursions, independently of respiratory heat.
-
-> **Calibration note.** `evap_coeff` was documented as the "evaporative/**respiratory**" coefficient
-> — respiratory loss used to be lumped into that skin surface term. It is now double-counted there.
-> Because `_loss_trim` auto-seeds, this does **not** move the resting core, but it does leave
-> sensitivity to ambient `rel_humidity` overstated. The `6.0` default is deliberately left unchanged
-> so resting behaviour and today's humidity response are untouched; reducing it to a skin-only value
-> is a physiological judgement left to the modeller.
-
-## Key parameters (defaults / units)
-
-| Parameter | Default | Meaning |
+| Property | Unit | Description |
 |---|---|---|
-| `env_temp` | `32.0 °C` | ambient air temperature (neutral-thermal incubator) |
-| `radiant_temp` | `null` | radiant-warmer effective temp; `null` → use `env_temp` |
-| `rel_humidity` | `0.5` | ambient relative humidity (fraction) — modulates evaporative loss |
-| `setpoint_temp` | `37.0 °C` | hypothalamic set-point |
-| `heat_capacity` | `3470 J/kg/K` | specific heat of body tissue |
-| `surface_area_k` | `0.05` | Meeh constant in `SA = k·weight^(2/3)` |
-| `h_radiative` / `h_convective` | `9.6` / `7.0 W/m²/K` | radiative / convective transfer coefficients (recalibrated ×1.75 for the two-node coupling) |
-| `evap_coeff` | `6.0 W/m²` per `(1−humidity)` | **skin** (transepidermal) evaporative loss coefficient — see the calibration note under *Respiratory heat loss* |
-| `respiratory_heat_loss` | `true` | count `Q_resp` in the balance; set `false` to compare against a body that conditions gas for free |
-| `resp_window` | `30.0 s` | averaging window for `Q_resp`; must span several breaths (see above) |
-| `caloric_equiv_o2` | `20.1 J/mL` | heat released per mL O2 consumed |
-| `blood_density` / `cp_blood` | `1.06 kg/L` / `3800 J/kg/K` | blood pool density and specific heat |
-| `blood_temp_tc` | `10.0 s` | perfusion equilibration time constant (`G_perf = C_blood / tc`); shared with `Blood` |
-| `blood_volume_per_kg` | `0.08 L/kg` | circulating blood volume used for the core-coupling mass |
-| `bat_gain` / `bat_max_per_kg` | `6.0 W/°C` / `4.5 W/kg` | brown-fat gain and ceiling |
-| `q10` | `2.3` | Q10 of metabolic rate (per 10 °C) |
-| `hr_temp_gain` | `0.1` | HR factor rise per °C above set-point (~10%/°C) |
-| `vo2_temp_factor_min/max` | `0.5` / `2.5` | Q10 clamp |
-| `hr_temp_factor_min/max` | `0.6` / `1.6` | HR-factor clamp |
+| `core_temp`, `skin_temp`, `skin_gradient` | °C | Core, skin read-out (= core − `skin_gradient`, 1 °C) and the gradient. |
+| `heat_production`, `heat_loss`, `brown_fat_heat` | W | Production, effective loss (with the trim), brown-fat part. |
+| `q_respiratory`, `q_perfusion` | W | Airway conditioning heat; tissue → blood heat flow. |
+| `blood_temp_mean` | °C | Heat-capacity-weighted mean blood temperature. |
+| `vo2_temp_factor`, `vo2_bat_factor`, `hr_temp_factor` | – | Applied effects. |
 
-Read-outs: `core_temp`, `skin_temp`, `heat_production`, `heat_loss`, `brown_fat_heat`,
-`blood_temp_mean`, `q_perfusion`, `vo2_temp_factor`, `hr_temp_factor`.
+## Calculation
 
-## Risk note
+Every 1 s:
+```
+Q_prod = vo2 · vo2_factor · vo2_temp_factor · weight / 60 · 20.1  +  brown fat     (W)
+brown fat = min(bat_gain · max(0, set-point − core), bat_max_per_kg · weight)
+SA     = surface_area_k · weight^(2/3)
+Q_loss = SA·[h_rad·(core − radiant) + h_conv·(core − env)] + SA·evap_coeff·(1 − humidity) + Q_resp + loss_trim
+Q_perf = (blood_volume_per_kg · weight · ρ · cp / blood_temp_tc) · (core − blood_mean)
+d core / dt = (Q_prod − Q_loss − Q_perf) / (weight · heat_capacity − C_blood)
+```
+- **`Q_resp`** is the heat the airway compartments actually spent warming and humidifying gas, metered by [GasCapacitance](./GasCapacitance.md) and drained through [`Gas.drain_respiratory_heat`](./Gas.md), averaged over `resp_window`. It is signed, so heat recovered when expired gas cools in the dead space is credited back. It works the same under mechanical ventilation and in apnoea.
+- **The trim** is captured once, after 5 s and a full `resp_window`, so production equals loss at the set-point.
 
-The path **core → VO2 (Q10) → metabolic heat → core** is **positive feedback**: a warmer core raises
-VO2 which raises heat production which warms the core further. It is bounded by the dominant heat-loss
-limb (which grows ∝ `core − env_temp` and so always overtakes) plus the `vo2_temp_factor` clamp
-`[0.5, 2.5]`. Keep the clamp in place when re-tuning `q10` or `caloric_equiv_o2`.
+**Effects** (written every update):
+- `Metabolism.vo2_temp_factor = q10^((core − 37)/10)` (clamped);
+- `Metabolism.vo2_bat_factor`: brown fat's O2 cost added to Metabolism's O2 use (its heat is counted once, above);
+- `Heart.hr_temp_factor = 1 + hr_temp_gain · (core − set-point)` (clamped);
+- `Blood.set_perfusion_target(core)` and `Gas.set_body_temperature(core)`.
 
-## Thermal model — scope & known limitations
+**Example** (term_neonate, room moved from 32 to 24 °C):
+- after 20 min: core 35.9 °C, brown fat 6.6 W (doubling Metabolism's O2 use, `vo2_bat_factor` 1.97), heart-rate factor 0.89, Q10 factor 0.91;
+- after 40 min: core 35.3 °C.
 
-The temperature model spans this class plus [`GasCapacitance`](./GasCapacitance.md) (airway gas warms
-toward core) and [`Blood`](./Blood.md) (blood pool warms toward core, two-node coupled). It is
-neutral at rest and reproduces environmental cold/warm defence, brown-fat thermogenesis, and
-device-driven blood cooling/rewarming. The following are **deliberate open items**, not bugs — recorded
-so they are not rediscovered as defects:
+## Factor system
 
-- **Respiratory *water* loss is still not conserved.** `Q_resp` charges the body the *heat* of
-  conditioning inspired gas, but `add_watervapour` still draws the water itself from an implicit
-  infinite source and discards condensate. Insensible fluid loss through the airway is therefore
-  still unmodelled and does not reach fluid balance — only its thermal cost does.
-- **`MOUTH` and `env_temp` are independent ambients.** The inspired-air source (`MOUTH`, seeded ~20 °C)
-  and the thermal environment (`env_temp`, 32 °C incubator default) are not unified, so a cold/warm
-  environment does not consistently drive inspired-gas temperature.
-- **Blood core-coupling uses circulating volume, not the compartment sum.** `blood_mean` is measured
-  over all blood compartments, but the coupling mass is `blood_volume_per_kg` (real circulating volume)
-  because the compartments sum to ~2.4× that (they include vascular beds). This keeps the loss
-  coefficients physical at the cost of a small, bounded *transient* energy inexactness — zero at rest.
-- **`ctotal` is not gas-law-consistent in a sealed static gas pocket.** Pressure comes from elastance
-  while `ctotal` sums species, and the two are not hard-coupled. For flowing gas this stays within ~2 %
-  (see [`GasCapacitance`](./GasCapacitance.md)); a never-ventilated compartment (`fetus_term` lungs)
-  drifts to ~8.6 %.
-- **Warm-environment core response is more defended** than the former single-node model (rise ~0.57 vs
-  ~0.82 °C in the probe's hot step) — a consequence of the blood/core thermal buffer, considered more
-  physiological.
+It owns `Metabolism.vo2_temp_factor`, `vo2_bat_factor` and `Heart.hr_temp_factor`, and sets the perfusion and airway temperature targets.
 
-## See also
-[`Metabolism`](./Metabolism.md) (VO2 source + the Q10 effector target) ·
-[`Heart`](./Heart.md) (`hr_temp_factor` channel) ·
-[`Blood`](./Blood.md) (`set_perfusion_target` → blood warming, acid-base / O2-dissociation) ·
-[`Gas`](./Gas.md) / [`GasCapacitance`](./GasCapacitance.md) (`set_body_temperature` → airway gas targets) ·
-[`Ecls`](./Ecls.md) (blood-side heater-cooler) ·
-[`Hormones`](./Hormones.md) (sibling controller / neutrality idiom).
+## Inputs and outputs
+
+- **Reads:** Metabolism (`vo2`, `vo2_factor`); `Blood.get_thermal_state`; `Gas.drain_respiratory_heat`; `model.weight`.
+- **Writes:** the channels above.
+- **Written by:** the user (environment, warmer, humidity, switch).
+- **Read by:** Gas (its `setpoint_temp`, at build), `DataCollector` watchers, the Monitor.
+
+## Assumptions and limitations
+
+- **Heat production counts Metabolism only,** not the myocardium (Mob); the trim absorbs it at rest, but a change in cardiac work doesn't change heat.
+- **Respiratory heat is 0.87 W of 9.6 W in term_neonate on room air** (~9 %, mostly latent). A heated humidifier drives it to ~0, but the whole-model thermal gain is only ~0.043 °C/W, so the core rises just ~0.04 °C. Most retained heat goes into `Q_perf`.
+- **`Q_perf` doesn't return to 0 after a perturbation** (≈ 1.2 W sustained after the humidifier step), although the coupling should be energy-neutral at rest. The coupling mass is the circulating volume (0.08 L/kg), while Blood relaxes all compartments (~2.4× that). Worth checking before relying on absolute temperature excursions.
+- **`evap_coeff` still contains the old respiratory loss,** now counted separately by `Q_resp`. Rest is unaffected (the trim absorbs it), but the sensitivity to ambient humidity is overstated.
+- **Respiratory water loss** isn't conserved (only its heat is charged).
+- **The inspired air (`MOUTH`, 20 °C) and `env_temp` are independent:** a cold room doesn't cool the inspired gas.
+- **No skin node, no peripheral vasoconstriction:** skin temperature is a fixed offset; the infant's own vasomotor defence is not modelled.
+
+## Example definition (JSON)
+
+From `term_neonate.json`, `models.Thermoregulation` (trimmed to the main config):
+
+```json
+{
+  "name": "Thermoregulation",
+  "model_type": "Thermoregulation",
+  "is_enabled": true,
+  "thermoregulation_running": true,
+  "env_temp": 32,
+  "radiant_temp": null,
+  "rel_humidity": 0.5,
+  "respiratory_heat_loss": true,
+  "setpoint_temp": 37,
+  "surface_area_k": 0.05,
+  "bat_gain": 6,
+  "bat_max_per_kg": 4.5,
+  "q10": 2.3
+}
+```
+
+## Usage in the scenarios
+
+One instance in every scenario.
+
+| Scenario | `env_temp` (°C) | Humidity | Set-point | Brown fat | Respiratory heat |
+|---|---|---|---|---|---|
+| term_neonate | 32 | 0.5 | 37 | yes | yes |
+| preterm_30wk / 28wk / 25wk, Bischoff | 34 / 35 / 36 / 36 | 0.6 / 0.7 / 0.8 / 0.8 | 37 | yes | yes |
+| fetal ×3 | 37.3 | 1.0 | 37.5 | no | no |
+
+## References
+
+No literature values; the coefficients are standard heat-transfer estimates, and the trim makes every scenario neutral at its own environment.
 
 ````
 
@@ -14521,467 +13415,346 @@ so they are not rediscovered as defects:
 ````markdown
 # TimeVaryingElastance
 
-A `TimeVaryingElastance` is a volume compartment whose stiffness **varies over the cardiac cycle** —
-the base for contractile chambers (`HeartChamber`, `BloodTimeVaryingElastance`). Each step it
-interpolates between a relaxed (diastolic) and a contracted (systolic) pressure–volume relation,
-driven by an activation factor. It is the canonical implementation of the factor / effective-value
-pattern for the dual-elastance case.
+A `TimeVaryingElastance` is an elastic compartment whose stiffness changes during the heartbeat. It moves between a relaxed (diastolic) and a contracted (systolic) pressure–volume relation, driven by an activation signal from the `Heart`. It is the base of every heart chamber and of the coronary bed.
+
+## Physiology
+
+Heart muscle is soft when relaxed and stiff when contracted. If a chamber's volume is held fixed, its pressure therefore rises during systole and falls during diastole. The *time-varying elastance* concept (Suga and Sagawa) captures this with one number that changes over the cycle:
+
+- **Diastole.** The chamber sits on its *end-diastolic pressure–volume relation*: low elastance (`el_min`), so it fills at low pressure. A stiff, poorly relaxing ventricle (diastolic dysfunction) has a high `el_min`.
+- **Systole.** The elastance rises to `el_max`, the slope of the *end-systolic pressure–volume relation* and the classic load-independent index of contractility. A higher `el_max` means a stronger contraction.
+- **In between,** the activation signal from the `Heart` (0 at rest, 1 at peak contraction) blends the two curves. That one signal produces ejection, isovolumic relaxation and filling, depending on the valves and the pressures around the chamber.
+
+The same mechanism drives the coronary bed: the contracting myocardium squeezes the intramural vessels in systole.
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── TimeVaryingElastance        (el_min/el_max, act_factor)
-        ├── HeartChamber               (+ blood composition, ANS/MOB contractility)
+  └── TimeVaryingElastance
+        ├── HeartChamber               (+ blood composition, ANS/drug/load contractility; own factor composition)
         └── BloodTimeVaryingElastance  (+ blood composition)
 ```
 
-See [BaseModelClass.md](./BaseModelClass.md) for the lifecycle contract and shared fields.
-
-## What it models
-
-A chamber whose recoil pressure swings between an end-diastolic curve (relaxed) and an end-systolic
-curve (contracted) under an activation signal. With `act_factor = 0` it behaves like a passive
-[`Capacitance`](./Capacitance.md) on its diastolic curve; with `act_factor = 1` it sits on its
-systolic curve. This is the standard time-varying-elastance model of cardiac contraction.
+`HeartChamber` overrides `calc_elastances` and `calc_volumes` (extra layers; see [HeartChamber](./HeartChamber.md)) but uses `calc_pressure` from this class. `BloodTimeVaryingElastance` uses all of this class's calculation.
 
 ## Properties
 
-### Config / independent (set in the definition JSON)
+### Config (set in the definition JSON)
 
-| Property | Unit | Description |
-|---|---|---|
-| `u_vol` | L | Unstressed volume |
-| `el_min` | mmHg/L | Minimal (end-diastolic) elastance — the EDPVR |
-| `el_max` | mmHg/L | Maximal (end-systolic) elastance — the ESPVR |
-| `el_k` | mmHg/L² | Non-linear elastance coefficient (diastolic curve only) |
-| `pres_ext` | mmHg | External pressure applied this step (non-persistent; cleared each step) |
-| `act_factor` | unitless | Activation factor (0 → 1), supplied by the `Heart` model |
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `u_vol` | L | 0.0 | Unstressed volume (the end-systolic and end-diastolic relations share it). |
+| `el_min` | mmHg/L | 0.0 | Minimal (diastolic) elastance. |
+| `el_max` | mmHg/L | 0.0 | Maximal (end-systolic) elastance: contractility. |
+| `el_k` | mmHg/L² | 0.0 | Non-linear term of the diastolic relation, above `u_vol` only. The heart chambers of 8 scenarios use a pure quadratic diastolic relation (`el_min` 0, `el_k` > 0); see [HeartChamber](./HeartChamber.md#the-diastolic-relation). |
+| `vol` | L | 0.0 | Volume; the starting volume in a definition. |
+| `u_vol_factor`, `el_min_factor`, `el_max_factor`, `el_k_factor` | – | 1.0 | Non-persistent factors, reset to 1 every step. |
+| `u_vol_factor_ps`, `el_min_factor_ps`, `el_max_factor_ps`, `el_k_factor_ps` | – | 1.0 | Persistent factors. |
+| `u_vol_factor_scaling_ps`, `el_min_factor_scaling_ps`, `el_max_factor_scaling_ps`, `el_k_factor_scaling_ps` | – | 1.0 | Persistent scaling factors. |
 
-Factor inputs (all default `1.0`) — see [Factor system](#factor-system):
-`u_vol_factor`, `el_min_factor`, `el_max_factor`, `el_k_factor` (non-persistent);
-`u_vol_factor_ps`, `el_min_factor_ps`, `el_max_factor_ps`, `el_k_factor_ps` (persistent);
-`u_vol_factor_scaling_ps`, `el_min_factor_scaling_ps`, `el_max_factor_scaling_ps`,
-`el_k_factor_scaling_ps` (scaling).
+### Outputs
 
-### Computed / dependent (engine outputs)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pres_in` | mmHg | 0.0 | Recoil pressure of the wall. |
+| `pres` | mmHg | 0.0 | `pres_in + pres_ext`: what the valves and connectors read. |
+| `el_min_eff`, `el_max_eff`, `el_k_eff` | mmHg/L, mmHg/L² | 0.0 | Effective values after the factor layers. `el_max_eff` is kept ≥ `el_min_eff`. |
+| `u_vol_eff` | L | 0.0 | Effective unstressed volume, floored at 0. |
 
-| Property | Unit | Description |
-|---|---|---|
-| `vol` | L | Current volume |
-| `pres` | mmHg | Total pressure (`pres_in + pres_ext`) |
-| `pres_in` | mmHg | Internal recoil pressure |
-| `el_min_eff` | mmHg/L | Effective minimal elastance after the factor layers |
-| `el_max_eff` | mmHg/L | Effective maximal elastance after the factor layers |
-| `u_vol_eff` | L | Effective unstressed volume after the factor layers |
-| `el_k_eff` | mmHg/L² | Effective non-linear coefficient after the factor layers |
+### Set by other models
 
-## Calculation cycle (`calc_model`)
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `act_factor` | – | 0.0 | Activation, 0 (relaxed) to 1 (fully contracted). Written every step by `Heart`: `aaf` for the atria, `vaf` for the LV and the coronaries, `rvaf` for the RV (equal to `vaf` unless `Heart.rv_delay` is set). A saved value is overwritten on the first step. |
+| `pres_ext` | mmHg | 0.0 | External pressure for this step (the `PERICARDIUM` container), reset after use. |
 
-Each step: `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
+## Calculation
 
-### `calc_elastances`
+`calc_model()` runs `calc_elastances()` → `calc_volumes()` → `calc_pressure()`.
 
-```
-el_min_eff = el_min + (el_min_factor − 1)·el_min + (el_min_factor_ps − 1)·el_min + (el_min_factor_scaling_ps − 1)·el_min
-el_max_eff = el_max + (el_max_factor − 1)·el_max + (el_max_factor_ps − 1)·el_max + (el_max_factor_scaling_ps − 1)·el_max
-el_k_eff   = el_k   + (el_k_factor − 1)·el_k     + (el_k_factor_ps − 1)·el_k     + (el_k_factor_scaling_ps − 1)·el_k
-```
+1. **`calc_elastances`**: `el_min_eff`, `el_max_eff` and `el_k_eff` from the base value and the three layers, composed additively. `el_max_eff` is raised to `el_min_eff` if it falls below it. The non-persistent factors are then reset.
+2. **`calc_volumes`**: `u_vol_eff` from the three layers, floored at 0. `u_vol_factor` is reset.
+3. **`calc_pressure`**, with `S = vol − u_vol_eff`:
 
-It then clamps `el_max_eff` to be ≥ `el_min_eff`, and resets the non-persistent factors
-`el_min_factor`, `el_max_factor`, `el_k_factor` to `1.0`.
+   ```
+   p_es    = el_max_eff · S                                     end-systolic relation (linear)
+   p_ed    = (S > 0 ? el_k_eff · S² : 0) + el_min_eff · S       end-diastolic relation
+   pres_in = p_ed + (p_es − p_ed) · act_factor
+   pres    = pres_in + pres_ext
+   pres_ext = 0
+   ```
 
-### `calc_volumes`
+   At `act_factor` 0 the chamber is on its diastolic curve, at 1 on its systolic curve, and in between the pressure is blended linearly.
 
-```
-u_vol_eff = u_vol + (u_vol_factor − 1)·u_vol + (u_vol_factor_ps − 1)·u_vol + (u_vol_factor_scaling_ps − 1)·u_vol
-```
-
-A negative sum (the factor layers add up) is clamped to `0`, as in [Capacitance](./Capacitance.md); `HeartChamber`'s override, which adds the remodeling layer, does the same. Then resets the non-persistent factor `u_vol_factor` to `1.0`.
-
-### `calc_pressure`
-
-```
-p_ms = (vol − u_vol_eff) · el_max_eff                                  (end-systolic, linear)
-p_ed = el_k_eff · s² · [s > 0] + el_min_eff · s,  s = vol − u_vol_eff   (end-diastolic, non-linear)
-pres_in = (p_ms − p_ed) · act_factor + p_ed
-pres    = pres_in + pres_ext                                          (total)
-pres_ext := 0                                                         (external pressure is non-persistent)
-```
-
-`act_factor` runs `0 → 1` over a contraction: at 0 the chamber sits on its diastolic curve (`p_ed`), at
-1 on its systolic curve (`p_ms`), interpolating linearly in between. The non-linear `el_k` term lives
-only in the diastolic relation (the EDPVR stiffens at high filling), which is the physiologically
-expected shape, and only above `u_vol` (same guard as [Capacitance](./Capacitance.md)).
-
-`act_factor` is supplied by the `Heart` model (the atrial/ventricular activation functions `aaf`/
-`vaf`); see [HeartChamber.md](./HeartChamber.md) for the ANS/MOB contractility coupling layered on top
-of `el_max`.
-
-## Volume flow
-
-`volume_in`/`volume_out` behave as in [Capacitance](./Capacitance.md): `volume_out` clamps at `0` and
-returns the un-removed volume; subclasses extend `volume_in` to mix the incoming blood composition. Heart chambers can fall below their unstressed volume during ejection
-(ventricular suction), which the formula handles naturally.
+**Volume transfer.** `volume_in(dvol, comp_from)` adds `dvol` (the blood subclasses also mix the composition). `volume_out(dvol)` removes it, stops at 0 and returns what could not be removed, as in [Capacitance](./Capacitance.md). There is no `fixed_composition` here.
 
 ## Factor system
 
-Both elastances plus `el_k` and `u_vol` are **never used raw**. Each combines three multiplier layers
-**additively against the base** into an `*_eff` value:
+`u_vol`, `el_min`, `el_max` and `el_k` each carry the three layers, composed **additively** in this class (see [ARCHITECTURE §7a](./ARCHITECTURE.md#7a-the-factor--effective-value-pattern)). `HeartChamber` replaces this with its own composition. Writers in the current code:
 
-| Layer | Persistence | Set by |
-|---|---|---|
-| `<p>_factor` | reset to `1.0` every step | transient interventions |
-| `<p>_factor_ps` | persistent | user / scenario / regulator models (ANS, MOB…) |
-| `<p>_factor_scaling_ps` | persistent | `ModelScaler` (allometric/weight scaling) |
+| Layer | Writers |
+|---|---|
+| `_factor` (reset every step) | `HeartChamber` internally (ANS, drugs, load) |
+| `_factor_ps` | `Heart`: `set_contractility` → `el_max_factor_ps`, `set_relaxation` → `el_min_factor_ps` (left and right separately); the `Calibrator` (`el_max_factor_ps`); the user via `setPropValue` |
+| `_factor_scaling_ps` | `ModelScaler` (`scale_heart_el_min`/`el_max`, whole heart or left/right) |
 
-```
-p_eff = p + (factor − 1)·p + (factor_ps − 1)·p + (factor_scaling_ps − 1)·p
-```
+## Inputs and outputs
 
-Same pattern as [`Capacitance`](./Capacitance.md), applied to `el_min`, `el_max`, `el_k`, and `u_vol`.
-Contractility interventions typically drive `el_max_factor_ps`.
+- **Reads:** nothing from other models; `act_factor` and `pres_ext` are written onto it.
+- **Written by:** `Heart` (`act_factor`, contractility and relaxation factors); `PERICARDIUM` (`pres_ext`); the connected resistors and valves (volume); `ModelScaler`.
+- **Read by:**
+  - the valves and connectors (`pres`), and `Heart` (volumes and pressures for the per-beat analysis: EDV, ESV, SV, EF);
+  - `Resistor`s with `implicit`, which read the instantaneous local elastance: the diastolic `el_min_eff + 2·el_k_eff·S` blended toward `el_max_eff` by `act_factor`;
+  - `DataCollector` watchers (PV loops).
+
+## Assumptions and limitations
+
+- **One unstressed volume for both relations.** The end-systolic relation passes through `u_vol` (`V0` = `u_vol`); a separate `V0` for the ESPVR isn't modelled.
+- **Linear systolic relation.** `el_max` is a constant slope; the curvature of the real ESPVR at high loads is ignored.
+- **Quadratic, not exponential, diastolic relation.** The diastolic term is `el_min·S + el_k·S²`; real EDPVRs are steeper (power law with exponent ~2.8, Klotz 2006). A pure quadratic (used for the heart chambers) is the closest this form gets. Apart from it, the pericardium is the only diastolic non-linearity.
+- **No force–velocity or length-dependent activation.** Contraction depends on volume and activation only. Shortening deactivation and the Frank–Starling length effect on activation aren't modelled; preload acts through the pressure–volume relation alone.
+- **Below the unstressed volume** the systolic term goes strongly negative (`el_max · S`), which acts as early-diastolic suction.
 
 ## Example definition (JSON)
 
-Plain `TimeVaryingElastance` is not instantiated directly in scenarios (the contractile subclasses are
-used); a definition block carries the config fields below (factor fields default to `1.0` and are
-usually omitted):
+No scenario uses a plain `TimeVaryingElastance`. The coronary bed uses this class's calculation unchanged; from `term_neonate.json`, `models.Mob.components.COR` (a `BloodTimeVaryingElastance`, trimmed to the props this class defines):
 
 ```json
 {
-  "name": "EXAMPLE_CHAMBER",
-  "description": "contractile chamber",
-  "model_type": "TimeVaryingElastance",
+  "name": "COR",
+  "model_type": "BloodTimeVaryingElastance",
   "is_enabled": true,
-  "vol": 0.015,
-  "u_vol": 0.005,
-  "el_min": 100,
-  "el_max": 1500,
+  "u_vol": 0.00028,
+  "el_min": 30000,
+  "el_max": 90000,
   "el_k": 0,
-  "act_factor": 0
+  "vol": 0.00067
 }
 ```
 
-## Usage in the model
+## Usage in the scenarios
 
-- The base for every contractile cardiac chamber: `HeartChamber` (LV/RV/LA/RA) and
-  `BloodTimeVaryingElastance`.
-- `el_max_factor_ps` is the primary contractility lever (used by ANS/MOB and scenario tuning);
-  `el_min`/`el_min_factor_ps` set diastolic stiffness (e.g. for filling-pressure / CVP shaping).
-- `act_factor` is written each step by the `Heart` model — do not set it statically.
+Six instances in every shipped scenario:
+
+| Instance | Class | Activation | term_neonate `el_min` / `el_k` / `el_max` | `u_vol` (mL) |
+|---|---|---|---|---|
+| `LV` | HeartChamber | `vaf` | 0 / 1.56·10⁵ / 30478 | 0.73 |
+| `RV` | HeartChamber | `rvaf` | 0 / 1.79·10⁵ / 28120 | 4.0 |
+| `LA` | HeartChamber | `aaf` | 0 / 2.11·10⁵ / 2975 | 0 |
+| `RAIVCI`, `RASVC` | HeartChamber | `aaf` | 0 / 9.20·10⁵ / 5947 each | 0 |
+| `COR` | BloodTimeVaryingElastance | `vaf` | 30000 / 0 / 90000 | 0.28 |
+
+(`el_min`, `el_max` in mmHg/L, `el_k` in mmHg/L². preterm_25wk and bischoff_ltr_pda still have linear chambers, `el_k` 0.)
+
+The heart chambers are owned by `Heart`, the coronary bed by `Mob`.
+
+## References
+
+- Suga H, Sagawa K, Shoukas AA. Load independence of the instantaneous pressure-volume ratio of the canine left ventricle and effects of epinephrine and heart rate on the ratio. *Circ Res* 1973;32(3):314–322. [doi:10.1161/01.res.32.3.314](https://doi.org/10.1161/01.res.32.3.314) (the time-varying elastance concept).
+
+The elastance and unstressed-volume values are scenario calibrations (see the `*Reference.md` pages).
 
 ````
+
+### FILE: explain-engine/docs/Units.md
+
+```markdown
+# Units
+
+`helpers/Units.js` holds the engine's shared physical constants and unit conversions. Every model that converts between gas volumes and amounts, or needs water vapour pressure, imports them from here, so each constant is defined once.
+
+## Physiology
+
+Gas amounts in physiology are quoted in two ways:
+- **Volumes at STPD** (0 °C, 760 mmHg, dry): oxygen consumption (VO2, mL/kg/min), Hüfner's constant (1.36 mL O2 per g Hb), O2 solubility (0.0031 mL/dL per mmHg). At STPD one mmol of gas occupies 22.414 mL, whatever the body temperature.
+- **Partial pressures** in gas mixtures, from the ideal gas law. Gas in the airways and alveoli is saturated with water vapour at body temperature (47 mmHg at 37 °C), which dilutes the other gases (the "− 47" in the alveolar gas equation).
+
+## API
+
+| Export | Value | Meaning |
+|---|---|---|
+| `O2_MMOL_PER_ML` | 1 / 22.414 mmol/mL | Every mL O2 (or CO2) ↔ mmol conversion. STPD, independent of temperature. |
+| `GAS_CONSTANT` | 62.36367 L·mmHg/(mol·K) | Ideal gas constant, for `p·V = n·R·T` in gas compartments. |
+| `svp_h2o(temp)` | mmHg | Saturation water vapour pressure at `temp` °C: `exp(20.386 − 5132 / (temp + 273.15))`. |
+
+## Users
+
+| Export | Imported by |
+|---|---|
+| `O2_MMOL_PER_ML` | [BloodComposition](./BloodComposition.md), [Metabolism](./Metabolism.md), [Mob](./Mob.md), [Lactate](./Lactate.md), [Uterus](./Uterus.md), [MaternalPlacenta](./MaternalPlacenta.md), [Monitor](./Monitor.md) |
+| `GAS_CONSTANT` | [GasCapacitance](./GasCapacitance.md), [GasComposition](./GasComposition.md), [GasExchanger](./GasExchanger.md) |
+| `svp_h2o` | [GasCapacitance](./GasCapacitance.md), [GasComposition](./GasComposition.md), [Gas](./Gas.md) |
+
+No other file in the engine hard-codes these numbers.
+
+## Assumptions and limitations
+
+- **`svp_h2o` is a two-parameter Clausius–Clapeyron fit**, slightly low against the Buck equation: −0.4 % at 30 °C, −0.9 % at 33.5 °C, −1.3 % at 37 °C (46.5 vs 47.1 mmHg), −1.6 % at 40 °C. The inspired pO2 at 37 °C is therefore 0.13 mmHg higher than with the standard 47 in room air, 0.6 mmHg in 100 % O2.
+- **CO2 uses the same molar volume as O2** (ideal gas). The real STPD molar volume of CO2 is ~22.26 mL/mmol, 0.7 % smaller.
+
+## References
+
+- 22.414 L/mol (ideal gas at STP) and R = 62.364 L·mmHg/(mol·K): CODATA values.
+- Buck AL. New equations for computing vapor pressure and enhancement factor. *J Appl Meteorol* 1981;20:1527–32 (the comparison above).
+
+```
 
 ### FILE: explain-engine/docs/Uterus.md
 
 ````markdown
 # Uterus
 
-The `Uterus` model turns the otherwise-passive uterine vascular bed (`UT_ART → UT_CAP → UT_VEN`)
-into a living organ. Like [`Placenta`](./Placenta.md), [`MaternalPlacenta`](./MaternalPlacenta.md) and
-`Kidneys`, it is a **controller / process model**: it extends `BaseModelClass`, owns no blood of its
-own, and instead operates each step on the existing uterine compartments and resistors that
-`Circulation` supplies. It does three things: (1) imposes a dedicated uterine oxygen consumption on
-`UT_CAP`; (2) applies pregnancy adaptation — gestational-age scaling of bed resistance, unstressed
-volume and VO₂ that grows uterine blood flow from ~50 mL/min toward 500–700 mL/min at term; and
-(3) models uterine contractions / labor via a periodic intrauterine-pressure (IUP) waveform that
-compresses and throttles the bed. It is calibration-neutral at its defaults (non-pregnant, no
-contractions).
+> **Experimental.** Used only by the archived `adult_female_uterus` scenario (the Pregnancy panel is hidden in the app as unfinished). It builds and runs on the current engine, but its pregnancy physiology isn't calibrated; see [Assumptions and limitations](#assumptions-and-limitations).
+
+`Uterus` turns the adult uterine vascular bed (`UT_ART` → `UT_CAP` → `UT_VEN`) into an organ. It holds no blood. It controls those vessels and adds:
+- a uterine oxygen consumption, with blood-flow and oxygen read-outs;
+- **pregnancy:** with gestational age the bed dilates and fills, and its O2 demand rises;
+- **labour:** periodic contractions that raise the intrauterine pressure and throttle uterine flow;
+- an optional coupling that feeds uterine arterial blood into the fetal placenta's maternal pool.
+
+It is the single source of the pregnancy state (`pregnant`, `preg_ga`, `iup`) that [MaternalPlacenta](./MaternalPlacenta.md) reads.
+
+## Physiology
+
+Outside pregnancy the uterus receives a small blood flow (~50 mL/min). In pregnancy the uterine arteries and the spiral arteries remodel into wide, low-resistance vessels, and uterine blood flow rises to roughly 500–750 mL/min at term, 10–15 % of the mother's cardiac output, most of it to the placenta. The uterus and the conceptus consume more oxygen as they grow.
+
+In labour the myometrium contracts every few minutes. The pressure inside the uterus (resting tone ~8–12 mmHg, peaks 40–60 mmHg above it) compresses the vessels in its wall: inflow falls and venous blood is squeezed out. Contraction strength is summarised clinically in **Montevideo units** (peak amplitude × contractions per 10 min; adequate labour ≥ 200).
 
 ## Inheritance
 
 ```
 BaseModelClass
-  └── Uterus   (uterine bed controller: metabolism + pregnancy scaling + contractions)
+  └── Uterus
 ```
-
-## What it models
-
-The uterine circulation is the bed `UT_ART → UT_CAP → UT_VEN`, fed by the inflow resistor
-`AD_UT_ART` (off the abdominal aorta `AD`) and drained by `UT_VEN_VLB` (into the lower-body venous
-bed `VLB`). `Uterus` does not hold blood; it modulates the components by reference name:
-
-| Reference | Default name | Role |
-|---|---|---|
-| `_ut_art` | `UT_ART` | arteriolar inflow vessel |
-| `_ut_cap` | `UT_CAP` | capillary — metabolism / gas-exchange site (myometrium) |
-| `_ut_ven` | `UT_VEN` | venular outflow vessel |
-| `_ut_in_res` | `AD_UT_ART` | inflow resistor — the uterine blood-flow source (read for flow) |
-| `_ut_out_res` | `UT_VEN_VLB` | venular drainage resistor (owned by `VLB`; scaled here in pregnancy) |
-| `_pl_mat` | `PL_MAT` | maternal placental pool — driven only when `couple_placenta` is on |
-
-All references are resolved **lazily** in `calc_model()` (build-order independent), because the
-Circulation compartments may be instantiated after this controller.
-
-Three behaviours, all gated:
-
-- **Uterine metabolism** — a dedicated uterine VO₂ (`ut_vo2`, mL O₂/kg/min) applied directly to
-  `UT_CAP` using the same molar conversion as the whole-body `Metabolism` model
-  (`O2_MMOL_PER_ML = 1/22.414`, STPD). It is deliberately **not** registered in
-  `Metabolism.metabolic_active_models`, so the calibrated whole-body VO₂ map is untouched and the
-  uterus carries an independent, pregnancy-scalable O₂ demand.
-- **Pregnancy adaptation** — `preg_ga` (pregnancy gestational age, weeks; distinct from the
-  engine-level `model.gestational_age`, which is the mother's own birth GA) drives a linear ramp that
-  drops bed resistance and raises unstressed volume + VO₂ from the non-pregnant baseline to term
-  anchors, expanding uterine flow.
-- **Contractions / labor** — a periodic IUP waveform (resting tone + half-sine contraction every
-  `contraction_period` s) that throttles the bed by both physical compression (`pres_ext`) and a
-  transient resistance rise (`r_factor`), with MVU / activity read-outs.
 
 ## Properties
 
-### Config (independent — set in JSON)
+### Config: wiring (model names)
+
+| Property | Default | Description |
+|---|---|---|
+| `ut_art_name`, `ut_cap_name`, `ut_ven_name` | `"UT_ART"`, `"UT_CAP"`, `"UT_VEN"` | The uterine arteriole, capillary and venule (BloodVessels). |
+| `ut_in_res_name` | `"AD_UT_ART"` | Inflow resistor (the uterine blood-flow read-out). |
+| `ut_out_res_name` | `"UT_VEN_VLB"` | Venous drainage resistor (owned by `VLB`; scaled in pregnancy). |
+| `pl_mat_name` | `"PL_MAT"` | Fetal placenta's maternal pool, for the coupling. |
+
+### Config: metabolism and tone
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `uterus_running` | boolean | `true` | Master switch. Off restores the pregnancy layers and zeroes the outputs. |
+| `met_active` | boolean | `true` | Switches the uterine O2 consumption. |
+| `ut_vo2` | mL O2/kg/min | 0.04 | Uterine O2 consumption per kg maternal weight (2.4 mL/min at 60 kg). Not part of `Metabolism`'s map. |
+| `vo2_factor`, `vo2_factor_ps` | – | 1.0 | Non-persistent (reset each step) and persistent VO2 multipliers. |
+| `resp_q` | – | 0.8 | Respiratory quotient. |
+| `perfusion_factor` | – | 1.0 | Vascular tone of `UT_ART`: < 1 dilates, > 1 constricts. |
+
+### Config: pregnancy
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `pregnant` | boolean | `false` | Pregnancy switch. |
+| `preg_ga` | weeks | 0 | Gestational age of the pregnancy (not `model.gestational_age`, which is the mother's own). |
+| `preg_ga_threshold`, `preg_ga_term` | weeks | 4, 40 | The adaptations ramp linearly between these ages. |
+| `preg_res_term_factor` | – | 0.083 | Resistance multiplier of `UT_ART`, `UT_VEN` and the drainage at term. |
+| `preg_cap_res_term_factor` | – | 0.083 | Resistance multiplier of `UT_CAP` (myometrium) at term; archived scenario 0.43, so the placenta takes the larger share. |
+| `preg_vol_term_factor` | – | 3.0 | Unstressed-volume multiplier of the bed at term (engorgement). |
+| `preg_vo2_term_factor` | – | 8.0 | VO2 multiplier at term (archived scenario 2). |
+| `couple_placenta` | boolean | `false` | Drive `PL_MAT`'s O2/CO2 content from `UT_ART` while pregnant. Set `Placenta.skip_mat_gas_write` with it. |
+
+### Config: contractions
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `contractions_running` | boolean | `false` | Labour switch. |
+| `contraction_period` | s | 180 | Time between contraction onsets. |
+| `contraction_duration` | s | 60 | Duration of each contraction. |
+| `resting_tone` | mmHg | 8 | Intrauterine pressure between contractions. |
+| `contraction_amplitude` | mmHg | 50 | Peak pressure above resting tone. |
+| `contraction_pres_gain` | – | 0.6 | Fraction of the pressure applied to the bed vessels as external pressure. |
+| `contraction_r_peak` | – | 2.0 | Bed resistance multiplier at the contraction peak. |
+
+### Outputs
 
 | Property | Unit | Description |
 |---|---|---|
-| `uterus_running` | bool | Master gate for uterine organ function. When false, the pregnancy scaling layers this model owns are restored to 1.0 and outputs zeroed. |
-| `ut_art_name` | string | Name of the arteriolar inflow vessel (`UT_ART`). |
-| `ut_cap_name` | string | Name of the capillary / metabolism site (`UT_CAP`). |
-| `ut_ven_name` | string | Name of the venular outflow vessel (`UT_VEN`). |
-| `ut_in_res_name` | string | Name of the inflow resistor read for blood flow (`AD_UT_ART`). |
-| `ut_out_res_name` | string | Name of the venular drainage resistor scaled in pregnancy (`UT_VEN_VLB`). |
-| `met_active` | bool | Uterine O₂ consumption on/off. |
-| `ut_vo2` | mL O₂/kg/min | Uterine oxygen use applied to `UT_CAP` (scenario-calibrated, ~25 % O2ER at baseline). |
-| `vo2_factor` | unitless | Non-persistent VO₂ multiplier — reset to 1.0 every step (transient interventions). |
-| `vo2_factor_ps` | unitless | Persistent VO₂ multiplier (interventions / scaling). |
-| `resp_q` | unitless | Respiratory quotient (CO₂ produced / O₂ consumed). |
-| `perfusion_factor` | unitless | Transient vaso-tone knob written to `UT_ART.r_factor`. <1 = vasodilation (more flow), >1 = vasoconstriction. |
-| `pregnant` | bool | Master pregnancy gate (default false → preserves the non-pregnant calibration). |
-| `preg_ga` | weeks | Pregnancy gestational age (0 = non-pregnant … 40 = term). |
-| `preg_ga_threshold` | weeks | Below this GA the bed is treated as non-pregnant (no scaling). |
-| `preg_ga_term` | weeks | GA anchor at which the term multipliers are reached. |
-| `preg_res_term_factor` | unitless | Conduit (`UT_ART`/`UT_VEN`) resistance multiplier at term. |
-| `preg_cap_res_term_factor` | unitless | `UT_CAP` (myometrium) resistance multiplier at term — dilates separately from the conduits. Defaults to the conduit factor unless overridden. |
-| `preg_vol_term_factor` | unitless | Bed unstressed-volume multiplier at term (engorgement). |
-| `preg_vo2_term_factor` | unitless | Uterine / conceptus VO₂ multiplier at term. |
-| `couple_placenta` | bool | When pregnant and true, drive the `PL_MAT` pool gas content from uterine arterial blood. |
-| `pl_mat_name` | string | Name of the maternal placental pool driven when coupling (`PL_MAT`). |
-| `contractions_running` | bool | Master gate for contractions (default false → bed untouched). |
-| `contraction_period` | s | Seconds between contraction onsets (active labor ≈ every 180 s / 3 min). |
-| `contraction_duration` | s | Duration of each contraction's rise + fall. |
-| `resting_tone` | mmHg | Baseline IUP between contractions. |
-| `contraction_amplitude` | mmHg | Peak IUP above resting tone. |
-| `contraction_pres_gain` | unitless (0..1) | Fraction of IUP applied as `pres_ext` to the bed. |
-| `contraction_r_peak` | unitless (≥1) | Bed resistance multiplier at peak contraction. |
+| `ut_blood_flow` | mL/min | Total uterine inflow (placental + myometrial), smoothed over 5 s. |
+| `ut_do2`, `ut_vo2_ml` | mL O2/min | O2 delivery and the uterine consumption (`MaternalPlacenta` reports the placental one). |
+| `ut_o2er` | % | Whole-uterus extraction `(Ca − Cv)/Ca` from `UT_ART` and `UT_VEN`, so it includes the placenta. |
+| `ut_avo2` | mmol/L | Arterio-venous O2 content difference. |
+| `iup` | mmHg | Intrauterine pressure (0 when contractions are off). |
+| `contraction_active` | boolean | Inside a contraction. |
+| `montevideo_units` | MVU | `contraction_amplitude · 600 / contraction_period` (the setting, not a measurement). |
 
-### Computed (dependent — read-outs)
+## Calculation
 
-| Property | Unit | Description |
-|---|---|---|
-| `ut_blood_flow` | mL/min | Smoothed uterine blood flow (EMA of the inflow resistor flow). |
-| `ut_do2` | mL O₂/min | Oxygen delivery. |
-| `ut_vo2_ml` | mL O₂/min | Oxygen uptake (rate). |
-| `ut_o2er` | % | Oxygen extraction ratio, from the actual arterio-venous content difference. |
-| `ut_avo2` | mmol/L | Arterio-venous O₂ content difference (whole-uterus). |
-| `iup` | mmHg | Current intrauterine pressure. |
-| `contraction_active` | bool | True while inside a contraction. |
-| `montevideo_units` | — | MVU = peak amplitude × contractions per 10 min (labor adequacy). |
+Each step (references resolved lazily; skipped without the three vessels; outputs zeroed when `UT_CAP` is empty):
 
-### Internal state (not config)
-
-`_flow_ema` (smoothed inflow, L/s), `_flow_tc` (smoothing time constant, 5.0 s),
-`_contraction_timer` (s elapsed within the current contraction cycle). `_t` is the modeling
-step-size (s) inherited from the base.
-
-## `calc_model()` — calculation cycle
-
-After lazy reference resolution and the gating guards (`uterus_running`; presence of `UT_ART`,
-`UT_CAP`, `UT_VEN`; and `UT_CAP.vol > 0`), the step runs in order:
-
-### Pregnancy bed scaling
-
-A normalised pregnancy progress `frac ∈ [0, 1]` is computed by `_preg_frac()`:
-
-```
-frac = 0                                                       if !pregnant or preg_ga ≤ preg_ga_threshold
-frac = (preg_ga - preg_ga_threshold) / (preg_ga_term - preg_ga_threshold)   otherwise, clamped to 1
-```
-
-Term-anchored multipliers are then linearly interpolated from 1.0 (non-pregnant) toward each
-`*_term_factor`:
-
-```
-res_factor     = 1 + frac · (preg_res_term_factor     - 1)   // conduits UT_ART / UT_VEN / drainage
-cap_res_factor = 1 + frac · (preg_cap_res_term_factor - 1)   // UT_CAP (myometrium)
-vol_factor     = 1 + frac · (preg_vol_term_factor     - 1)   // bed unstressed volume
-```
-
-These are written **every step** to the persistent scaling layers (idempotent — the engine
-recomputes each `*_eff` from the base each step, so re-asserting never compounds):
-
-```
-UT_ART.r_factor_scaling_ps = UT_VEN.r_factor_scaling_ps = res_factor
-UT_CAP.r_factor_scaling_ps = cap_res_factor
-UT_ART/UT_CAP/UT_VEN.u_vol_factor_scaling_ps = vol_factor
-UT_VEN_VLB.r_factor_scaling_ps = res_factor          // drainage resistor, if present
-```
-
-Scaling the `UT_VEN_VLB` drainage resistor matters: it is owned by `VLB` (which re-asserts its base
-`r_for` each step), but its `r_factor_scaling_ps` layer is free. Without scaling it, the unscaled
-drainage resistance becomes the dominant series resistor at term, capping flow at ~385 mL/min and
-pinning `UT_VEN` pressure high.
-
-### VO₂ scaling (tied to flow, not GA)
-
-VO₂ expansion tracks the **flow** expansion (`~1/cap_res_factor`), not GA linearly — because flow is
-convex in GA (flow ~ 1/R, R linear in GA), a GA-linear VO₂ would outpace perfusion mid-gestation and
-push O2ER unphysiologically high:
-
-```
-flow_factor      = 1 / cap_res_factor
-flow_factor_term = 1 / preg_cap_res_term_factor
-preg_vo2 = 1 + ((flow_factor - 1) / (flow_factor_term - 1)) · (preg_vo2_term_factor - 1)   if flow_factor_term > 1
-preg_vo2 = 1                                                                                otherwise
-```
-
-`preg_vo2` reaches `preg_vo2_term_factor` exactly when flow reaches its term expansion.
-
-### Uterine contractions
-
-When `contractions_running`, the cycle timer advances by `_t` and wraps at `contraction_period`. The
-contraction intensity is a smooth half-sine over the active window, flat between contractions:
-
-```
-intensity = sin(π · _contraction_timer / contraction_duration)   for _contraction_timer < contraction_duration
-intensity = 0                                                     otherwise
-contraction_active = intensity > 0
-iup = resting_tone + contraction_amplitude · intensity
-```
-
-The IUP throttles the bed two ways:
-
-```
-pres_ext += iup · contraction_pres_gain          // physical compression on UT_ART, UT_CAP, UT_VEN
-contraction_r_factor = 1 + intensity · (contraction_r_peak - 1)   // controllable flow reduction
-montevideo_units = contraction_amplitude · (600 / contraction_period)
-```
-
-When contractions are off, the timer/`iup`/`montevideo_units` are zeroed and `contraction_r_factor`
-stays 1.0.
-
-### Resistance composition (transient layer)
-
-The transient perfusion knob and the contraction factor are written to the **non-persistent**
-`r_factor` layer (the vessels reset it to 1.0 each step, so it is re-asserted every step):
-
-```
-UT_ART.r_factor = perfusion_factor · contraction_r_factor
-UT_CAP.r_factor = contraction_r_factor
-UT_VEN.r_factor = contraction_r_factor
-```
-
-### Uterine O₂ consumption / CO₂ production
-
-When `met_active`, applied to `UT_CAP` (same molar conversion as `Metabolism`):
-
-```
-vo2_eff  = ut_vo2 · vo2_factor · vo2_factor_ps · preg_vo2                       (mL O₂/kg/min)
-vo2_step = (O2_MMOL_PER_ML · vo2_eff · model.weight / 60) · _t                  (mmol per step)
-
-UT_CAP.to2  = max(0, (to2·vol  − vo2_step)        / vol)
-UT_CAP.tco2 = max(0, (tco2·vol + vo2_step·resp_q) / vol)
-ut_vo2_ml   = vo2_eff · model.weight                                            (mL O₂/min)
-```
-
-with `O2_MMOL_PER_ML = 1/22.414` (STPD, `helpers/Units.js`). `vo2_factor` is then reset to 1.0 (the non-persistent layer).
-
-### Flow & oxygen read-outs
-
-Inflow is exponentially smoothed (`_flow_tc = 5.0 s`, long enough to average several cardiac cycles)
-to tame the pulsatile resistor flow:
-
-```
-alpha = _t / (_flow_tc + _t)
-_flow_ema += (AD_UT_ART.flow − _flow_ema) · alpha
-ut_blood_flow = _flow_ema · 60000                       (L/s → mL/min)
-
-flow_l_min = _flow_ema · 60                             (L/s → L/min)
-ut_do2  = (flow_l_min · UT_ART.to2) / O2_MMOL_PER_ML    (mL O₂/min)
-ut_avo2 = UT_ART.to2 − UT_VEN.to2                       (mmol/L)
-ut_o2er = (ut_avo2 / UT_ART.to2) · 100                  (%, 0 if UT_ART.to2 ≤ 0)
-```
-
-O2ER is derived from the actual content difference `(Ca − Cv)/Ca`, which is flow- and
-VO₂-source-independent — important because `UT_VEN` is the **common outflow** of both the myometrial
-(`UT_CAP`) and placental (`PL_IVS`, via [`MaternalPlacenta`](./MaternalPlacenta.md)) beds. At baseline
-this equals the older VO₂/DO₂ form.
-
-### Maternal-placental coupling
-
-When `pregnant && couple_placenta`, the maternal placental pool `PL_MAT` gas content is driven from
-uterine arterial blood so the placental maternal supply tracks uterine perfusion:
-
-```
-PL_MAT.to2  = UT_ART.to2
-PL_MAT.tco2 = UT_ART.tco2
-```
-
-`Placenta` is the other writer of `PL_MAT`; its `skip_mat_gas_write` flag must be set so exactly one
-model is authoritative per step. (Note: this is the legacy fixed `PL_MAT` pool of the fetal
-[`Placenta`](./Placenta.md) — distinct from the perfused `PL_IVS` intervillous space owned by
-[`MaternalPlacenta`](./MaternalPlacenta.md).)
-
-### Helper methods
-
-- `_preg_frac()` — normalised pregnancy progress, as above.
-- `_reset_preg_scaling()` — restores the pregnancy scaling layers this model owns
-  (`r_factor_scaling_ps`, `u_vol_factor_scaling_ps` on `UT_ART/UT_CAP/UT_VEN`, plus the drainage
-  resistor's `r_factor_scaling_ps`) to 1.0; called when `uterus_running` is false so disabling the
-  organ doesn't strand the scaled bed.
-- `_zero_outputs()` — zeroes all read-outs (used when gated off or `UT_CAP.vol ≤ 0`).
+1. **Pregnancy scaling.** `frac = (preg_ga − threshold)/(term − threshold)`, 0–1, 0 when not pregnant. Linear in `frac`:
+   - `r_factor_scaling_ps` of `UT_ART`, `UT_VEN` and the drainage resistor → `preg_res_term_factor`; of `UT_CAP` → `preg_cap_res_term_factor`;
+   - `u_vol_factor_scaling_ps` of the three vessels → `preg_vol_term_factor`.
+   Written every step, so they return to 1 when the pregnancy is switched off.
+2. **VO2 multiplier** follows the myometrial flow gain (`1/cap_res_factor`), reaching `preg_vo2_term_factor` exactly at term, so the extraction stays physiological while flow rises.
+3. **Contractions.** A timer runs over `contraction_period`; inside the first `contraction_duration` the intensity is a half-sine 0 → 1 → 0.
+   - `iup = resting_tone + contraction_amplitude · intensity`;
+   - each bed vessel gets `pres_ext += iup · contraction_pres_gain` (compression; venous blood squeezed out);
+   - the bed's resistance factor is `1 + intensity·(contraction_r_peak − 1)`.
+4. **Non-persistent tone:** `UT_ART.r_factor = perfusion_factor · contraction factor`; `UT_CAP` and `UT_VEN.r_factor` = contraction factor.
+5. **Uterine metabolism** on `UT_CAP`: `ut_vo2 · factors · pregnancy multiplier`, STPD conversion as in Metabolism; `resp_q` times it added as CO2.
+6. **Read-outs:** smoothed inflow, DO2, AV difference and O2ER.
+7. **Coupling** (pregnant and `couple_placenta`): `PL_MAT.to2/tco2` = `UT_ART.to2/tco2`.
 
 ## Factor system
 
-`Uterus` is a controller, so it does not carry the `el_*`/`r_*` factor triplets itself — instead it
-**writes into** the factor layers of the bed components it controls, and the math above relies on
-those layers being disjoint so they compose multiplicatively:
+- It writes the **scaling layers** (`r_factor_scaling_ps`, `u_vol_factor_scaling_ps`), which belong to `ModelScaler`. That is safe only while the uterine vessels aren't in a scaler group (they aren't in the archived scenario).
+- It writes the **non-persistent** `r_factor` every step (tone and contractions).
+- It leaves `r_factor_ps` (Circulation's SVR channels) and the ANS alone; BloodVessel multiplies all layers.
 
-| Layer it writes | On | Purpose |
-|---|---|---|
-| `r_factor_scaling_ps` | `UT_ART`, `UT_CAP`, `UT_VEN`, `UT_VEN_VLB` | persistent pregnancy resistance scaling (idempotent each step) |
-| `u_vol_factor_scaling_ps` | `UT_ART`, `UT_CAP`, `UT_VEN` | persistent pregnancy volume (engorgement) scaling |
-| `r_factor` (non-persistent) | `UT_ART`, `UT_CAP`, `UT_VEN` | transient `perfusion_factor` × contraction resistance, re-asserted each step |
-| `pres_ext` (additive) | `UT_ART`, `UT_CAP`, `UT_VEN` | contraction physical compression, re-added each step |
+## Inputs and outputs
 
-These layers are deliberately disjoint from the ANS (`ans_*`), the SVR layer (`r_factor_ps`) and each
-other, so the uterine controller stacks cleanly on top of the rest of the circulation. For its own
-metabolism, `Uterus` exposes the standard `vo2_factor` (non-persistent, reset each step) /
-`vo2_factor_ps` (persistent) pair on the VO₂ rate.
+- **Reads:** the three vessels and the inflow resistor (flows, O2 contents, `UT_CAP` volume); `model.weight`.
+- **Writes:** the vessels' scaling layers, `r_factor`, `pres_ext`; `UT_CAP.to2/tco2`; `UT_VEN_VLB.r_factor_scaling_ps`; `PL_MAT.to2/tco2` when coupled.
+- **Read by:** `MaternalPlacenta` (`pregnant`, `preg_ga`, `iup`).
+- **Written by:** the user.
+
+## Assumptions and limitations
+
+- **Pregnancy isn't calibrated.** Measured in the archived scenario:
+
+  | Gestation | Uterine flow (mL/min) | Placental share | MAP (mmHg) |
+  |---|---|---|---|
+  | not pregnant | 46 | – | 98 |
+  | 20 wk | 78 | 11 % | 89 |
+  | 28 wk | 96 | 15 % | 81 |
+  | 36 wk | 166 | 25 % | 114 |
+  | 40 wk | 628 | 84 % | 75 |
+
+  The term value is right, but the path isn't. Resistance falls linearly with gestation, so flow (∝ 1/R) stays low until the last weeks and then jumps; real uterine flow rises steadily from the first trimester. MAP is non-monotonic with gestation. The maternal blood volume expansion, cardiac output rise and fall in SVR of pregnancy aren't modelled.
+- **Scaling-layer use** (see [Factor system](#factor-system)).
+- **Contractions are a fixed waveform.** No uterine electrophysiology, no oxytocin; `montevideo_units` restates the settings.
+- **The coupling is plumbing only.** No combined mother + fetus scenario uses it.
+- **Consumption is silently capped** when it would make `UT_CAP`'s O2 content negative.
 
 ## Example definition (JSON)
 
-From `adult_female_uterus.json` (`model_definition.models.Uterus`):
+From `archive/adult_female_uterus.json`, `models.Uterus` (trimmed to the physiology props; the wiring props are the defaults):
 
 ```json
 {
   "name": "Uterus",
-  "description": "uterine organ: perfusion + oxygen consumption read-outs",
-  "is_enabled": true,
   "model_type": "Uterus",
-  "components": {},
+  "is_enabled": true,
   "uterus_running": true,
-  "ut_art_name": "UT_ART",
-  "ut_cap_name": "UT_CAP",
-  "ut_ven_name": "UT_VEN",
-  "ut_in_res_name": "AD_UT_ART",
-  "ut_out_res_name": "UT_VEN_VLB",
-  "met_active": true,
   "ut_vo2": 0.04,
-  "vo2_factor": 1,
-  "vo2_factor_ps": 1,
-  "resp_q": 0.8,
   "perfusion_factor": 1,
   "pregnant": false,
   "preg_ga": 0,
-  "preg_ga_threshold": 4,
-  "preg_ga_term": 40,
   "preg_res_term_factor": 0.083,
   "preg_cap_res_term_factor": 0.43,
   "preg_vol_term_factor": 3,
   "preg_vo2_term_factor": 2,
   "couple_placenta": false,
-  "pl_mat_name": "PL_MAT",
   "contractions_running": false,
   "contraction_period": 180,
   "contraction_duration": 60,
@@ -14992,27 +13765,13 @@ From `adult_female_uterus.json` (`model_definition.models.Uterus`):
 }
 ```
 
-At these defaults (non-pregnant, contractions off) the bed runs at its calibrated baseline:
-`ut_blood_flow ≈ 49 mL/min`, `ut_vo2_ml = 2.4 mL O₂/min`, `ut_o2er ≈ 28 %`. Note this scenario
-overrides `preg_cap_res_term_factor` to `0.43` (so the myometrial capillary stays a modest minority
-of uterine flow once a maternal placenta carries the dominant share) and `preg_vo2_term_factor` to
-`2` rather than the constructor defaults of `0.083` / `8.0`.
+## Usage in the scenarios
 
-## Usage in the model
+Only `archive/adult_female_uterus` (60 kg adult female, not pregnant at build). There the uterine bed (`AD_UT_ART` → `UT_ART` → `UT_CAP` → `UT_VEN` → `VLB`) runs in parallel with the placental bed `PL_IVS` of [MaternalPlacenta](./MaternalPlacenta.md). With contractions on at term, the smoothed uterine flow swings between ~410 and ~670 mL/min over a cycle. None of the canonical neonatal and fetal scenarios include it.
 
-- **Scenario:** `adult_female_uterus.json` (the maternal/pregnancy line built on `adult_female`).
-- **Bed it drives:** the `UT_ART → UT_CAP → UT_VEN` uterine vascular bed, fed by `AD_UT_ART` (off the
-  abdominal aorta) and drained by `UT_VEN_VLB` (into the lower-body venous bed).
-- **Couples to** [`MaternalPlacenta`](./MaternalPlacenta.md): both organs read pregnancy progress from
-  the same `preg_ga`, and `UT_VEN` is the common outflow of both the myometrial (`UT_CAP`) and
-  placental intervillous (`PL_IVS`) beds, so the whole-uterus O2ER read-out stays correct once the
-  placenta carries flow. `MaternalPlacenta` reads `Uterus.preg_ga`, `Uterus.pregnant` and
-  `Uterus.iup` (for spiral-artery dilation and contraction compression) — `Uterus` is the single
-  source of truth for pregnancy state.
-- **Distinct from** the fetal [`Placenta`](./Placenta.md): `Placenta` models the **fetal** side
-  (umbilical circulation + the fixed `PL_MAT` reservoir); `Uterus` and `MaternalPlacenta` model the
-  **maternal** uterine circulation. When `couple_placenta` is enabled, `Uterus` drives the legacy
-  `PL_MAT` pool from uterine arterial blood.
+## References
+
+None calibrated yet.
 
 ````
 
@@ -15033,6 +13792,16 @@ circuit, an expiratory (PEEP) reservoir, and the inspiratory/expiratory valves p
 resistor — and modulates those parts every step to deliver the configured ventilation mode (`PC`,
 `PRVC`, `VC`, `PS`, `CPAP`, or `HFOV`). Pressures are entered in cmH₂O and converted to the engine's mmHg
 internally.
+
+## Physiology
+
+A neonatal ventilator delivers gas through an endotracheal tube. The main ways it supports a baby:
+- **pressure modes (PC, PS):** it raises the airway pressure to a set peak (PIP) for a set inspiratory time or until the flow decays, then lets it fall to PEEP;
+- **volume-targeted modes:** volume control, or volume guarantee / PRVC, which adjust the pressure breath by breath to reach a set tidal volume;
+- **CPAP:** a constant distending pressure while the baby breathes on its own;
+- **high-frequency oscillation (HFOV):** tiny tidal volumes at 5–15 Hz around a mean airway pressure, where gas moves by dispersion rather than bulk flow.
+
+PEEP and mean airway pressure keep the lung open (FRC, oxygenation); tidal volume and rate set CO2 removal. A ventilator also measures: pressures, volumes and flows, compliance and resistance, leak, end-tidal CO2. Synchronised modes deliver a breath when the patient's own effort is detected (trigger), and an uncuffed neonatal tube leaks around its outside.
 
 ## Inheritance
 
@@ -15139,6 +13908,9 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `term_sens_perc` | % | Termination sensitivity: a `PS` (or SIMV support) breath cycles off when inspiratory flow falls below this % of its peak (default 30) |
 | `backup_rate` | /min | `CPAP` apnoea backup: a time-cycled breath at `pip_cmh2o`/`insp_time` after `60/backup_rate` s without a spontaneous effort (default 0 = off) |
 | `synchronized` | bool | Enable patient-trigger detection in `PC`/`PRVC`/`VC` (default false). `PS` and `SIMV` always trigger; ignored in `CPAP` |
+| `tube_position` | string | Airway event: `trachea` (default), `right_main` (blocks the left main bronchus) or `extubated`; set with `set_tube_position` |
+| `circuit_connected` | bool | Airway event: false opens the circuit's Y-piece and the tube's proximal end to the room (default true); set with `set_circuit_connected` |
+| `disconnect_resistance` | mmHg·s/L | Resistance of the open Y-piece of a disconnected circuit (default 5) |
 
 ### Computed (dependent) read-outs
 
@@ -15170,6 +13942,9 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `pressure_limited` | bool | Volume-targeted modes: working pressure at `pip_cmh2o_max` while Vt is still below target (the "Vt low / Pmax reached" alarm condition) |
 | `map_meas` | cmH₂O | Mean airway pressure over the last breath; without breaths (CPAP, HFOV, apnoea) over 3 s blocks |
 | `hfo_amplitude_delivered` | cmH₂O | HFOV amplitude in use: the set one, or the working one with volume targeting |
+| `hfo_tidal_volume` | L | HFOV volume per oscillation at the tube |
+| `hfo_dco2` | mL²/s | HFOV gas transport coefficient f · Vt² |
+| `hfo_map_meas` / `hfo_amplitude_meas` | cmH₂O | Measured mean and peak-to-peak circuit pressure in HFOV |
 | `hfo_sigh_remaining` / `hfo_pause_remaining` | s | Time left of a running HFOV sigh / oscillation pause (0 = oscillating) |
 | `ti_meas` / `te_meas` | s | Measured inspiratory time of the last breath and the expiratory time before it |
 | `ie_ratio_meas` | – | `te_meas / ti_meas` (shown as 1:x) |
@@ -15818,6 +14593,13 @@ the full definition also nests the six `VENT_*` sub-models under `components`:
 `is_enabled: false` is the normal resting state — the ventilator is switched on at runtime via
 `switch_ventilator(true)` (or by `Resuscitation.switch_cpr`).
 
+## Inputs and outputs
+
+- **Reads:** its circuit components; `DS` (pCO2, the tube's dead-space sub-tanks); the lungs through the airway; `Breathing` (`ncc_insp`, `insp_running`, `breathing_enabled`, `resp_rate`) for triggering and monitoring.
+- **Writes:** its circuit (valves, volumes, compositions, resistances); `MOUTH_DS.no_flow` (natural airway closed while intubated); `DS.tube_volume`/`tube_port_model` (tube dead space); `Respiration.set_tube_block` (right-main intubation).
+- **Written by:** the user and bot (modes and settings through the `set_*` API); [Resuscitation](./Resuscitation.md) (CPR ventilation); [Sle6000](./Sle6000.md) (its subclass).
+- **Read by:** Monitor (etCO2 and breath detection: `ncc_insp`, `_inspiration`, `is_enabled`), the app's ventilator screens, `DataCollector` watchers.
+
 ## Usage in the model
 
 - One `Ventilator` per scenario; disabled at rest so the patient breathes spontaneously through
@@ -15829,7 +14611,9 @@ the full definition also nests the six `VENT_*` sub-models under `components`:
   tidal-volume feedback continues during CPAP/PS whatever the airway route (see "Coupling to
   `Breathing`").
 
-## Notes & caveats
+## Assumptions and limitations
+
+- **An ideal device.** Valves respond within one step (unless `pres_response_tau` is set); no circuit compliance beyond the circuit compartment; no humidifier water loss.
 
 - **`compliance`/`resistance` are measured per breath** at end-expiration (in
   `calc_measured_mechanics`), not recomputed every step. `compliance` mirrors `compliance_dynamic`
@@ -15850,6 +14634,11 @@ the full definition also nests the six `VENT_*` sub-models under `components`:
   components and are assumed present after build.
 - **`exp_time` is floored at `_min_exp_time` (0.1 s)** — `60/vent_rate − insp_time` can no longer go
   negative at very high rates / long `insp_time`, so the cycler cannot jam into continuous inspiration.
+
+## References
+
+- ISO 80601-2-12 (critical care ventilators): the expiratory-limb pressure drop limits used for the automatic expiratory valve.
+- SLE6000 instructions for use: monitoring definitions (see [Sle6000](./Sle6000.md)).
 
 ````
 
@@ -15906,23 +14695,23 @@ In these lesions the right-heart outflow to the lungs is obstructed or absent, s
 
 - **A1 — Pulmonary atresia with intact ventricular septum (PA-IVS).** *Also FO-dependent.* The RV outflow is blind; lungs are fed only by the PDA, and all systemic venous return must cross the foramen ovale right→left to reach the left heart. RV and tricuspid valve are hypoplastic; ~10% have an RV-dependent coronary circulation, the key risk modifier (Chikkabyrappa 2018 [#9]; Jaggers AATS consensus 2025 [#10]).
   *Engine:* `RV_PA.no_flow = true`; `Pda.diameter_relative > 0`; `Shunts.diameter_fo > 0` (R→L); RV hypoplasia via `Heart.components.RV` `el_min`↑ / `u_vol`. **Fully buildable.**
-  **✅ BUILT** as `pa_ivs` — `scripts/_make_paivs.mjs` → `reseed_paivs.mjs` → `probe_paivs.mjs`. Calibrated: **zero antegrade flow** (atretic `RV_PA`), the **duct is the sole pulmonary supply** (≈ 590 mL/min, aorta→PA L→R), a **suprasystemic hypertensive blind RV** (peak ≈ 70 mmHg) that decompresses only through a restrictive **tricuspid-regurgitation jet** (≈ 500 mL/min — its single outlet), and an **obligate R→L FO** (≈ 500 mL/min = the whole systemic venous return) feeding the LV-only output → cyanosis (SpO₂ ≈ 74%, pO₂ ≈ 32 mmHg), MAP preserved at 50. Levers: `RV_PA.no_flow` (atresia, not stenosis — contrast `critical_ps`), `diameter_vsd: 0` (intact septum), RV hypoplasia (`el_min: 2500`, `u_vol: 0.002`), **tricuspid regurgitation** (`RAIVCI_RV`/`RASVC_RV` `no_back_flow: false`, `r_back: 5000` — a restrictive r_back lets the blind RV pressurize to suprasystemic levels yet stay volume-stable; free TR leaves it flaccid at ~12 mmHg, no TR traps volume), `diameter_fo: 6` (left at baseline `fo_lr_factor: 25` — R→L easy), `Pda.diameter_relative: 1.0`. Left heart structurally normal → no engine change. RV-dependent coronary circulation (sinusoids, ~10% of cases) not modeled.
+  **✅ BUILT** as `pa_ivs` — `scripts/archive/_make_paivs.mjs` → `reseed_paivs.mjs` → `probe_paivs.mjs`. Calibrated: **zero antegrade flow** (atretic `RV_PA`), the **duct is the sole pulmonary supply** (≈ 590 mL/min, aorta→PA L→R), a **suprasystemic hypertensive blind RV** (peak ≈ 70 mmHg) that decompresses only through a restrictive **tricuspid-regurgitation jet** (≈ 500 mL/min — its single outlet), and an **obligate R→L FO** (≈ 500 mL/min = the whole systemic venous return) feeding the LV-only output → cyanosis (SpO₂ ≈ 74%, pO₂ ≈ 32 mmHg), MAP preserved at 50. Levers: `RV_PA.no_flow` (atresia, not stenosis — contrast `critical_ps`), `diameter_vsd: 0` (intact septum), RV hypoplasia (`el_min: 2500`, `u_vol: 0.002`), **tricuspid regurgitation** (`RAIVCI_RV`/`RASVC_RV` `no_back_flow: false`, `r_back: 5000` — a restrictive r_back lets the blind RV pressurize to suprasystemic levels yet stay volume-stable; free TR leaves it flaccid at ~12 mmHg, no TR traps volume), `diameter_fo: 6` (left at baseline `fo_lr_factor: 25` — R→L easy), `Pda.diameter_relative: 1.0`. Left heart structurally normal → no engine change. RV-dependent coronary circulation (sinusoids, ~10% of cases) not modeled.
 
 - **A2 — Pulmonary atresia with VSD.** Lungs fed by the PDA and/or major aortopulmonary collateral arteries (MAPCAs). With a VSD the RV decompresses into the LV/aorta (Soquet 2019 [#11]; Presnell 2015 [#12]).
   *Engine:* `RV_PA.no_flow = true`; `Shunts.diameter_vsd > 0`; `Pda` open. **Buildable without MAPCAs** — collateral vessels are not modelable (see [limitations](#3-engine-lever-summary--limitations)).
-  **✅ BUILT** as `pa_vsd` — `scripts/_make_pavsd.mjs` → `reseed_pavsd.mjs` → `probe_pavsd.mjs`. Calibrated: **zero antegrade flow** (atretic `RV_PA`), a large VSD lets the **RV decompress into the LV/aorta** (`diameter_vsd: 5`, VSD flow RV→LV ≈ 450 mL/min, **RV/LV peaks equilibrated at 71/70 mmHg** — *not* a blind hypertensive RV, contrast PA-IVS), so the atrial septum stays intact (`diameter_fo: 0` — **not** FO-dependent); the **duct is the sole pulmonary supply** (`Pda.diameter_relative: 1.0`, fat 4 mm duct, ≈ 750 mL/min, no MAPCAs), mixed aortic blood → cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34), MAP 47. **Profoundly duct-dependent** — closing the duct crashes SpO₂ to ≈ 14% (the duct is the *only* pulmonary flow). *Calibration:* both ventricles eject into one aortic outlet, which the lumped model over-pumps, so `Heart.cont_factor_left/right: 0.6` normalizes the combined systemic output (a geometry compensation, not intrinsic weakness). Left heart normal → no engine change. **Limitation:** MAPCAs (a real alternative pulmonary supply) are not modelable — so duct closure here is more catastrophic than a MAPCA-supplied patient.
+  **✅ BUILT** as `pa_vsd` — `scripts/archive/_make_pavsd.mjs` → `reseed_pavsd.mjs` → `probe_pavsd.mjs`. Calibrated: **zero antegrade flow** (atretic `RV_PA`), a large VSD lets the **RV decompress into the LV/aorta** (`diameter_vsd: 5`, VSD flow RV→LV ≈ 450 mL/min, **RV/LV peaks equilibrated at 71/70 mmHg** — *not* a blind hypertensive RV, contrast PA-IVS), so the atrial septum stays intact (`diameter_fo: 0` — **not** FO-dependent); the **duct is the sole pulmonary supply** (`Pda.diameter_relative: 1.0`, fat 4 mm duct, ≈ 750 mL/min, no MAPCAs), mixed aortic blood → cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34), MAP 47. **Profoundly duct-dependent** — closing the duct crashes SpO₂ to ≈ 14% (the duct is the *only* pulmonary flow). *Calibration:* both ventricles eject into one aortic outlet, which the lumped model over-pumps, so `Heart.cont_factor_left/right: 0.6` normalizes the combined systemic output (a geometry compensation, not intrinsic weakness). Left heart normal → no engine change. **Limitation:** MAPCAs (a real alternative pulmonary supply) are not modelable — so duct closure here is more catastrophic than a MAPCA-supplied patient.
 
 - **A3 — Critical pulmonary stenosis.** Severe but not complete RVOT obstruction; duct-dependent when critical. A right→left atrial "pop-off" across the FO offloads the pressured RA (Latson 2001 [#13]; Aggarwal 2018 [#14]).
   *Engine:* `RV_PA.r_for`↑ (stenosis, keep some antegrade flow); `Pda` open; `Shunts.diameter_fo` for the atrial pop-off. **Fully buildable.**
-  **✅ BUILT** as `critical_ps` — `scripts/_make_cps.mjs` → `reseed_cps.mjs` → `probe_ps.mjs`. Calibrated: **suprasystemic, pressure-loaded RV** (peak ≈ 110 mmHg) with an 84 mmHg trans-valvular gradient and a low post-stenotic PA; antegrade flow is a trickle (≈ 180 mL/min) while the **duct supplies the majority of pulmonary flow** (≈ 310 mL/min, aorta→PA L→R — close it and pulmonary flow halves); a **right→left FO pop-off** (≈ 340 mL/min) drives cyanosis (SpO₂ ≈ 77%, pO₂ ≈ 33 mmHg), systemic MAP preserved. Levers: `RV_PA.r_for: 8000` (patent — not atretic), `Heart.cont_factor_right: 0.6` (the pressure-loaded RV beginning to fail — keeps the peak realistic and deepens the pop-off), `Pda.diameter_relative: 0.7`, `diameter_fo: 5`. *Note:* the FO is left at the baseline `fo_lr_factor: 25` — its fetal-flap asymmetry already makes R→L easy, exactly the direction this lesion needs (contrast HLHS/TGA, which need `fo_lr_factor ≈ 1`). Left heart structurally normal → no engine change. *Modeling caveat:* the linear-resistance valve + time-varying-elastance RV trade peak pressure against antegrade flow, so the realistic peak comes via a mildly failing RV rather than a 200 mmHg hypercontractile one.
+  **✅ BUILT** as `critical_ps` — `scripts/archive/_make_cps.mjs` → `reseed_cps.mjs` → `probe_ps.mjs`. Calibrated: **suprasystemic, pressure-loaded RV** (peak ≈ 110 mmHg) with an 84 mmHg trans-valvular gradient and a low post-stenotic PA; antegrade flow is a trickle (≈ 180 mL/min) while the **duct supplies the majority of pulmonary flow** (≈ 310 mL/min, aorta→PA L→R — close it and pulmonary flow halves); a **right→left FO pop-off** (≈ 340 mL/min) drives cyanosis (SpO₂ ≈ 77%, pO₂ ≈ 33 mmHg), systemic MAP preserved. Levers: `RV_PA.r_for: 8000` (patent — not atretic), `Heart.cont_factor_right: 0.6` (the pressure-loaded RV beginning to fail — keeps the peak realistic and deepens the pop-off), `Pda.diameter_relative: 0.7`, `diameter_fo: 5`. *Note:* the FO is left at the baseline `fo_lr_factor: 25` — its fetal-flap asymmetry already makes R→L easy, exactly the direction this lesion needs (contrast HLHS/TGA, which need `fo_lr_factor ≈ 1`). Left heart structurally normal → no engine change. *Modeling caveat:* the linear-resistance valve + time-varying-elastance RV trade peak pressure against antegrade flow, so the realistic peak comes via a mildly failing RV rather than a 200 mmHg hypercontractile one.
 
 - **A4 — Tricuspid atresia (with pulmonary stenosis/atresia).** *Also FO-dependent.* The tricuspid valve is absent, so **all** systemic venous return is obligated right→left across the FO into the LA; the functionally single LV then supplies the body, while pulmonary flow comes via a VSD and/or the duct (Sumal 2020 [#15]). A restrictive atrial septum is poorly tolerated.
   *Engine:* `RA_RV.no_flow = true`; `Shunts.diameter_fo` (obligate R→L); `Shunts.diameter_vsd`; RV hypoplasia; `Pda` if pulmonary atresia / severe PS. **Buildable** (functionally single LV).
-  **✅ BUILT** as `tricuspid_atresia` (type Ib — normally related great arteries, restrictive VSD + pulmonary stenosis, the cyanotic reduced-pulmonary-flow form) — `scripts/_make_ta.mjs` → `reseed_ta.mjs` → `probe_ta.mjs`. Calibrated: **obligate FO R→L** (≈ 500 mL/min = the whole systemic venous return), the **single LV** as the only pump (CO ≈ 0.78 L/min), pulmonary flow reaching the lungs only via the **VSD→RV→PA route** (≈ 465 mL/min — the hypoplastic RV acts as a conduit, so VSD flow ≈ antegrade Qp) **supplemented duct-dependently** (duct L→R ≈ 300 mL/min; closing the duct drops SpO₂ 80→74%), cyanosis (SpO₂ ≈ 80%, pO₂ ≈ 35 mmHg), MAP 49 / PAP 33. Levers: the split tricuspid `RAIVCI_RV` + `RASVC_RV` `no_flow` (atresia), RV hypoplasia (`el_min: 2200`, `u_vol: 0.0025`, VSD-fed), `diameter_fo: 6` (baseline `fo_lr_factor: 25` → R→L easy), `diameter_vsd: 2` (restrictive) + `RV_PA.r_for: 800` (pulmonary stenosis) + `Pda.diameter_relative: 0.8`. Left heart normal → no engine change (single LV uses the normal cycle path). Cross-listed as a Category-D (FO-dependent) teaching case.
+  **✅ BUILT** as `tricuspid_atresia` (type Ib — normally related great arteries, restrictive VSD + pulmonary stenosis, the cyanotic reduced-pulmonary-flow form) — `scripts/archive/_make_ta.mjs` → `reseed_ta.mjs` → `probe_ta.mjs`. Calibrated: **obligate FO R→L** (≈ 500 mL/min = the whole systemic venous return), the **single LV** as the only pump (CO ≈ 0.78 L/min), pulmonary flow reaching the lungs only via the **VSD→RV→PA route** (≈ 465 mL/min — the hypoplastic RV acts as a conduit, so VSD flow ≈ antegrade Qp) **supplemented duct-dependently** (duct L→R ≈ 300 mL/min; closing the duct drops SpO₂ 80→74%), cyanosis (SpO₂ ≈ 80%, pO₂ ≈ 35 mmHg), MAP 49 / PAP 33. Levers: the split tricuspid `RAIVCI_RV` + `RASVC_RV` `no_flow` (atresia), RV hypoplasia (`el_min: 2200`, `u_vol: 0.0025`, VSD-fed), `diameter_fo: 6` (baseline `fo_lr_factor: 25` → R→L easy), `diameter_vsd: 2` (restrictive) + `RV_PA.r_for: 800` (pulmonary stenosis) + `Pda.diameter_relative: 0.8`. Left heart normal → no engine change (single LV uses the normal cycle path). Cross-listed as a Category-D (FO-dependent) teaching case.
 
 - **A5 — Tetralogy of Fallot with pulmonary atresia / severe RVOT obstruction.** Large VSD with an overriding aorta; in the pulmonary-atresia form, pulmonary flow is duct- (±MAPCA-) dependent (Miller AATS consensus 2022 [#18]; Bailliard 2009 [#19]).
   *Engine:* large `Shunts.diameter_vsd`; `RV_PA` high `r_for` (or `no_flow` for atresia); `Pda`; the aortic override via the pre-wired `RV_AA` valve (RV→AA) enabled alongside `LV_AA`.
-  **✅ BUILT** as a four-phenotype family — `tof_pink`, `tof` (headline), `tof_severe`, `tof_pa` — term neonate **24 h old, 3.3 kg** (term_neonate allometrically scaled from 3.545 kg with `weight_scale`, volumes only). `scripts/_make_tof.mjs` → `reseed_tof.mjs` → `probe_tof.mjs`. Shared levers: `diameter_vsd: 5` (RV/LV peaks equalise in every variant — non-restrictive), `RV_AA` enabled so both ventricles eject into the aorta (RV share of aortic inflow ≈ 33–35%, 15% in `tof_pink`), `Heart.cont_factor_left/right` 0.7 (0.75 pink) to normalise the two-into-one-outlet output (as `pa_vsd`), `diameter_fo: 1.5` (small PFO). **No extra RV hypertrophy** — RVH develops postnatally under systemic loading (Alipour Symakani 2023), so the RV chamber keeps baseline stiffness on day 1. Calibrated operating points (ANS on, after reseed):
+  **✅ BUILT** as a four-phenotype family — `tof_pink`, `tof` (headline), `tof_severe`, `tof_pa` — term neonate **24 h old, 3.3 kg** (term_neonate allometrically scaled from 3.545 kg with `weight_scale`, volumes only). `scripts/archive/_make_tof.mjs` → `reseed_tof.mjs` → `probe_tof.mjs`. Shared levers: `diameter_vsd: 5` (RV/LV peaks equalise in every variant — non-restrictive), `RV_AA` enabled so both ventricles eject into the aorta (RV share of aortic inflow ≈ 33–35%, 15% in `tof_pink`), `Heart.cont_factor_left/right` 0.7 (0.75 pink) to normalise the two-into-one-outlet output (as `pa_vsd`), `diameter_fo: 1.5` (small PFO). **No extra RV hypertrophy** — RVH develops postnatally under systemic loading (Alipour Symakani 2023), so the RV chamber keeps baseline stiffness on day 1. Calibrated operating points (ANS on, after reseed):
 
   | scenario | `RV_PA.r_for` | duct (`diameter_relative`, max) | RVOT gradient | VSD net | Qp:Qs | SpO₂ | MAP | Qs mL/kg/min |
   |---|---|---|---|---|---|---|---|---|
@@ -15943,16 +14732,16 @@ Here the left-heart outflow to the body is obstructed or absent, so systemic per
 
 - **B1 — Hypoplastic left heart syndrome (HLHS).** *Also FO-dependent.* The LV cannot support the systemic circulation; the entire cardiac output is delivered by the RV → PDA → aorta, perfusing the arch and coronaries **retrograde**. Pulmonary venous return is obligated left→right across the FO. An intact or highly restrictive atrial septum is a lethal combination requiring emergent decompression (Connor 2007 [#22]; Schranz duct-stenting 2024 [#23]; Vlahos 2004 [#26]; Generali 2022 [#27]).
   *Engine:* `LV_AA.no_flow` or severe `r_for`↑ + LV hypoplasia (reuse the `cdh_lv_dysfunction` LV levers: `Heart.cont_factor_left`, LV `el_min` / `u_vol`); `LA_LV.no_flow` or high `r_for` (mitral atresia/stenosis); `Shunts.diameter_fo` L→R; `Pda` carrying R→L (PA→AAR; the `AAR_DA` resistor is bidirectional). The *restrictive/intact-septum* variant (`diameter_fo → 0`) is a high-value teaching toggle.
-  **✅ BUILT** as `hlhs` (mitral + aortic atresia → LV fully excluded) — `scripts/_make_hlhs.mjs` → `reseed_hlhs.mjs` → `probe_hlhs.mjs`. Calibrated single-RV parallel circulation: RV output ≈ 1.2 L/min split **Qp:Qs ≈ 1.7** (mild pulmonary over-circulation, the typical balance), systemic Qs ≈ 0.46 L/min via the duct (PA→aorta, R→L), **retrograde aortic-arch and coronary perfusion** (AAR→AA), obligate FO L→R ≈ 0.75 L/min, moderate cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34 mmHg), PAP > MAP (RV is the systemic pump). Levers: mitral+aortic atresia, `diameter_fo: 6` / `fo_lr_factor: 1`, `Pda.diameter_relative: 1.0` with a fat 4 mm duct, hypoplastic AA (`u_vol ×0.6`, `el_base ×1.4`), **pulmonary arteriolar resistance ×2 to balance Qp:Qs** (at baseline PVR the lungs steal the output → Qp:Qs ≈ 3.5, systemic hypoperfusion — itself a teaching failure mode). A second engine generalization was needed: `Heart.calc_model` now derives the cardiac cycle from the ventricular activation window when the LV has *no* outflow (aortic atresia → both `LV_AA` and `LV_PA` disabled), so the single-RV physiology keeps a valid cycle (and `HeartFunction` inputs); identity for any heart with a working LV outflow (normal, TGA, tricuspid atresia, PA-IVS).
+  **✅ BUILT** as `hlhs` (mitral + aortic atresia → LV fully excluded) — `scripts/archive/_make_hlhs.mjs` → `reseed_hlhs.mjs` → `probe_hlhs.mjs`. Calibrated single-RV parallel circulation: RV output ≈ 1.2 L/min split **Qp:Qs ≈ 1.7** (mild pulmonary over-circulation, the typical balance), systemic Qs ≈ 0.46 L/min via the duct (PA→aorta, R→L), **retrograde aortic-arch and coronary perfusion** (AAR→AA), obligate FO L→R ≈ 0.75 L/min, moderate cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34 mmHg), PAP > MAP (RV is the systemic pump). Levers: mitral+aortic atresia, `diameter_fo: 6` / `fo_lr_factor: 1`, `Pda.diameter_relative: 1.0` with a fat 4 mm duct, hypoplastic AA (`u_vol ×0.6`, `el_base ×1.4`), **pulmonary arteriolar resistance ×2 to balance Qp:Qs** (at baseline PVR the lungs steal the output → Qp:Qs ≈ 3.5, systemic hypoperfusion — itself a teaching failure mode). A second engine generalization was needed: `Heart.calc_model` now derives the cardiac cycle from the ventricular activation window when the LV has *no* outflow (aortic atresia → both `LV_AA` and `LV_PA` disabled), so the single-RV physiology keeps a valid cycle (and `HeartFunction` inputs); identity for any heart with a working LV outflow (normal, TGA, tricuspid atresia, PA-IVS).
   **✅ Restrictive/intact-septum variant BUILT** as `hlhs_restrictive` (same builder, only the atrial lever differs: `diameter_fo: 1`). The atrial communication is too small to pass the whole pulmonary venous return, so the LA cannot decompress: **LA pressure rises to ≈ 21 mmHg** (vs 4.5 open — a ≈ 19 mmHg trans-septal gradient = severe pulmonary venous hypertension), the obligate shunt is choked (≈ 420 vs 750 mL/min), single-RV preload/output fall (≈ 0.8 vs 1.2 L/min), and hypoxaemia is severe (**SpO₂ ≈ 64%, pO₂ ≈ 28 mmHg, pH ≈ 7.30**) — the lethal emergency needing immediate atrial decompression (balloon/blade septostomy or stenting). It remains a stable steady state because the septum is restrictive, not fully intact (`diameter_fo → 0` would trap the LA entirely and collapse). Alveolar oedema is not separately modeled — the hypoxaemia arises from the reduced pulmonary flow + obligatory mixing.
 
 - **B2 — Critical aortic stenosis.** The LV cannot eject across the valve, so systemic perfusion becomes duct-dependent; high LV wall stress impairs coronary perfusion and drives LV dysfunction (Affolter 2014 [#24]).
   *Engine:* `LV_AA.r_for`↑; LV strain via the existing `HeartFunction` load-induced contractility model; `Pda` open. **Fully buildable.**
-  **✅ BUILT** as `critical_as` — `scripts/_make_cas.mjs` → `reseed_cas.mjs` → `probe_as.mjs`. Calibrated (left-sided mirror of `critical_ps`): **pressure-loaded, failing LV** (peak ≈ 127 mmHg, 83 mmHg trans-valvular gradient — a low-flow/low-gradient state) with reduced antegrade aortic flow (≈ 190 mL/min) while the **duct supplies ~40% of systemic flow** (R→L ≈ 125 mL/min, PA→aorta — close it → systemic shock); **differential cyanosis** (pre-ductal SpO₂ ≈ 96% from the LV-fed upper body vs post-ductal ≈ 85% from the duct-fed lower body); mild LA congestion (≈ 7.5 mmHg) decompressing L→R across the FO; low MAP (≈ 39) with compensatory tachycardia — the decompensating low-output picture. Levers: `LV_AA.r_for: 8000` (patent — not atretic, contrast HLHS), `Heart.cont_factor_left: 0.4` (failing LV — keeps the peak realistic ~110–130 not ~190 and deepens duct-dependence + differential cyanosis), `Pda.diameter_relative: 1.0`, `diameter_fo: 2.5` / `fo_lr_factor: 4` (modest L→R LA decompression). Aortic valve patent → no engine change. *Same modeling caveat as critical PS:* the realistic LV peak comes via a failing LV rather than a 190 mmHg hypercontractile one.
+  **✅ BUILT** as `critical_as` — `scripts/archive/_make_cas.mjs` → `reseed_cas.mjs` → `probe_as.mjs`. Calibrated (left-sided mirror of `critical_ps`): **pressure-loaded, failing LV** (peak ≈ 127 mmHg, 83 mmHg trans-valvular gradient — a low-flow/low-gradient state) with reduced antegrade aortic flow (≈ 190 mL/min) while the **duct supplies ~40% of systemic flow** (R→L ≈ 125 mL/min, PA→aorta — close it → systemic shock); **differential cyanosis** (pre-ductal SpO₂ ≈ 96% from the LV-fed upper body vs post-ductal ≈ 85% from the duct-fed lower body); mild LA congestion (≈ 7.5 mmHg) decompressing L→R across the FO; low MAP (≈ 39) with compensatory tachycardia — the decompensating low-output picture. Levers: `LV_AA.r_for: 8000` (patent — not atretic, contrast HLHS), `Heart.cont_factor_left: 0.4` (failing LV — keeps the peak realistic ~110–130 not ~190 and deepens duct-dependence + differential cyanosis), `Pda.diameter_relative: 1.0`, `diameter_fo: 2.5` / `fo_lr_factor: 4` (modest L→R LA decompression). Aortic valve patent → no engine change. *Same modeling caveat as critical PS:* the realistic LV peak comes via a failing LV rather than a 190 mmHg hypercontractile one.
 
 - **B3 — Critical coarctation of the aorta.** A discrete narrowing at the isthmus; the lower body is perfused by right→left ductal flow into the descending aorta, and abrupt ductal closure causes shock (Ganigara 2019 [#25]; Egan 2009 [#28]).
   *Engine:* `AAR_AD.r_for`↑ (or `no_flow` for near-atretic); `Pda` open feeding the lower body. **Buildable with a wiring note** — see B3/B4 caveat in [§3](#3-engine-lever-summary--limitations).
-  **✅ BUILT** as `coarctation` — `scripts/_make_coarc.mjs` → `reseed_coarc.mjs` → `probe_coarc.mjs`. Calibrated: a tight but patent isthmus gives the hallmark **pre/post-ductal pressure gradient** (upper body 101/55 vs lower 30/16, ≈ 55 mmHg mean — upper-body hypertension / weak femorals), a duct-dependent lower body (an antegrade isthmus trickle ≈ 130 mL/min plus the duct R→L ≈ 15 mL/min), and **differential cyanosis** (pre-ductal 97% vs post-ductal 87%). *Two engine facts resolved the wiring note (both JSON-only, no code change):* (1) re-point the duct to the descending aorta — `Pda.components.AAR_DA.comp_from: "AD"` (the `Pda` model drives whatever endpoints its resistor names, so the duct desaturates only the lower body → correct differential cyanosis); (2) the isthmus lever is **`Circulation.components.AD.r_for`** (= 30000 here), *not* `AAR_AD.r_for` — the `AD` BloodVessel adopts its same-named input resistor `AAR_AD` and overwrites `r_for` with `AD.r_for_eff` every step, so a direct edit to `AAR_AD.r_for` is wiped.
+  **✅ BUILT** as `coarctation` — `scripts/archive/_make_coarc.mjs` → `reseed_coarc.mjs` → `probe_coarc.mjs`. Calibrated: a tight but patent isthmus gives the hallmark **pre/post-ductal pressure gradient** (upper body 101/55 vs lower 30/16, ≈ 55 mmHg mean — upper-body hypertension / weak femorals), a duct-dependent lower body (an antegrade isthmus trickle ≈ 130 mL/min plus the duct R→L ≈ 15 mL/min), and **differential cyanosis** (pre-ductal 97% vs post-ductal 87%). *Two engine facts resolved the wiring note (both JSON-only, no code change):* (1) re-point the duct to the descending aorta — `Pda.components.AAR_DA.comp_from: "AD"` (the `Pda` model drives whatever endpoints its resistor names, so the duct desaturates only the lower body → correct differential cyanosis); (2) the isthmus lever is **`Circulation.components.AD.r_for`** (= 30000 here), *not* `AAR_AD.r_for` — the `AD` BloodVessel adopts its same-named input resistor `AAR_AD` and overwrites `r_for` with `AD.r_for_eff` every step, so a direct edit to `AAR_AD.r_for` is wiped.
 
 - **B4 — Interrupted aortic arch (IAA).** The aortic arch is discontinuous; the descending aorta is perfused entirely through the duct. Almost always with a VSD and a strong association with 22q11 deletion (DiGeorge). PGE1 "revolutionized" its management (Jonas 2015 [#29]; Burbano-Vera 2018 [#30]).
   *Engine:* `AAR_AD.no_flow = true`; `Shunts.diameter_vsd`; ductal lower-body path. **Buildable with rewire** (same caveat as B3).
@@ -15962,7 +14751,7 @@ Here the left-heart outflow to the body is obstructed or absent, so systemic per
 
 - **C1 — d-Transposition of the great arteries (d-TGA).** The aorta arises from the RV and the pulmonary artery from the LV, creating **two circulations in parallel** rather than in series. Survival is impossible without mixing — at the atrial level (FO/ASD), through the duct, and/or via a VSD. Cyanosis is inversely proportional to the amount of mixing. The classic neonatal rescue is PGE1 plus balloon atrial septostomy (Rashkind), pending the arterial switch (Martins 2008 [#16]; Rashkind 1966 [#17]; Cucerea 2024 [#33]; Beitzke 1983 [#35]).
   *Engine:* enable `RV_AA` + `LV_PA` and disable `RV_PA` + `LV_AA` (**all four already pre-wired in `term_neonate.json`**); mixing via `Shunts.diameter_fo` + `Pda` (+ optional `diameter_vsd`). A septostomy is demonstrable by ramping `diameter_fo` via the event scheduler.
-  **✅ BUILT** as `dtga` (intact ventricular septum) — `scripts/_make_dtga.mjs` → `reseed_dtga.mjs` → `probe_dtga.mjs`. Calibrated to a stable parallel circulation (Qp:Qs ≈ 1, balanced ~0.8 L/min outputs) with cyanosis (SpO₂ ≈ 59%, pO₂ ≈ 25 mmHg). Mixing levers: `diameter_fo: 6`, `fo_lr_factor: 1` (a true ASD/septostomy hole is symmetric — a high flap factor would throttle the LA→RA flow that oxygenates the systemic circuit), `Pda.diameter_relative: 1.0`, `diameter_vsd: 0`. *Note:* FO ≥ ~7 mm at `fo_lr_factor 1` makes the Hagen-Poiseuille atrial resistance so low the explicit solver oscillates — keep septostomy demos at/below 6 mm or raise `atrial_septal_width`. One small engine generalization was needed: `Heart.calc_model` now detects end-systole from whichever LV outflow valve is active (`LV_AA` if enabled, else `LV_PA`), so the cardiac-cycle analysis and `HeartFunction` wall-stress inputs stay valid with the great arteries transposed (identity for normal anatomy).
+  **✅ BUILT** as `dtga` (intact ventricular septum) — `scripts/archive/_make_dtga.mjs` → `reseed_dtga.mjs` → `probe_dtga.mjs`. Calibrated to a stable parallel circulation (Qp:Qs ≈ 1, balanced ~0.8 L/min outputs) with cyanosis (SpO₂ ≈ 59%, pO₂ ≈ 25 mmHg). Mixing levers: `diameter_fo: 6`, `fo_lr_factor: 1` (a true ASD/septostomy hole is symmetric — a high flap factor would throttle the LA→RA flow that oxygenates the systemic circuit), `Pda.diameter_relative: 1.0`, `diameter_vsd: 0`. *Note:* FO ≥ ~7 mm at `fo_lr_factor 1` makes the Hagen-Poiseuille atrial resistance so low the explicit solver oscillates — keep septostomy demos at/below 6 mm or raise `atrial_septal_width`. One small engine generalization was needed: `Heart.calc_model` now detects end-systole from whichever LV outflow valve is active (`LV_AA` if enabled, else `LV_PA`), so the cardiac-cycle analysis and `HeartFunction` wall-stress inputs stay valid with the great arteries transposed (identity for normal anatomy).
 
 ### D. Foramen-ovale / atrial-septum-dependent
 
@@ -15970,7 +14759,7 @@ These lesions depend on an **obligatory atrial-level shunt**; a restrictive or i
 
 - **D1 — Total anomalous pulmonary venous connection (TAPVC), especially obstructed.** The pulmonary veins drain to the systemic venous side instead of the LA, so an obligatory right→left atrial shunt across the FO is the only way to fill the left heart. The obstructed form presents with severe cyanosis and low output, is **unresponsive to prostaglandin**, and is one of the few true neonatal cardiac-surgical emergencies (Ross 2017 [#36]; Vanderlaan 2018 [#37]; Campbell 2022 [#38]).
   *Engine:* reroute the pulmonary venous return (`PV_LA`) so it enters the right side, adding the anomalous connection with high `r_for` for the obstructed variant; `Shunts.diameter_fo` obligate R→L. **Buildable with a pulmonary-venous rewire.**
-  **✅ BUILT** as `tapvc` (unobstructed) + `tapvc_obstructed` — `scripts/_make_tapvc.mjs` → `reseed_tapvc.mjs` → `probe_tapvc.mjs`. The reroute is **JSON-only**: `PV_LA.comp_to: "SVC"` (the pulmonary veins drain to the SVC — supracardiac, the commonest type). *Diagram:* the `PV_LA` connector is re-pointed PV→SVC ("vertical vein"), so the animation shows the anomalous drainage and an LA fed only across the foramen ovale. PV keeps its ring position; since the SVC is off the ring, the path renders as a curved chord across the diagram interior, drawn `arc_flip` so it bends up over the pulmonary side rather than down over the upper-body nodes (a straight one would lie on top of the FO chord). `PV_LA` is a free-standing Resistor (the `LA` HeartChamber doesn't adopt it), so its `comp_to` *and* `r_for` set directly — the channel `r_for` is the obstruction lever. The FO is opened (`diameter_fo: 6`, baseline `fo_lr_factor: 25` → R→L easy) to carry the obligate shunt that fills the *entire* left heart; the duct stays closed (TAPVC is FO-dependent, not duct-dependent → PGE1-unresponsive). Calibrated (re-tuned 2026-10-01 for the merged RA, `diameter_fo: 8`) — **unobstructed** (`PV_LA.r_for: 335`): full mixing in the RA, normal PV pressure ≈ 10 mmHg, CO ≈ 0.58 L/min, mild cyanosis (SpO₂ ≈ 85%, pO₂ ≈ 40). Before the merge the split RA confined pulmonary venous return to `RASVC` and streamed it toward the FO, which is how the earlier SpO₂ ≈ 87 arose. With true complete mixing, ≈ 85 is the closest the levers reach without dropping PV pressure below normal. **Obstructed** (`PV_LA.r_for: 4600`): **pulmonary venous hypertension** (PV pressure ≈ 36 mmHg, vs a near-normal LA — the pathology is upstream, not in the left atrium), secondary **suprasystemic PAP** (≈ 51 ≥ MAP), low output (CO ≈ 0.43 L/min, MAP ≈ 44), severe cyanosis (SpO₂ ≈ 73%, pO₂ ≈ 31) — the surgical emergency. Alveolar oedema not separately modeled (the hypoxaemia arises from the reduced pulmonary flow + complete mixing).
+  **✅ BUILT** as `tapvc` (unobstructed) + `tapvc_obstructed` — `scripts/archive/_make_tapvc.mjs` → `reseed_tapvc.mjs` → `probe_tapvc.mjs`. The reroute is **JSON-only**: `PV_LA.comp_to: "SVC"` (the pulmonary veins drain to the SVC — supracardiac, the commonest type). *Diagram:* the `PV_LA` connector is re-pointed PV→SVC ("vertical vein"), so the animation shows the anomalous drainage and an LA fed only across the foramen ovale. PV keeps its ring position; since the SVC is off the ring, the path renders as a curved chord across the diagram interior, drawn `arc_flip` so it bends up over the pulmonary side rather than down over the upper-body nodes (a straight one would lie on top of the FO chord). `PV_LA` is a free-standing Resistor (the `LA` HeartChamber doesn't adopt it), so its `comp_to` *and* `r_for` set directly — the channel `r_for` is the obstruction lever. The FO is opened (`diameter_fo: 6`, baseline `fo_lr_factor: 25` → R→L easy) to carry the obligate shunt that fills the *entire* left heart; the duct stays closed (TAPVC is FO-dependent, not duct-dependent → PGE1-unresponsive). Calibrated (re-tuned 2026-10-01 for the merged RA, `diameter_fo: 8`) — **unobstructed** (`PV_LA.r_for: 335`): full mixing in the RA, normal PV pressure ≈ 10 mmHg, CO ≈ 0.58 L/min, mild cyanosis (SpO₂ ≈ 85%, pO₂ ≈ 40). Before the merge the split RA confined pulmonary venous return to `RASVC` and streamed it toward the FO, which is how the earlier SpO₂ ≈ 87 arose. With true complete mixing, ≈ 85 is the closest the levers reach without dropping PV pressure below normal. **Obstructed** (`PV_LA.r_for: 4600`): **pulmonary venous hypertension** (PV pressure ≈ 36 mmHg, vs a near-normal LA — the pathology is upstream, not in the left atrium), secondary **suprasystemic PAP** (≈ 51 ≥ MAP), low output (CO ≈ 0.43 L/min, MAP ≈ 44), severe cyanosis (SpO₂ ≈ 73%, pO₂ ≈ 31) — the surgical emergency. Alveolar oedema not separately modeled (the hypoxaemia arises from the reduced pulmonary flow + complete mixing).
 
 > Cross-listed: **A1 (PA-IVS)**, **A4 (tricuspid atresia)**, and the **B1 (HLHS) restrictive-septum variant** are equally FO-dependent and double as Category-D teaching cases.
 
@@ -16348,15 +15137,13 @@ teaching:
 ## Workflow
 
 ```bash
-node scripts/_make_fetus.mjs 30                       # generate from term_fetus + the GA table
-node scripts/probe_fetus.mjs fetus_30wk --seconds 150 # read the panel; iterate the table row
-node scripts/reseed_fetus.mjs 30                      # dry run -> /tmp/fetus_30wk_reseed.json
-node scripts/reseed_fetus.mjs 30 --write              # bake the equilibrium into the scenario
-node scripts/probe_fetus.mjs fetus_30wk --seconds 20  # the reseed took if this matches the 150 s run
-node scripts/probe_fetus.mjs                          # regression: fetus_term must be unchanged
+node scripts/_make_fetus_validated.mjs --profile 30                  # term_neonate -> fetus_30wk (fetal transform, baked)
+node scripts/probe_term_reference.mjs fetus_30wk --ref scripts/reference/fetus_30wk.json   # vs Fetus30wkReference
 ```
 
-Adding a gestation is one row in `FETAL` (`scripts/_ga_tables.mjs`) plus a make/probe/reseed loop.
+Adding a gestation is a profile in `scripts/_fetal_profiles.mjs` plus a reference set
+(`docs/Fetus<ga>wkReference.md`, `scripts/reference/fetus_<ga>wk.json`). The older
+`_make_fetus.mjs`/`reseed_fetus.mjs` loop (from the archived `term_fetus`) is in `scripts/archive/`.
 
 `scripts/build_patient.mjs` also understands fetal baselines — it auto-detects one, seeds from the
 same `FETAL` table, skips the neonatal RDS/PDA levers, and drives pO₂/pCO₂ from
@@ -17394,10 +16181,54 @@ const build = function (model_definition) {
     }
   });
 
+  // the models listed in the definition; only these are initialized below; the sub-models are
+  // initialized by their owner's init_model
+  const top_level_models = Object.values(model.models);
+
+  // pre-create the sub-models that composite models declare in `components` (recursively), so every
+  // model exists before any init_model runs. Blood and Gas collect their compartments from
+  // model.models in init_model, so without this they missed the compartments of an owner listed
+  // after them in the definition. The owner still applies the component args in its own init_model
+  // (BaseModelClass only instantiates a name that does not exist yet). Same insertion order as
+  // BaseModelClass.init_model (all of a model's components, then each component's own), because the
+  // step loop runs the models in insertion order.
+  const create_components = function (components) {
+    const created = [];
+    Object.entries(components || {}).forEach(([component_name, component_def]) => {
+      if (!component_def || model.models.hasOwnProperty(component_name)) return;
+      const model_class = available_model_map[component_def.model_type];
+      if (!model_class) {
+        errors += 1;
+        console.log("Model type not found: ", component_def.model_type);
+        _send({
+          type: "status",
+          message: "ERROR: " + component_def.model_type + " model not found",
+          payload: [],
+        });
+        return;
+      }
+      try {
+        model.models[component_name] = new model_class(model, component_name, component_def.model_type);
+      } catch (e) {
+        errors += 1;
+        console.error("ModelEngine: model instantiation error: ", component_name, e);
+        _send({
+          type: "status",
+          message: "ERROR: failed to instantiate " + component_name + " (" + component_def.model_type + ")",
+          payload: [],
+        });
+        return;
+      }
+      created.push(component_def);
+    });
+    created.forEach((component_def) => create_components(component_def.components));
+  };
+  Object.values(model_definition.models).forEach((sub_model_def) => create_components(sub_model_def.components));
+
   // initialize all sub models
   if (errors < 1) {
     // now initialize all the models with the correct properties stored in the model definition
-    Object.values(model.models).forEach((model_comp) => {
+    top_level_models.forEach((model_comp) => {
       // // find the arguments for the model in the model definition
       let args = [];
       for (const [key, value] of Object.entries(model_definition.models[model_comp.name])) {
@@ -18138,7 +16969,6 @@ export { BloodDiffusor } from "./base_models/BloodDiffusor";
 export { Capacitance }  from "./base_models/Capacitance";
 export { Container} from "./base_models/Container";
 export { GasCapacitance } from "./component_models/GasCapacitance";
-export { GasDiffusor } from "./base_models/GasDiffusor"
 export { GasExchanger } from "./base_models/GasExchanger";
 export { Resistor } from "./base_models/Resistor";
 export { TimeVaryingElastance } from "./base_models/TimeVaryingElastance";
@@ -18148,7 +16978,6 @@ export { Blood } from "./component_models/Blood";
 export { BloodCapacitance } from "./component_models/BloodCapacitance";
 export { BloodTimeVaryingElastance } from "./component_models/BloodTimeVaryingElastance";
 export { BloodVessel } from "./component_models/BloodVessel";
-export { BloodPump } from "./component_models/BloodPump";
 export { Fluids } from "./component_models/Fluids";
 
 export { HeartValve } from "./component_models/HeartValve";
@@ -18206,15 +17035,13 @@ const resolve_model_class = (model_type) => get_model_class(model_type) ?? Built
 
 // This base model class is the blueprint for all the model objects (classes). It incorporates the properties and methods which all model objects must implement 
 export class BaseModelClass {
-  // model interface list as described above
-
   constructor(model_ref, name = "") {
     // initialize independent properties which all models implement
     this.name = name; // name of the model object
     this.description = ""; // description for documentation purposes
     this.is_enabled = false; // flag whether the model is enabled or not
     this.model_type = ""; // holds the model type e.g. BloodCapacitance
-    this.components = {}; // holds a dictionary 
+    this.components = {}; // sub-models this model owns, keyed by name: { name: definition } (see init_model)
 
     // initialize local properties
     this._model_engine = model_ref; // object holding a reference to the model engine
@@ -18296,9 +17123,9 @@ export class BloodDiffusor extends BaseModelClass {
     this.dif_solutes_factor_ps = 1.0; // persistent diffusion factor for solutes (unitless)
 
     // scaling factors
-    this.dif_o2_factor_scaling = 1.0; // scaling factor for the o2 diffusion factor (unitless)
-    this.dif_co2_factor_scaling = 1.0; // scaling factor for the co2 diffusion factor (unitless)
-    this.dif_solutes_factor_scaling = 1.0; // scaling factor for the solute diffusion factor (unitless)
+    this.dif_o2_factor_scaling_ps = 1.0; // scaling factor for the o2 diffusion factor (unitless)
+    this.dif_co2_factor_scaling_ps = 1.0; // scaling factor for the co2 diffusion factor (unitless)
+    this.dif_solutes_factor_scaling_ps = 1.0; // scaling factor for the solute diffusion factor (unitless)
   
     // dependent properties
     this.dif_o2_step = 0.0; // effective o2 diffusion constant incl. the factors (mmol/(mmHg·s))
@@ -18323,17 +17150,17 @@ export class BloodDiffusor extends BaseModelClass {
     this.dif_o2_step = this.dif_o2
         + (this.dif_o2_factor - 1) * this.dif_o2
         + (this.dif_o2_factor_ps - 1) * this.dif_o2
-        + (this.dif_o2_factor_scaling - 1) * this.dif_o2;
+        + (this.dif_o2_factor_scaling_ps - 1) * this.dif_o2;
 
     this.dif_co2_step = this.dif_co2
         + (this.dif_co2_factor - 1) * this.dif_co2
         + (this.dif_co2_factor_ps - 1) * this.dif_co2
-        + (this.dif_co2_factor_scaling - 1) * this.dif_co2;
+        + (this.dif_co2_factor_scaling_ps - 1) * this.dif_co2;
 
     let solutes_step = 1.0
         + (this.dif_solutes_factor - 1)
         + (this.dif_solutes_factor_ps - 1)
-        + (this.dif_solutes_factor_scaling - 1);
+        + (this.dif_solutes_factor_scaling_ps - 1);
 
     // diffuse the gases, where diffusion is partial pressure-driven. A failed acid-base / O2 solve
     // leaves po2/pco2 at the -1 sentinel, which would drive a spurious flux: skip that gas this step
@@ -18636,133 +17463,6 @@ export class Container extends BaseModelClass {
 
 ```
 
-### FILE: explain-engine/base_models/GasDiffusor.js
-
-```javascript
-import { BaseModelClass } from "./BaseModelClass";
-
-export class GasDiffusor extends BaseModelClass {
-  // static properties
-  static model_type = "GasDiffusor";
-
-  constructor(model_ref, name = "") {
-    // call the parent constructor
-    super(model_ref, name);
-
-    // initialize independent properties
-    this.comp_gas1 = ""; // name of the first gas-containing model
-    this.comp_gas2 = ""; // name of the second gas-containing model
-    this.dif_o2 = 0.01; // diffusion constant for o2 (mmol/(mmHg*s))
-    this.dif_co2 = 0.01; // diffusion constant for co2 (mmol/(mmHg*s))
-    this.dif_n2 = 0.01; // diffusion constant for n2 (mmol/(mmHg*s))
-    this.dif_other = 0.01; // diffusion constant for the other gasses (mmol/(mmHg*s))
-
-    // non-persistent property factors. These factors reset to 1.0 after each model step
-    this.dif_o2_factor = 1.0; // non-persistent diffusion factor for o2 (unitless)
-    this.dif_co2_factor = 1.0; // non-persistent diffusion factor for co2 (unitless)
-    this.dif_n2_factor = 1.0; // non-persistent diffusion factor for n2 (unitless)
-    this.dif_other_factor = 1.0; // non-persistent diffusion factor for other gasses (unitless)
-
-    // persistent property factors. These factors are persistent and do not reset
-    this.dif_o2_factor_ps = 1.0; // persistent diffusion factor for o2 (unitless)
-    this.dif_co2_factor_ps = 1.0; // persistent diffusion factor for co2 (unitless)
-    this.dif_n2_factor_ps = 1.0; // persistent diffusion factor for n2 (unitless)
-    this.dif_other_factor_ps = 1.0; // persistent diffusion factor for other gasses (unitless)
-
-    // scaling factors. These factors are persistent and do not reset, but they are applied as scaling factors to the diffusion factors, meaning that they apply to the total diffusion factor after applying the non-persistent and persistent factors
-    this.dif_o2_factor_scaling = 1.0;
-    this.dif_co2_factor_scaling = 1.0;
-    this.dif_n2_factor_scaling = 1.0;
-    this.dif_other_factor_scaling = 1.0;
-
-    // local variables
-    this._comp_gas1 = null; // reference to the first gas-containing model
-    this._comp_gas2 = null; // reference to the second gas-containing model
-    this.dif_o2_step = 0.0; // state variable for the o2 diffusion (mmol)
-    this.dif_co2_step = 0.0; // state variable for the co2 diffusion (mmol)
-    this.dif_n2_step = 0.0; // state variable for the n2 diffusion (mmol)
-    this.dif_other_step = 0.0; // state variable for the other gasses diffusion (mmol)
-  }
-
-  calc_model() {
-    // find the two gas-containing models and store references
-    this._comp_gas1 = this._model_engine.models[this.comp_gas1];
-    this._comp_gas2 = this._model_engine.models[this.comp_gas2];
-
-    // refresh the partial pressures of both gas compartments from their current concentrations,
-    // as we need the partial pressures for the gas diffusion. Use the GasCapacitance method (which
-    // derives partials from the actual concentrations) — NOT the standalone calc_gas_composition
-    // initializer, which would reset both compartments to a fixed (room-air) composition.
-    this._comp_gas1.calc_gas_composition();
-    this._comp_gas2.calc_gas_composition();
-
-    // incorporate the factors
-    this.dif_o2_step = this.dif_o2
-        + (this.dif_o2_factor - 1) * this.dif_o2
-        + (this.dif_o2_factor_ps - 1) * this.dif_o2
-        + (this.dif_o2_factor_scaling - 1) * this.dif_o2;
-
-    this.dif_co2_step = this.dif_co2
-        + (this.dif_co2_factor - 1) * this.dif_co2
-        + (this.dif_co2_factor_ps - 1) * this.dif_co2
-        + (this.dif_co2_factor_scaling - 1) * this.dif_co2;
-
-    this.dif_n2_step = this.dif_n2
-        + (this.dif_n2_factor - 1) * this.dif_n2
-        + (this.dif_n2_factor_ps - 1) * this.dif_n2
-        + (this.dif_n2_factor_scaling - 1) * this.dif_n2;
-
-    this.dif_other_step = this.dif_other
-        + (this.dif_other_factor - 1) * this.dif_other
-        + (this.dif_other_factor_ps - 1) * this.dif_other
-        + (this.dif_other_factor_scaling - 1) * this.dif_other;
-
-    // diffuse the gases, where diffusion is partial pressure-driven. Each concentration write is
-    // guarded by fixed_composition so a fixed (infinite-reservoir) compartment stays constant,
-    // mirroring BloodDiffusor.
-    let do2 = (this._comp_gas1.po2 - this._comp_gas2.po2) * this.dif_o2_step * this._t;
-    if (!this._comp_gas1.fixed_composition && this._comp_gas1.vol > 0.0) {
-      this._comp_gas1.co2 = (this._comp_gas1.co2 * this._comp_gas1.vol - do2) / this._comp_gas1.vol;
-    }
-    if (!this._comp_gas2.fixed_composition && this._comp_gas2.vol > 0.0) {
-      this._comp_gas2.co2 = (this._comp_gas2.co2 * this._comp_gas2.vol + do2) / this._comp_gas2.vol;
-    }
-
-    let dco2 = (this._comp_gas1.pco2 - this._comp_gas2.pco2) * this.dif_co2_step * this._t;
-    if (!this._comp_gas1.fixed_composition && this._comp_gas1.vol > 0.0) {
-      this._comp_gas1.cco2 = (this._comp_gas1.cco2 * this._comp_gas1.vol - dco2) / this._comp_gas1.vol;
-    }
-    if (!this._comp_gas2.fixed_composition && this._comp_gas2.vol > 0.0) {
-      this._comp_gas2.cco2 = (this._comp_gas2.cco2 * this._comp_gas2.vol + dco2) / this._comp_gas2.vol;
-    }
-
-    let dn2 = (this._comp_gas1.pn2 - this._comp_gas2.pn2) * this.dif_n2_step * this._t;
-    if (!this._comp_gas1.fixed_composition && this._comp_gas1.vol > 0.0) {
-      this._comp_gas1.cn2 = (this._comp_gas1.cn2 * this._comp_gas1.vol - dn2) / this._comp_gas1.vol;
-    }
-    if (!this._comp_gas2.fixed_composition && this._comp_gas2.vol > 0.0) {
-      this._comp_gas2.cn2 = (this._comp_gas2.cn2 * this._comp_gas2.vol + dn2) / this._comp_gas2.vol;
-    }
-
-    let dother = (this._comp_gas1.pother - this._comp_gas2.pother) * this.dif_other_step * this._t;
-    if (!this._comp_gas1.fixed_composition && this._comp_gas1.vol > 0.0) {
-      this._comp_gas1.cother = (this._comp_gas1.cother * this._comp_gas1.vol - dother) / this._comp_gas1.vol;
-    }
-    if (!this._comp_gas2.fixed_composition && this._comp_gas2.vol > 0.0) {
-      this._comp_gas2.cother = (this._comp_gas2.cother * this._comp_gas2.vol + dother) / this._comp_gas2.vol;
-    }
-
-    // reset the non-persistent factors
-    this.dif_o2_factor = 1.0;
-    this.dif_co2_factor = 1.0;
-    this.dif_n2_factor = 1.0;
-    this.dif_other_factor = 1.0;
-
-  }
-}
-
-```
-
 ### FILE: explain-engine/base_models/GasExchanger.js
 
 ```javascript
@@ -18800,19 +17500,19 @@ export class GasExchanger extends BaseModelClass {
     this.dif_o2_factor_ps = 1.0; // factor modifying the oxygen diffusion constant
     this.dif_co2_factor_ps = 1.0; // factor modifying the carbon diffusion constant
 
-    // scaling factor
-    this.dif_o2_factor_scaling = 1.0; // scaling factor for the oxygen diffusion constant
-    this.dif_co2_factor_scaling = 1.0; // scaling factor for the carbon diffusion constant
+    // scaling factors (the persistent scaling layer)
+    this.dif_o2_factor_scaling_ps = 1.0; // scaling factor for the oxygen diffusion constant
+    this.dif_co2_factor_scaling_ps = 1.0; // scaling factor for the carbon diffusion constant
     
     // dependent properties
-    this.flux_o2 = 0.0; // oxygen flux (mmol)
-    this.flux_co2 = 0.0; // carbon dioxide flux (mmol)
+    this.flux_o2 = 0.0; // O2 moved this step, blood -> gas (mmol per step; uptake is negative)
+    this.flux_co2 = 0.0; // CO2 moved this step, blood -> gas (mmol per step)
 
     // local variables
     this._blood = null; // reference to the blood component
     this._gas = null; // reference to the gas component
-    this.dif_o2_step = 0.0; // state variable for the o2 diffusion (mmol)
-    this.dif_co2_step = 0.0; // state variable for the co2 diffusion (mmol)
+    this.dif_o2_step = 0.0; // effective O2 diffusion constant incl. the factors (mmol/(mmHg·s))
+    this.dif_co2_step = 0.0; // effective CO2 diffusion constant incl. the factors (mmol/(mmHg·s))
     // the blood-gas solve (calc_blood_composition, an iterative acid-base / O2 solve) runs every
     // bc_interval seconds instead of every step; the fluxes in between use the last po2/pco2
     this.bc_interval = 0.002;
@@ -18828,6 +17528,7 @@ export class GasExchanger extends BaseModelClass {
       this._gas_name = this.comp_gas;
       this._bc_counter = Infinity;
     }
+    if (!this._blood || !this._gas) return;
 
     // set the blood composition of the blood component (every bc_interval, see the constructor)
     this._bc_counter += this._t;
@@ -18854,12 +17555,12 @@ export class GasExchanger extends BaseModelClass {
     this.dif_o2_step = this.dif_o2 
         + (this.dif_o2_factor - 1) * this.dif_o2
         + (this.dif_o2_factor_ps - 1) * this.dif_o2
-        + (this.dif_o2_factor_scaling - 1) * this.dif_o2; // apply scaling factor to the diffusion factor
+        + (this.dif_o2_factor_scaling_ps - 1) * this.dif_o2; // apply scaling factor to the diffusion factor
 
     this.dif_co2_step = this.dif_co2 
         + (this.dif_co2_factor - 1) * this.dif_co2
         + (this.dif_co2_factor_ps - 1) * this.dif_co2
-        + (this.dif_co2_factor_scaling - 1) * this.dif_co2; // apply scaling factor to the diffusion factor
+        + (this.dif_co2_factor_scaling_ps - 1) * this.dif_co2; // apply scaling factor to the diffusion factor
 
     // the factor layers add up, so several writers lowering them at once (Surfactant derecruitment
     // plus atelectasis) can take the sum below zero; a negative diffusion constant would pump gas
@@ -18910,7 +17611,7 @@ export class GasExchanger extends BaseModelClass {
     let new_cco2_gas = (cco2_gas * this._gas.vol + this.flux_co2) / this._gas.vol;
 
     // transfer the new concentrations, guarding each compartment by fixed_composition so a fixed
-    // (infinite-reservoir) compartment stays constant, mirroring BloodDiffusor/GasDiffusor
+    // (infinite-reservoir) compartment stays constant, mirroring BloodDiffusor
     if (!this._blood.fixed_composition) {
       this._blood.to2 = new_to2_blood;
       this._blood.tco2 = new_tco2_blood;
@@ -18992,7 +17693,6 @@ export class Resistor extends BaseModelClass {
     this.implicit = false;
     this.p1_ext = 0.0; // external pressure on the inlet (mmHg)
     this.p2_ext = 0.0; // external pressure on the outlet (mmHg)
-    this.fixed_composition = false;
     // Mixing without net flow (L/s): an equal volume exchanged both ways each step. Blood: eddies and
     // vortex flow between compartments that are one continuous pool (helpers/BloodMixing.js
     // exchange_blood). Gas: molecular diffusion and cardiogenic mixing (helpers/GasMixing.js
@@ -19020,7 +17720,6 @@ export class Resistor extends BaseModelClass {
     this.r_for_eff = 1000;  // calculated forward resistance (mmHg/L*s)
     this.r_back_eff = 1000; // calculated backward resistance (mmHg/L*s)
     this.r_k_eff = 0; // calculated non-linear resistance coefficient (mmHg·s²/L²)
-    this._prev_flow = 0.0; // flow from previous model step (L/s)
     this._ref_version = -1; // _models_version the cached _comp_from/_comp_to were resolved at
     this._ref_from = null; // comp_from / comp_to names they were resolved for
     this._ref_to = null;
@@ -19086,13 +17785,26 @@ export class Resistor extends BaseModelClass {
       }
   }
 
-  // current elastance of a compartment for the implicit correction: a capacitance's el_eff, or a
-  // time-varying elastance's instantaneous value between its minimum and maximum
+  // current local elastance dP/dV of a compartment for the implicit correction: a capacitance's el_eff, or
+  // a time-varying elastance's instantaneous value between its minimum and maximum, plus the slope of the
+  // non-linear term above the unstressed volume (2·el_k·S; for a time-varying elastance it belongs to the
+  // diastolic curve, so it fades with the activation)
   _elastance(c) {
     if (!c) return 0.0;
+    const s = typeof c.vol === "number" && typeof c.u_vol_eff === "number" ? c.vol - c.u_vol_eff : 0.0;
+    const k = s > 0.0 && typeof c.el_k_eff === "number" ? 2.0 * c.el_k_eff * s : 0.0;
     if (typeof c.el_max_eff === "number" && typeof c.act_factor === "number")
-      return c.el_min_eff + (c.el_max_eff - c.el_min_eff) * c.act_factor;
-    return typeof c.el_eff === "number" ? c.el_eff : 0.0;
+      return c.el_min_eff + k + (c.el_max_eff - c.el_min_eff - k) * c.act_factor;
+    return typeof c.el_eff === "number" ? c.el_eff + k : 0.0;
+  }
+
+  // flow magnitude (L/s) for a pressure drop dp >= 0 through a linear resistance r plus the turbulent
+  // term: dp = r * f + r_k_eff * f^2. Solved exactly for this step, in the form without cancellation,
+  // f = 2 dp / (r + sqrt(r^2 + 4 r_k dp)), so the turbulent loss never lags, chatters or reverses the
+  // flow. r_k_eff = 0 keeps the plain dp / r.
+  _flow(dp, r) {
+    if (!(this.r_k_eff > 0.0)) return dp / r;
+    return (2.0 * dp) / (r + Math.sqrt(r * r + 4.0 * this.r_k_eff * dp));
   }
 
   calc_flow() {
@@ -19108,29 +17820,18 @@ export class Resistor extends BaseModelClass {
     this.flow = 0.0;
 
     // return if no flow is allowed across this resistor
-    if (this.no_flow || this.no_flow_ext) {
-      this._prev_flow = 0.0;
-      // return from this function
-      return;
-    }
+    if (this.no_flow || this.no_flow_ext) return;
 
     // calculate the forward flow between two components
     if (_p1_t >= _p2_t) {
       // guard against a non-positive resistance (would produce Infinity/NaN flow)
-      if (this.r_for_eff <= 0.0) {
-        this._prev_flow = 0.0;
-        return;
-      }
-      // calculate the forward flow. The non-linear term uses the previous step's flow (explicit
-      // lagged scheme) — not this.flow, which was just reset to 0 above.
-      this.flow = (_p1_t - _p2_t - this.r_k_eff * Math.pow(this._prev_flow, 2)) / this.r_for_eff;
+      if (this.r_for_eff <= 0.0) return;
+      // calculate the forward flow: dp = r_for_eff * flow + r_k_eff * flow^2 (see _flow)
+      this.flow = this._flow(_p1_t - _p2_t, this.r_for_eff);
 
       // update the volumes of the connected components but do not remove the volume which could not be removed from the upstream component (to prevent volume loss)
       const vol_not_removed = this._comp_from.volume_out(this.flow * this._t);
       this._comp_to.volume_in(this.flow * this._t - vol_not_removed, this._comp_from);
-
-      // store the previous flow
-      this._prev_flow = this.flow;
       
       // return from this function
       return;
@@ -19139,28 +17840,19 @@ export class Resistor extends BaseModelClass {
     // calculate the backward flow between two components
     if (_p1_t < _p2_t && !this.no_back_flow) {
       // guard against a non-positive resistance (would produce Infinity/NaN flow)
-      if (this.r_back_eff <= 0.0) {
-        this._prev_flow = 0.0;
-        return;
-      }
-      // calculate the backward flow. The non-linear term uses the previous step's flow (explicit
-      // lagged scheme) — not this.flow, which was just reset to 0 above.
-      this.flow = (_p1_t - _p2_t + this.r_k_eff * Math.pow(this._prev_flow, 2)) / this.r_back_eff;
+      if (this.r_back_eff <= 0.0) return;
+      // calculate the backward flow (negative), same relation on the pressure difference's magnitude
+      this.flow = -this._flow(_p2_t - _p1_t, this.r_back_eff);
 
       // update the volumes of the connected components but do not remove the volume which could not be removed from the upstream component (to prevent volume loss)
       let vol_not_removed = this._comp_to.volume_out(-this.flow * this._t);
       this._comp_from.volume_in(-this.flow * this._t - vol_not_removed,this._comp_to);
 
-      // store the previous flow
-      this._prev_flow = this.flow;
-
       // return from this function
       return;
     }
 
-    // reached only when p1 < p2 and backflow is blocked: no flow occurred this step,
-    // so clear the stored flow to keep the non-linear term consistent next step
-    this._prev_flow = 0.0;
+    // reached only when p1 < p2 and backflow is blocked: no flow this step
   }
 }
 

@@ -114,7 +114,7 @@ Allometric/group scaling. A `Select` of groups (`weight_scale`, `blood_volume`, 
 - Apply → `scale(group, factor)` then `refreshState()`.
 - Reset → `scale("reset")` then `refreshState()`.
 
-`scale()` routes to `Model.scaleModel`, which dispatches to `ModelScaler`'s `scale_*` methods (touching only the `*_factor_scaling_ps` layer). `reset` restores `model.weight` to `_baseline_weight`. There is no slow watchlist here — values reflect after `refreshState()`.
+`scale()` routes to `Model.scaleModel`, which dispatches to `ModelScaler`'s `scale_*` methods. The factor groups set the `*_factor_scaling_ps` layer absolutely (1.0 = the scenario as loaded; every shipped scenario is baked); the volume groups and weight scaling change `vol`/`u_vol`. `reset` returns every group to 1.0 and restores `model.weight` to `_baseline_weight`. There is no slow watchlist here — values reflect after `refreshState()`.
 
 ---
 

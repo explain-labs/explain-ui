@@ -274,7 +274,7 @@ export const COMMAND_ALLOWLIST: AllowEntry[] = [
 ];
 
 // Common physiological tasks (directional nudges) contribute their singleton
-// setProp levers — e.g. Circulation.svr_factor_art / pvr_factor_art — so the bot
+// setProp levers — e.g. Heart.heart_rate_ref, Pda.diameter_relative — so the bot
 // can nudge them in Guided scope too. Appended here (deduped) to keep the catalog
 // single-sourced. model_type-resolved levers are skipped (see commonTasks.ts).
 for (const e of commonTaskAllowEntries()) {
