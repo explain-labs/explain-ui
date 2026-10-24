@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **45 model_types**, **467 settable params**, **52 functions**
+Snapshot: **43 model_types**, **449 settable params**, **52 functions**
 (+ 70 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -140,13 +140,13 @@ _setProp_:
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:
-- `set_temperature(temp (number, range 25–45); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set temperature (C)
+- `set_temperature(temp (number, range 25–45); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber))` — set blood temperature once (C)
 - `set_viscosity(viscosity (number, range 0.1–12))` — set viscosity (cP)
 - `set_haldane_coeff(new_coeff (number, 0 = off, range 0–5))` — set Haldane coefficient
 - `set_P50(new_p50 (number, fetal HbF 18.8, neonatal 20.0, adult 26.7, range 15–30))` — set P50 (Hb-O2 affinity)
-- `set_to2(to2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set total oxygen concentration (mmol/l)
-- `set_tco2(tco2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set total carbon dioxide concentration (mmol/l)
-- `set_solute(solute_name (list, one of na/k/ca/cl/lact/mg/albumin/phosphates/uma/hemoglobin); solute_value (number, range 0–1000); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/BloodPump))` — set solute concentration
+- `set_to2(to2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber))` — set total oxygen concentration (mmol/l)
+- `set_tco2(tco2 (number, range 0–20); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber))` — set total carbon dioxide concentration (mmol/l)
+- `set_solute(solute_name (list, one of na/k/ca/cl/lact/mg/albumin/phosphates/uma/hemoglobin); solute_value (number, range 0–1000); site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber))` — set solute concentration
 
 ### BloodCapacitance
 
@@ -170,22 +170,11 @@ _setProp_:
 - `dif_o2` — oxygen diffusion constant (number)
 - `dif_co2` — carbon dioxide diffusion constant (number)
 - `dif_solutes` — solute diffusion constant (number)
-- `comp_blood1` — blood component 1 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber)
-- `comp_blood2` — blood component 2 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber)
+- `comp_blood1` — blood component 1 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber)
+- `comp_blood2` — blood component 2 (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber)
 - `dif_o2_factor_ps` — oxygen diffusion factor (factor)
 - `dif_co2_factor_ps` — carbon dioxide diffusion factor (factor)
 - `dif_solutes_factor_ps` — solute diffusion factor (factor)
-
-### BloodPump
-
-_setProp_:
-- `is_enabled` — enabled (boolean)
-- `u_vol` — unstressed volume (L) (number, L)
-- `el_base` — elastance pump (mmHg/L) (number, mmHg/L)
-- `pump_rpm` — pump rpm (number)
-- `el_k` — non linear elastance factor (number)
-- `inlet` — inlet blood resistor (list, one of BloodResistor/BloodVesselResistor/HeartValve)
-- `outlet` — outlet blood resistor (list, one of BloodResistor/BloodVesselResistor/HeartValve)
 
 ### BloodTimeVaryingElastance
 
@@ -332,7 +321,7 @@ _setProp_:
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:
-- `add_volume( (number, ml); _default_time (number, s); fluid type (list, one of normal_saline/ringers_lactate/packed_cells/albumin_20%))` — Adminster fluid
+- `add_volume( (number, ml); _default_time (number, s); fluid type (list, one of normal_saline/ringers_lactate/packed_cells/albumin_20%/d5/d10))` — Adminster fluid
 
 ### Gas
 
@@ -360,21 +349,6 @@ _setProp_:
 - `el_base_factor_ps` — elastance baseline factor (factor)
 - `el_k_factor_ps` — elastance non linear factor (factor)
 
-### GasDiffusor
-
-_setProp_:
-- `is_enabled` — enabled (boolean)
-- `dif_o2` — oxygen diffusion constant (number)
-- `dif_co2` — carbon dioxide diffusion constant (number)
-- `dif_n2` — nitric oxide diffusion constant (number)
-- `dif_other` — other gasses diffusion constant (number)
-- `comp_gas1` — gas component 1 (list, one of GasCapacitance)
-- `comp_gas2` — gas component 2 (list, one of GasCapacitance)
-- `dif_o2_factor_ps` — oxygen diffusion factor (factor)
-- `dif_co2_factor_ps` — carbon dioxide diffusion factor (factor)
-- `dif_n2_factor_ps` — nitric oxide diffusion factor (factor)
-- `dif_other_factor_ps` — other gasses diffusion factor (factor)
-
 ### GasExchanger
 
 _setProp_:
@@ -382,7 +356,7 @@ _setProp_:
 - `dif_o2` — oxygen diffusion constant (number)
 - `dif_co2` — carbon dioxide diffusion constant (number)
 - `comp_gas` — gas component (list, one of GasCapacitance)
-- `comp_blood` — blood component (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber)
+- `comp_blood` — blood component (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber)
 - `dif_o2_factor_ps` — oxygen diffusion factor (factor)
 - `dif_co2_factor_ps` — carbon dioxide diffusion factor (factor)
 
@@ -469,8 +443,8 @@ _setProp_:
 - `r_for` — forward resistance (number)
 - `r_back` — backward resistance (number)
 - `r_k` — non linear resistance coefficient (number)
-- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
-- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
+- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/GasCapacitance)
+- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/GasCapacitance)
 - `mix_flow` — mixing exchange without net flow (L/s) (number, L/s, range ≥0) _(advanced)_
 - `r_factor_ps` — resistance factor (factor)
 - `r_k_factor_ps` — non linear resistance coefficient factor (factor)
@@ -632,8 +606,8 @@ _setProp_:
 - `r_for` — forward resistance (number)
 - `r_back` — backward resistance (number)
 - `r_k` — non linear resistance coefficient (number)
-- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
-- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodPump/BloodVessel/HeartChamber/GasCapacitance)
+- `comp_from` — comp from (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/GasCapacitance)
+- `comp_to` — comp to (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber/GasCapacitance)
 - `mix_flow` — mixing exchange without net flow (L/s) (number, L/s, range ≥0) _(advanced)_
 - `r_factor_ps` — resistance factor (factor)
 - `r_k_factor_ps` — non linear resistance coefficient factor (factor)

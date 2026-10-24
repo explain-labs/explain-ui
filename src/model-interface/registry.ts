@@ -228,22 +228,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": true,
       "edit_mode": "basic",
       "readonly": false
-    },
-    {
-      "target": "BR_MAP",
-      "type": "reference",
-      "caption": "Baroreceptor",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": false
-    },
-    {
-      "target": "CR_PCO2",
-      "type": "reference",
-      "caption": "Chemoreceptor pCO2",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": false
     }
   ],
   "AnsAfferent": [
@@ -462,7 +446,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
-      "caption": "set temperature (C)",
+      "caption": "set blood temperature once (C)",
       "edit_mode": "basic",
       "target": "set_temperature",
       "type": "function",
@@ -485,8 +469,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodCapacitance",
             "BloodTimeVaryingElastance",
             "BloodVessel",
-            "HeartChamber",
-            "BloodPump"
+            "HeartChamber"
           ]
         }
       ]
@@ -569,8 +552,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodCapacitance",
             "BloodTimeVaryingElastance",
             "BloodVessel",
-            "HeartChamber",
-            "BloodPump"
+            "HeartChamber"
           ]
         }
       ]
@@ -599,8 +581,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodCapacitance",
             "BloodTimeVaryingElastance",
             "BloodVessel",
-            "HeartChamber",
-            "BloodPump"
+            "HeartChamber"
           ]
         }
       ]
@@ -648,8 +629,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "BloodCapacitance",
             "BloodTimeVaryingElastance",
             "BloodVessel",
-            "HeartChamber",
-            "BloodPump"
+            "HeartChamber"
           ]
         }
       ]
@@ -837,7 +817,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber"
       ]
@@ -852,7 +831,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber"
       ]
@@ -880,84 +858,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": false,
       "edit_mode": "basic",
       "readonly": false
-    }
-  ],
-  "BloodPump": [
-    {
-      "target": "model_type",
-      "type": "string",
-      "build_prop": false,
-      "edit_mode": "basic",
-      "readonly": true,
-      "caption": "model type"
-    },
-    {
-      "target": "description",
-      "type": "string",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": true,
-      "caption": "description"
-    },
-    {
-      "target": "is_enabled",
-      "type": "boolean",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": false,
-      "caption": "enabled"
-    },
-    {
-      "caption": "unstressed volume (L)",
-      "target": "u_vol",
-      "type": "number",
-      "factor": 1,
-      "delta": 0.001,
-      "rounding": 3
-    },
-    {
-      "caption": "elastance pump (mmHg/L)",
-      "target": "el_base",
-      "factor": 1,
-      "delta": 1,
-      "rounding": 0,
-      "type": "number"
-    },
-    {
-      "caption": "pump rpm",
-      "target": "pump_rpm",
-      "delta": 10,
-      "factor": 1,
-      "rounding": 1,
-      "type": "number"
-    },
-    {
-      "caption": "non linear elastance factor",
-      "target": "el_k",
-      "delta": 0.1,
-      "factor": 0.001,
-      "rounding": 3,
-      "type": "number"
-    },
-    {
-      "caption": "inlet blood resistor",
-      "target": "inlet",
-      "type": "list",
-      "options": [
-        "BloodResistor",
-        "BloodVesselResistor",
-        "HeartValve"
-      ]
-    },
-    {
-      "caption": "outlet blood resistor",
-      "target": "outlet",
-      "type": "list",
-      "options": [
-        "BloodResistor",
-        "BloodVesselResistor",
-        "HeartValve"
-      ]
     }
   ],
   "BloodTimeVaryingElastance": [
@@ -1144,8 +1044,7 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodVessel",
         "BloodTimeVaryingElastance",
-        "BloodCapacitance",
-        "BloodPump"
+        "BloodCapacitance"
       ]
     },
     {
@@ -1671,7 +1570,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber",
         "GasCapacitance"
@@ -2284,7 +2182,9 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
             "normal_saline",
             "ringers_lactate",
             "packed_cells",
-            "albumin_20%"
+            "albumin_20%",
+            "d5",
+            "d10"
           ]
         }
       ]
@@ -2509,112 +2409,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "type": "factor"
     }
   ],
-  "GasDiffusor": [
-    {
-      "target": "model_type",
-      "type": "string",
-      "build_prop": false,
-      "edit_mode": "basic",
-      "readonly": true,
-      "caption": "model type"
-    },
-    {
-      "target": "description",
-      "type": "string",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": true,
-      "caption": "description"
-    },
-    {
-      "target": "is_enabled",
-      "type": "boolean",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "readonly": false,
-      "caption": "enabled"
-    },
-    {
-      "caption": "oxygen diffusion constant",
-      "target": "dif_o2",
-      "type": "number",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "factor": 1,
-      "delta": 0.001,
-      "rounding": 3
-    },
-    {
-      "caption": "carbon dioxide diffusion constant",
-      "target": "dif_co2",
-      "type": "number",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "factor": 1,
-      "delta": 0.001,
-      "rounding": 3
-    },
-    {
-      "caption": "nitric oxide diffusion constant",
-      "target": "dif_n2",
-      "type": "number",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "factor": 1,
-      "delta": 0.001,
-      "rounding": 3
-    },
-    {
-      "caption": "other gasses diffusion constant",
-      "target": "dif_other",
-      "type": "number",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "factor": 1,
-      "delta": 0.001,
-      "rounding": 3
-    },
-    {
-      "caption": "gas component 1",
-      "target": "comp_gas1",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "type": "list",
-      "options": [
-        "GasCapacitance"
-      ]
-    },
-    {
-      "caption": "gas component 2",
-      "target": "comp_gas2",
-      "type": "list",
-      "build_prop": true,
-      "edit_mode": "basic",
-      "options": [
-        "GasCapacitance"
-      ]
-    },
-    {
-      "caption": "oxygen diffusion factor",
-      "target": "dif_o2_factor_ps",
-      "type": "factor"
-    },
-    {
-      "caption": "carbon dioxide diffusion factor",
-      "target": "dif_co2_factor_ps",
-      "type": "factor"
-    },
-    {
-      "caption": "nitric oxide diffusion factor",
-      "target": "dif_n2_factor_ps",
-      "type": "factor"
-    },
-    {
-      "caption": "other gasses diffusion factor",
-      "target": "dif_other_factor_ps",
-      "type": "factor"
-    }
-  ],
   "GasExchanger": [
     {
       "target": "model_type",
@@ -2679,7 +2473,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber"
       ]
@@ -3241,7 +3034,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber",
         "GasCapacitance"
@@ -3256,7 +3048,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber",
         "GasCapacitance"
@@ -3451,8 +3242,8 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
-      "caption": "afferent vessel name",
-      "target": "aff_vessel_name",
+      "caption": "afferent arteriole resistor",
+      "target": "aff_resistor_name",
       "type": "string",
       "build_prop": true,
       "edit_mode": "advanced",
@@ -6056,7 +5847,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber",
         "GasCapacitance"
@@ -6071,7 +5861,6 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "options": [
         "BloodCapacitance",
         "BloodTimeVaryingElastance",
-        "BloodPump",
         "BloodVessel",
         "HeartChamber",
         "GasCapacitance"

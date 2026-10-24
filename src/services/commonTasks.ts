@@ -109,10 +109,10 @@ export const COMMON_TASKS: CommonTask[] = [
     label: "Systemic vascular resistance (afterload)",
     short: "SVR",
     category: "vascular_tone",
-    // Use the ModelScaler systemic-resistance group, NOT Circulation.svr_factor_art:
-    // that factor is rewritten every step by the Hormones (RAAS) model, so a
-    // one-shot setProp is clobbered. The *_scaling_ps layer this group writes is
-    // independent of ANS/Hormones/drugs, so the nudge sticks.
+    // Use the ModelScaler systemic-resistance group: it covers every systemic
+    // vessel in scaler_config (Circulation.svr_factor_art reaches only its
+    // arterioles). The group factor is absolute (1.0 = the scenario as loaded,
+    // since every shipped scenario is baked), independent of ANS/Hormones/drugs.
     lever: { kind: "scale", group: "systemic_resistances" },
     step: 0.3,
     steps: [0.1, 0.2, 0.3, 0.5],
