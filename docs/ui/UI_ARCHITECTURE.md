@@ -122,7 +122,7 @@ while typing in inputs), a fast-forward `calculate(calcSecs)` button with a `CAL
 (`5/10/30/60/120/300 s`) selector, a model-developer-only local-scenario `Select` (+ startup-default
 star + delete), and [`SaveStatePanel`](./ControlPanels.md). Scenario selection loads immediately via a
 watcher on `current` (no Load button). Startup priority: model-developer default local scenario →
-user default cloud state → bundled `term_neonate`.
+user default cloud state → bundled `term_neonate_72h`.
 
 ---
 

@@ -3,7 +3,7 @@ import { scenarioFile } from "./scenarioFile";
 
 describe("scenarioFile", () => {
   const base = {
-    name: "term_neonate",
+    name: "term_neonate_72h",
     user: "timothy",
     description: "normal neonate",
     provenance: "hand-authored",

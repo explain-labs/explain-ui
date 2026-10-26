@@ -329,7 +329,7 @@ def double_seed_error(spec: dict, baseline: str) -> str | None:
     return (
         f"baseline {baseline!r} is already preterm ({base_ga:g} wk) and carries the "
         f"prematurity adjustments; adding gestational_age {ga:g} would apply them a "
-        f"second time. Use baseline 'term_neonate' with gestational_age, or keep "
+        f"second time. Use baseline 'term_neonate_72h' with gestational_age, or keep "
         f"{baseline!r} and leave gestational_age out"
     )
 
@@ -341,7 +341,7 @@ def run_build(spec: dict) -> tuple[dict | None, str, dict | None]:
     detail is the structured calibration report (None on failure)."""
     if not BUILD_SCRIPT.exists():
         return None, f"builder not found at {BUILD_SCRIPT}", None
-    baseline = str(spec.get("baseline", "term_neonate"))
+    baseline = str(spec.get("baseline", "term_neonate_72h"))
     if not re.fullmatch(r"[A-Za-z0-9_]+", baseline):
         return None, f"invalid baseline name: {baseline!r}", None
     seed_error = double_seed_error(spec, baseline)

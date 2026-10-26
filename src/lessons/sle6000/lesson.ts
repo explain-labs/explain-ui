@@ -49,7 +49,7 @@ export default defineLesson({
     nl: "Leer het apparaat kennen en zie hoe het reageert op problemen",
     en: "Get to know the device and see how it reacts to problems",
   },
-  scenario: "term_neonate",
+  scenario: "term_neonate_72h",
   controls: [],
   layout: {
     centre: ["sle6000", "diagram"],

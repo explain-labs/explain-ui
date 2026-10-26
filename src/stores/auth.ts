@@ -65,7 +65,7 @@ export const useAuthStore = defineStore("auth", () => {
   const lesson = computed(() => user.value?.lesson ?? null);
 
   // Dev-only: persist the developer's chosen startup scenario to localStorage so this
-  // device reloads it. Pass null to clear (falls back to the bundled term_neonate).
+  // device reloads it. Pass null to clear (falls back to the bundled term_neonate_72h).
   function setDefaultLocalState(name: string | null) {
     if (name) localStorage.setItem(LOCAL_DEFAULT_KEY, name);
     else localStorage.removeItem(LOCAL_DEFAULT_KEY);
