@@ -6,9 +6,8 @@
 // The Vue app still serves them statically from public/model_definitions/, so
 // this script copies them across. It is:
 //   - additive: it copies/overwrites canonical files but never deletes extras,
-//     so developer/user snapshots written into public/ persist. The one
-//     exception: copies of scenarios the engine moved to model_definitions/archive/
-//     are removed.
+//     so developer/user snapshots written into public/ persist. The exception:
+//     copies of scenarios the engine archived, renamed or deleted are removed.
 //   - idempotent: safe to run on every `predev` / `prebuild`.
 //
 // index.json is rebuilt as the sorted union of every scenario basename present
@@ -16,7 +15,7 @@
 // and the vite snapshotApi plugin expect (a JSON array of names, no .json).
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const srcDir = path.join(root, "explain-engine", "model_definitions");
@@ -51,6 +50,23 @@ if (fs.existsSync(archiveDir)) {
   }
 }
 
+// scenarios the engine renamed (explain-engine/helpers/ScenarioAliases.js; the engine's load() maps the
+// old name to the current file) or deleted without archiving: drop their served copies too, so an
+// old name is not listed beside its successor and a deleted scenario is not served stale
+const DELETED = [
+  // removed 2026-10-25 during the re-validation, to be rebuilt from scratch on the term baby
+  "preterm_25wk", "preterm_28wk", "preterm_30wk", "fetus_25wk", "fetus_term",
+  "bischoff_no_pda", "bischoff_ltr_pda", "bischoff_bidir_pda",
+];
+const aliasesFile = path.join(root, "explain-engine", "helpers", "ScenarioAliases.js");
+const { SCENARIO_ALIASES = {} } = fs.existsSync(aliasesFile) ? await import(pathToFileURL(aliasesFile).href) : {};
+let retired = 0;
+for (const name of [...Object.keys(SCENARIO_ALIASES), ...DELETED]) {
+  if (fs.existsSync(path.join(srcDir, `${name}.json`))) continue;
+  const served = path.join(dstDir, `${name}.json`);
+  if (fs.existsSync(served)) { fs.rmSync(served); retired++; }
+}
+
 const names = fs
   .readdirSync(dstDir)
   .filter((f) => f.endsWith(".json") && f !== "index.json")
@@ -58,4 +74,4 @@ const names = fs
   .sort();
 fs.writeFileSync(path.join(dstDir, "index.json"), JSON.stringify(names, null, 2) + "\n");
 
-console.log(`[sync-scenarios] copied ${copied} canonical scenario(s); removed ${archived} archived; index lists ${names.length}.`);
+console.log(`[sync-scenarios] copied ${copied} canonical scenario(s); removed ${archived} archived, ${retired} renamed/deleted; index lists ${names.length}.`);

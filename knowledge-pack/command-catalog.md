@@ -385,7 +385,7 @@ _setProp_:
 - `vent_escape_rate` — ventricular escape rate (bpm) (number, bpm, range 20–120) _(extra)_
 - `vt_rate` — ventricular tachycardia rate (bpm) (number, bpm, range 120–300) _(extra)_
 - `av_delay` — av delay time (ms) (number, ms, range 0.5–10) _(extra)_
-- `rv_delay` — RV activation delay (ms) (number, ms, range 0–40) _(extra)_
+- `rv_delay` — RV activation delay (ms; < 0: LV lags) (number, ms; < 0: LV lags, range -60–40) _(extra)_
 - `p_amp` — ECG P amplitude (mV) (number, mV, range -5–5) _(extra)_
 - `q_amp` — ECG Q amplitude (mV) (number, mV, range -5–5) _(extra)_
 - `r_amp` — ECG R amplitude (mV) (number, mV, range -5–5) _(extra)_

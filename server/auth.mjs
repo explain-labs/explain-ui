@@ -90,7 +90,7 @@ export async function register(
   };
   try {
     const result = await users.insertOne(doc);
-    // Seed the new user's default state from the bundled term_neonate definition
+    // Seed the new user's default state from the bundled term_neonate_72h definition
     // and point defaultState at it. Best-effort: a failure here must not break
     // registration, so we log and continue without a default.
     try {

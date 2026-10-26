@@ -132,16 +132,15 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
    Ask for anything critical that's missing (at least a weight or gestational age).
 
 2. **Pick the closest baseline** scenario to start from (it's much easier to calibrate a
-   nearby baseline than to build from scratch): `term_neonate`, `preterm_24wk`…`preterm_36wk`,
-   `adult_female`, `fetus_term`, a CDH/CHD/PDA variant, etc. (see the scenario list in the
-   knowledge pack / `public/model_definitions/index.json`).
-   **For a preterm, choose one of two forms — never both.** Either `term_neonate` plus
-   `targets.gestational_age` (the builder then applies the prematurity adjustments for that
-   gestation), or a `preterm_*wk` baseline **without**
-   `gestational_age` (the baseline already carries them). A preterm baseline combined with
-   a `gestational_age` below 37 would apply the adjustments twice, so the server rejects
-   that SPEC. Prefer `term_neonate` plus `gestational_age` when the user gives a
-   gestational age.
+   nearby baseline than to build from scratch): `term_neonate_72h` (the healthy term baby at
+   72 h), or for a term baby in its first day `term_neonate_1h`, `term_neonate_12h` or
+   `term_neonate_24h` (open, closing duct; see the scenario list in the knowledge pack /
+   `public/model_definitions/index.json`). The old name `term_neonate` still loads the 72 h baby.
+   **For a preterm,** use `term_neonate_72h` plus `targets.gestational_age` (the builder then
+   applies the prematurity adjustments for that gestation). If a preterm baseline
+   (`preterm_*wk`) is listed, use it **without** `gestational_age` (it already carries them):
+   combined with a `gestational_age` below 37 the adjustments would apply twice, so the server
+   rejects that SPEC.
 
 3. **Emit ONE fenced `explain-build` block** containing the SPEC (schema below) — nothing
    else. Keep your normal prose too (say what you're building). Example:
@@ -150,7 +149,7 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
    I'll build that 1.2 kg, 28-week preterm and calibrate it to your targets.
 
    ```explain-build
-   {"baseline":"term_neonate","name":"custom_preterm","summary":"1.2 kg / 28 wk preterm — MAP 33, SpO2 90, pCO2 52, BE −5","targets":{"weight":1.2,"gestational_age":28,"map":33,"hr":165,"spo2":90,"pco2":52,"be":-5}}
+   {"baseline":"term_neonate_72h","name":"custom_preterm","summary":"1.2 kg / 28 wk preterm — MAP 33, SpO2 90, pCO2 52, BE −5","targets":{"weight":1.2,"gestational_age":28,"map":33,"hr":165,"spo2":90,"pco2":52,"be":-5}}
    ```
    ````
 
@@ -164,7 +163,7 @@ patient to the app. You have no shell — do not try to run scripts or read/writ
 
 ```jsonc
 {
-  "baseline": "term_neonate",          // required — a scenario name to start from
+  "baseline": "term_neonate_72h",          // required — a scenario name to start from
   "name": "custom_patient",            // output patient name
   "postnatal_age_days": 3,             // optional metadata: postnatal age in days. A term baby's
                                        //   PA pressure falls steeply over the first days, so its
@@ -290,7 +289,7 @@ are calibration targets (for example: one of pO2/SpO2, one of BE/pH, no capillar
    coupled, and calibrating to made-up numbers distorts the fit to the measured ones. Give
    it a provenance row with status `emergent` and the expected range, and leave it out of
    the SPEC.
-5. **Baseline:** always `term_neonate`. Prematurity comes from `gestational_age` in the
+5. **Baseline:** always `term_neonate_72h`. Prematurity comes from `gestational_age` in the
    targets (see the preterm rule under "Building a new patient"). Do not add
    `pathophysiology`, `pda` or a `profile`, and do not pick a lesion baseline: form requests
    build a structurally normal baby.
@@ -306,7 +305,7 @@ One row for **every key in `unknown`** — nothing for measured values (the app 
 
 ```jsonc
 {
-  "baseline": "term_neonate",
+  "baseline": "term_neonate_72h",
   "baseline_reason": "Preterm built from the term baseline plus gestational age 28 wk.",
   "fields": [
     { "key": "hb", "value": 9.0, "status": "reference",
@@ -339,11 +338,11 @@ One row for **every key in `unknown`** — nothing for measured values (the app 
 Building a 1.08 kg, 28-week baby on day 3 from the term baseline, calibrated to the measured heart rate, mean pressure, saturation, pCO2 and base excess.
 
 ```explain-provenance
-{"baseline":"term_neonate","baseline_reason":"Preterm built from the term baseline plus gestational age 28 wk.","fields":[{"key":"hb","value":9.0,"status":"reference","basis":"28 wk, day 3: first-week value for under 29 wk","source":{"title":"neonatal-reference.md (draft), table 2","url":null}},{"key":"height","value":0.355,"status":"reference","basis":"length at 28 wk","source":{"title":"neonatal-reference.md (draft), table 1","url":null}},{"key":"temp","value":null,"status":"emergent","basis":"baseline normal temperature","source":null},{"key":"cvp","value":null,"status":"emergent","basis":"left to the model; expected 0 to 7 mmHg","source":null},{"key":"co","value":null,"status":"emergent","basis":"left to the model","source":null},{"key":"rr","value":null,"status":"emergent","basis":"left to the model; expected 40 to 75 /min","source":null},{"key":"po2","value":null,"status":"emergent","basis":"left to the model; expected 40 to 65 mmHg","source":null}],"warnings":["No cardiac output measured: output and resistance come from the baseline."]}
+{"baseline":"term_neonate_72h","baseline_reason":"Preterm built from the term baseline plus gestational age 28 wk.","fields":[{"key":"hb","value":9.0,"status":"reference","basis":"28 wk, day 3: first-week value for under 29 wk","source":{"title":"neonatal-reference.md (draft), table 2","url":null}},{"key":"height","value":0.355,"status":"reference","basis":"length at 28 wk","source":{"title":"neonatal-reference.md (draft), table 1","url":null}},{"key":"temp","value":null,"status":"emergent","basis":"baseline normal temperature","source":null},{"key":"cvp","value":null,"status":"emergent","basis":"left to the model; expected 0 to 7 mmHg","source":null},{"key":"co","value":null,"status":"emergent","basis":"left to the model","source":null},{"key":"rr","value":null,"status":"emergent","basis":"left to the model; expected 40 to 75 /min","source":null},{"key":"po2","value":null,"status":"emergent","basis":"left to the model; expected 40 to 65 mmHg","source":null}],"warnings":["No cardiac output measured: output and resistance come from the baseline."]}
 ```
 
 ```explain-build
-{"baseline":"term_neonate","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"sys":48,"dia":27,"spo2":91,"pco2":51,"be":-4.5,"fio2":0.3,"hb":9.0,"height":0.355}}
+{"baseline":"term_neonate_72h","name":"pb_3fa94c1e","summary":"1.08 kg / 28 wk, day 3","max_iters":10,"targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"sys":48,"dia":27,"spo2":91,"pco2":51,"be":-4.5,"fio2":0.3,"hb":9.0,"height":0.355}}
 ```
 ````
 

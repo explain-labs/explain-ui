@@ -159,7 +159,7 @@ const loadedName = computed(() => {
   return (model as any).loadedFileData?.name || current.value || null;
 });
 
-const DEFAULT_SCENARIO = "term_neonate";
+const DEFAULT_SCENARIO = "term_neonate_72h";
 
 // guided lesson pages (/lesson/:id), linked from the header for non-lesson users
 const lessons = listLessons().filter((l) => l.kind !== "paper");

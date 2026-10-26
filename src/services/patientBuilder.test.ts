@@ -67,7 +67,7 @@ describe("buildRequest", () => {
 
 describe("parseProvenance", () => {
   const good = {
-    baseline: "term_neonate",
+    baseline: "term_neonate_72h",
     baseline_reason: "Preterm built from the term baseline plus gestational age.",
     fields: [
       { key: "hb", value: 9.6, status: "reference", basis: "Typical for 28 wk, day 3", source: { title: "neonatal-reference.md", url: "https://example.org/hb" } },
@@ -85,7 +85,7 @@ describe("parseProvenance", () => {
     const r = parseProvenance(`Built.\n\n${block(good)}\n\nDone.`);
     expect(r.errors).toEqual([]);
     expect(r.clean).toBe("Built.\n\nDone.");
-    expect(r.provenance!.baseline).toBe("term_neonate");
+    expect(r.provenance!.baseline).toBe("term_neonate_72h");
     expect(r.provenance!.fields.map((f) => [f.key, f.status, f.value])).toEqual([
       ["hb", "reference", 9.6],
       ["temp", "assumed", 36.8],
@@ -134,8 +134,8 @@ describe("parseProvenance", () => {
   });
 
   it("reads only the first of several blocks", () => {
-    const r = parseProvenance(`${block({ baseline: "term_neonate" })}\n${block({ baseline: "pphn" })}`);
-    expect(r.provenance!.baseline).toBe("term_neonate");
+    const r = parseProvenance(`${block({ baseline: "term_neonate_72h" })}\n${block({ baseline: "pphn" })}`);
+    expect(r.provenance!.baseline).toBe("term_neonate_72h");
     expect(r.errors).toEqual(["more than one provenance block; only the first was read"]);
     expect(r.clean).toBe("");
   });
@@ -146,7 +146,7 @@ describe("checkSpec", () => {
   const spec = (extra: Record<string, unknown> = {}, drop: string[] = []) => {
     const targets: Record<string, unknown> = { ...request().payload.targets, ...extra };
     for (const k of drop) delete targets[k];
-    return { baseline: "term_neonate", postnatal_age_days: 3, targets };
+    return { baseline: "term_neonate_72h", postnatal_age_days: 3, targets };
   };
 
   it("accepts a spec that carries the submitted targets unchanged", () => {
@@ -181,12 +181,12 @@ describe("checkSpec", () => {
   it("does not ask for a postnatal age the form did not have", () => {
     const f = { ...FORM, numbers: { ...FORM.numbers, postnatal_age: { value: null, unit: "days" } } };
     const r = buildRequest(f, "pb_noage")!;
-    const { postnatal_age_days: _, ...noAge } = { baseline: "term_neonate", postnatal_age_days: 0, targets: { ...r.payload.targets } };
+    const { postnatal_age_days: _, ...noAge } = { baseline: "term_neonate_72h", postnatal_age_days: 0, targets: { ...r.payload.targets } };
     expect(checkSpec(noAge, r, null)).toEqual([]);
   });
 
   it("reports a spec with no target list", () => {
-    expect(checkSpec({ baseline: "term_neonate" }, request(), null)).toHaveLength(1);
+    expect(checkSpec({ baseline: "term_neonate_72h" }, request(), null)).toHaveLength(1);
     expect(checkSpec(null, request(), null)).toHaveLength(1);
   });
 });

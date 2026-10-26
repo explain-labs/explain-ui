@@ -15,7 +15,7 @@ pressures mmHg, gases mmHg, base excess and bicarbonate mmol/L.
 ## 1. Size by gestational age
 
 The builder's own seed table (`explain-engine/scripts/build_patient.mjs`, `PRETERM_SEED`;
-term row from the `term_neonate` scenario). Use it to fill a missing **weight** or
+term row from the `term_neonate_72h` scenario). Use it to fill a missing **weight** or
 **length** from the gestational age, and to estimate a missing **gestational age** from a
 weight. It describes an appropriately grown baby at birth; it is not a growth chart.
 

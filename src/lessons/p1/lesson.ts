@@ -54,7 +54,7 @@ export default defineLesson({
     nl: "Een geïntegreerd model voor de simulatie van neonatale fysiologie — het cardiovasculaire systeem",
   },
   subtitle: { en: "Antonius, van Meurs, Westerhof, de Boode · Pediatric Research", nl: "Antonius, van Meurs, Westerhof, de Boode · Pediatric Research" },
-  scenario: "term_neonate",
+  scenario: "term_neonate_72h",
   experiments,
   references: Object.entries(experiments.references).map(([id, text]) => ({ id, text })),
   controls: ["ductus", "foramen_ovale"],

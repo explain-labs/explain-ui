@@ -79,7 +79,7 @@ no cardiac output (output and resistance then come from the baseline).
 An empty FiO2 is not sent to the bot as an unknown: it means room air, not a value to look up.
 The same holds for the PDA diameter (an unmeasured duct keeps the gestational-age default),
 the foramen ovale diameter (an unmeasured foramen keeps the baseline's, closed in
-`term_neonate`) and for lactate, electrolytes, glucose and albumin: unmeasured, they keep the
+`term_neonate_72h`) and for lactate, electrolytes, glucose and albumin: unmeasured, they keep the
 baseline's normal values. Measured, they are written into the model before calibration, so a
 base-excess target is fitted by the unmeasured anions left over after the measured ions.
 
@@ -185,6 +185,6 @@ answers `POST /v1/ask` with `{ answer, conversation_id, artifact, build }`:
 `artifact` comes from running the builder by hand:
 
 ```sh
-echo '{"baseline":"term_neonate","name":"pb_test","targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5}}' \
+echo '{"baseline":"term_neonate_72h","name":"pb_test","targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5}}' \
   | node explain-engine/scripts/build_patient.mjs > pb_test.json
 ```

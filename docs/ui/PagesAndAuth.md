@@ -76,7 +76,7 @@ The center `chat` tab hosts `ChatPanel.vue` (see [ChatAndBot](./ChatAndBot.md)).
 0. A **lesson account** (nicupicu.nl launch) always opens its own lesson via `loadLesson()`: `lesson.stateId` if set, else `lesson.scenario`. See [Lesson launch](#lesson-launch-nicupicunl) below.
 1. A model developer's chosen **local** scenario (`defaultLocalState`, if present in the scenario list).
 2. The user's default **cloud** state (`defaultState` → `statesStore.loadState` → `loadFromObject`).
-3. The bundled `term_neonate` (or the first available scenario).
+3. The bundled `term_neonate_72h` (or the first available scenario).
 
 Selecting a scenario loads it immediately (`watch(current, …)`); no Load button.
 

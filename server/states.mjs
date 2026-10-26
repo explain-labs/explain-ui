@@ -17,7 +17,7 @@ import { getStatesCollection, getUsersCollection } from "./db.mjs";
 import { parseCookies, verifySession, COOKIE_NAME } from "./session.mjs";
 
 // Name of the bundled model definition seeded as each new user's default state.
-export const DEFAULT_STATE_NAME = "term_neonate";
+export const DEFAULT_STATE_NAME = "term_neonate_72h";
 
 /**
  * @typedef {{ status: number, body: any }} StateResult
@@ -94,14 +94,14 @@ function modelDefinitionPath(name) {
   return null;
 }
 
-// Read the bundled term_neonate definition used to seed each new user's default.
+// Read the bundled term_neonate_72h definition used to seed each new user's default.
 function readDefaultDefinition() {
   const p = modelDefinitionPath(DEFAULT_STATE_NAME);
   if (!p) throw new Error(`default state definition not found (${DEFAULT_STATE_NAME}.json)`);
   return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
-// Seed a user's default state from the bundled term_neonate definition.
+// Seed a user's default state from the bundled term_neonate_72h definition.
 // Idempotent (upsert by owner+name). Returns the saved state's id string.
 export async function seedDefaultState(user) {
   const file = readDefaultDefinition();

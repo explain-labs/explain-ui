@@ -186,7 +186,7 @@ Scenarios live in `explain-engine/model_definitions/*.json`. Copy one as a start
 and name yours `student_<yourname>_<something>.json`:
 
 ```sh
-cp model_definitions/term_neonate.json model_definitions/student_<yourname>_experiment.json
+cp model_definitions/term_neonate_72h.json model_definitions/student_<yourname>_experiment.json
 ```
 
 Add an entry to its `model_definition.models` map:

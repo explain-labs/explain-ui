@@ -2647,13 +2647,13 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "extra"
     },
     {
-      "caption": "RV activation delay (ms)",
+      "caption": "RV activation delay (ms; < 0: LV lags)",
       "target": "rv_delay",
       "type": "number",
       "delta": 1,
       "factor": 1000,
       "rounding": 0,
-      "ll": 0,
+      "ll": -60,
       "ul": 40,
       "readonly": false,
       "build_prop": true,
