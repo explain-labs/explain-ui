@@ -95,6 +95,8 @@ Bespoke CPR console. Targets `Resuscitation` (and mirror-writes to `Ventilator`)
 
 ## PregnancyPanel.vue
 
+Shown only when the loaded scenario has a `Uterus` or `MaternalPlacenta` model (none of the shipped neonatal scenarios does), and in production not at all (unfinished).
+
 Bespoke pregnancy/labor console for `Uterus` + `MaternalPlacenta`. **All plain config props → `setProp()`** (no setter side-effects). Self-disables when no `Uterus` model is present.
 
 | Control | Write |
@@ -108,6 +110,8 @@ Slow read-outs span both models: `Uterus.ut_blood_flow`/`iup`/`montevideo_units`
 ---
 
 ## ScalerPanel.vue
+
+Not shown in the app (`HIDDEN_PANELS` in `MainPage.vue`, dev included): it is hardly used by end users. The component is kept; scaling stays available through `scaleModel` and the bot.
 
 Allometric/group scaling. A `Select` of groups (`weight_scale`, `blood_volume`, `heart_volume`, `lung_volume`, systemic/pulmonary resistances & elastances, `heart_el_min`/`heart_el_max`) + a factor `InputNumber`.
 
