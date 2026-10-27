@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, computed, watch } from "vue";
 import { storeToRefs } from "pinia";
 import Select from "primevue/select";
+import SelectButton from "primevue/selectbutton";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import InputGroup from "primevue/inputgroup";
@@ -54,7 +55,7 @@ async function logout() {
   await auth.logout();
   router.push({ name: "login" });
 }
-const { model, status, modelReady, isRunning, realtimeFactor, error, load, loadFromObject, start, stop, calculate, slowValues, modelState } =
+const { model, status, modelReady, isRunning, realtimeFactor, error, load, loadFromObject, start, stop, calculate, slowValues, modelState, watchSlow } =
   useExplain();
 const statesStore = useStatesStore();
 const monitorsStore = useMonitorsStore();
@@ -111,9 +112,13 @@ function snapshotRows() {
   const l = latestSlowRow();
   const w = (modelState.value as any)?.weight ?? 1;
   const rows: { group: string; label: string; value: string; unit: string }[] = [];
-  for (const g of monitorGroups.value) {
+  // every tab, not only the one shown; the tab name prefixes the group when there are several
+  const several = monitorsStore.dashboards.length > 1;
+  for (const { dashboard, group: g } of monitorsStore.allGroups) {
+    if (g.enabled === false) continue;
+    const group = several ? `${dashboard} / ${g.title}` : g.title;
     for (const p of g.parameters ?? []) {
-      rows.push({ group: g.title, label: p.label, value: formatParam(p, l, w), unit: p.unit ?? "" });
+      rows.push({ group, label: p.label, value: formatParam(p, l, w), unit: p.unit ?? "" });
     }
   }
   return rows;
@@ -144,7 +149,7 @@ function downloadSnapshot() {
 }
 
 // Monitor groups come from the monitors store, which mirrors the loaded
-// scenario's `configuration.monitors` and persists edits back. Synced on every
+// scenario's `configuration.monitor_dashboards` (one tab each) and persists edits back. Synced on every
 // (re)build (modelReady). In edit mode every group is shown (so disabled ones
 // can be re-enabled); read-only mode hides disabled groups.
 const monitorGroups = computed(() =>
@@ -155,11 +160,22 @@ const monitorGroups = computed(() =>
 watch(
   modelReady,
   (ready) => {
-    if (ready) monitorsStore.syncFromScenario();
-    else editingMonitors.value = false;
+    if (ready) {
+      monitorsStore.syncFromScenario();
+      watchAllMonitorPaths();
+    } else editingMonitors.value = false;
   },
   { immediate: true },
 );
+
+// subscribe the paths of every tab, not only the mounted one, so the export has every value and a
+// tab's sparklines already hold their history when it is opened. build() resets the watchlist, so
+// this runs on every (re)build; the engine dedups.
+function watchAllMonitorPaths() {
+  const paths = new Set<string>();
+  for (const { group } of monitorsStore.allGroups) for (const p of group.parameters ?? []) for (const path of p.props ?? []) paths.add(path);
+  if (paths.size) watchSlow([...paths]);
+}
 
 // dashboard switcher options
 const dashboardOptions = computed(() =>
@@ -608,9 +624,23 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   />
                 </div>
 
-                <!-- dashboard switcher -->
+                <!-- dashboard tabs (several dashboards, read-only mode) -->
+                <SelectButton
+                  v-if="monitorsStore.dashboards.length > 1 && !editingMonitors"
+                  data-tour="monitoring.tabs"
+                  :model-value="monitorsStore.activeId"
+                  :options="dashboardOptions"
+                  option-label="label"
+                  option-value="value"
+                  :allow-empty="false"
+                  size="small"
+                  class="monitor-tabs w-full"
+                  :disabled="!modelReady"
+                  @update:model-value="monitorsStore.setActive"
+                />
+                <!-- dashboard switcher (manage mode) -->
                 <Select
-                  v-if="monitorsStore.dashboards.length > 1 || editingMonitors"
+                  v-if="editingMonitors"
                   :model-value="monitorsStore.activeId"
                   :options="dashboardOptions"
                   option-label="label"
@@ -811,6 +841,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </template>
 
 <style scoped>
+/* Monitoring dashboard tabs: equal-width segments that wrap in the narrow column. */
+.monitor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+}
+.monitor-tabs :deep(.p-togglebutton) {
+  flex: 1 1 auto;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.5rem;
+}
 /* Make the bottom run-control bar denser than PrimeVue's "small" size. */
 .compact-bar :deep(.p-button),
 .compact-bar :deep(.p-select),

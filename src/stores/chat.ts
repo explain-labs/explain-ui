@@ -103,8 +103,14 @@ export const useChatStore = defineStore("chat", () => {
       if (bits.length) lines.push(bits.join(", "));
     }
 
-    const monitors = (model as any).loadedFileData?.configuration?.monitors ?? {};
-    const groups = Object.entries<any>(monitors).filter(([, m]) => m?.enabled !== false);
+    // every dashboard's groups (configuration.monitors mirrors only the first), deduped by key
+    const cfg = (model as any).loadedFileData?.configuration;
+    const sets: any[] = Array.isArray(cfg?.monitor_dashboards) && cfg.monitor_dashboards.length
+      ? cfg.monitor_dashboards.map((d: any) => d?.monitors ?? {})
+      : [cfg?.monitors ?? {}];
+    const byKey = new Map<string, any>();
+    for (const set of sets) for (const [k, m] of Object.entries<any>(set)) if (!byKey.has(k)) byKey.set(k, m);
+    const groups = [...byKey.entries()].filter(([, m]) => m?.enabled !== false);
 
     // make sure every path we want is on the slow watchlist (engine dedups)
     const paths = new Set<string>();
