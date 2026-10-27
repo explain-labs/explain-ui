@@ -25,7 +25,7 @@ Rules of thumb:
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
 Snapshot: **43 model_types**, **449 settable params**, **52 functions**
-(+ 70 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
+(+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
 ## Guided mode — curated safe set
@@ -90,6 +90,7 @@ anything else is rejected (the app suggests switching to Full). Full mode (below
 - `loadDefinition`  — load+run a bot-built calibrated patient (Full scope; definition rides in response.artifact)
 - `call` `Respiration.set_atelectasis_left` — Atelectasis left lung (collapsed fraction) — directional nudge lever (arg: new value)
 - `call` `Respiration.set_atelectasis_right` — Atelectasis right lung (collapsed fraction) — directional nudge lever (arg: new value)
+- `call` `Gas.set_fio2` — Inspired O2 fraction (FiO2), spontaneous breathing — directional nudge lever (arg: new value)
 - `setProp` `Pda.diameter_relative` — Ductus arteriosus (PDA) size — directional nudge lever
 - `setProp` `Shunts.diameter_fo` — Foramen ovale size — directional nudge lever
 - `setProp` `Shunts.diameter_vsd` — Ventricular septal defect (VSD) size — directional nudge lever
@@ -895,6 +896,8 @@ physiological quantity LOWERS the lever — noted per task.
 
 ### Gas exchange
 
+- **Inspired O2 fraction (FiO2), spontaneous breathing** — call `Gas.set_fio2` (current value `fio2`), step ±0.05, range 0.21–1. Oxygen fraction of the air the baby breathes (0.21 = room air, 1.0 = pure oxygen), as in a headbox or an oxygen-filled incubator: no flow or pressure. On the ventilator use the ventilator's own O2 setting instead.
+  - e.g. `{"op":"call","model":"Gas","target":"set_fio2","args":[<0.21–1>],"reason":"set FiO2"}`
 - **O2 diffusion capacity** — setProp `dif_o2_factor_ps` on each `GasExchanger` instance, default ±30%. Down = impaired alveolar O2 transfer.
   - e.g. `{"op":"setProp","model":"<instance>","target":"dif_o2_factor_ps","value":<target in display units, or current×(1±30%) if shown>,"reason":"adjust O2 diffusion"}`
 

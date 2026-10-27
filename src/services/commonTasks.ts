@@ -231,6 +231,22 @@ export const COMMON_TASKS: CommonTask[] = [
   ),
   // --- Gas exchange ---
   {
+    id: "fio2",
+    label: "Inspired O2 fraction (FiO2), spontaneous breathing",
+    short: "FiO2",
+    category: "gas_exchange",
+    // Gas.set_fio2 recomposes the ambient gas in MOUTH (a fixed-composition reservoir, the room
+    // air the baby breathes); its default sites are OUT and MOUTH, and no scenario has OUT.
+    // Gas.fio2 holds the last value set.
+    lever: { kind: "call", model: "Gas", fn: "set_fio2", read: "fio2" },
+    mode: "absolute",
+    step: 0.05,
+    steps: [0.01, 0.05, 0.1, 0.2],
+    min: 0.21,
+    max: 1.0,
+    help: "Oxygen fraction of the air the baby breathes (0.21 = room air, 1.0 = pure oxygen), as in a headbox or an oxygen-filled incubator: no flow or pressure. On the ventilator use the ventilator's own O2 setting instead.",
+  },
+  {
     id: "o2_diffusion",
     label: "O2 diffusion capacity",
     short: "O2 diffusion",
