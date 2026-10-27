@@ -2689,7 +2689,7 @@ The factor is capped at ×2.5 (0.57 kg), the edge of the pulse-wave-velocity dat
   Tolerance 0.015 L/min at 3.5 kg, scaled with weight.
 - **`rr`** — spontaneous respiratory rate via `Breathing.vt_rr_ratio_factor`. Breathing sets `rate = √(target minute volume / (ratio × weight))`, so the controller steps in closed form, `f ← f × (measured / target)²`, bounds 0.2–5. Minute volume stays with the pCO2 lever; the two interact only through dead space. Refused (exit 1) when spontaneous breathing is off.
 
-**Plasma solutes** — `na`, `k`, `cl`, `lactate`, `glucose` (mmol/L) and `albumin` (g/L) are structural: written to every blood compartment with `Blood.set_solute` before the loop. They feed the Stewart solver (`sid = na + k + 2ca + 2mg − cl − lact`, albumin as a weak acid), so with them a `be`/`ph` target is fitted by the unmeasured anions (`uma`) *left over* after the measured ions, rather than `uma` absorbing the whole acidosis. Two have their own controllers, which are moved with them: `Lactate.lact_baseline` (clearance target, t½ ≈ 6 min) and `Glucose.glucose_setpoint`. Kidney filtration moves the others only slightly over a build; the final arterial values are read back into `build_report.solutes`. If the measured ions already explain more than the measured acidosis, `uma` hits its floor of 0 and the BE target is reported missed with its lever at bound.
+**Plasma solutes** — `na`, `k`, `cl`, `lactate`, `glucose` (mmol/L) and `albumin` (g/L) are structural: written to every blood compartment with `Blood.set_solute` before the loop. They feed the Stewart solver (`sid = na + k + 2ca + 2mg − cl − lact`, albumin as a weak acid), so with them a `be`/`ph` target is fitted by the unmeasured anions (`uma`) *left over* after the measured ions, rather than `uma` absorbing the whole acidosis. Two have their own controllers, which are moved with them: `Lactate.lact_baseline` (clearance target, t½ ≈ 6 min) and `Glucose.glucose_setpoint`, with the interstitial pool `Glucose.isf_glucose` scaled at the baseline's resting ISF/plasma ratio (left at the baseline value it refills the blood, and the blunted newborn insulin response needs over an hour to clear that: a 3.2 mmol/L target settled at 3.7). Kidney filtration moves the others only slightly over a build; the final arterial values are read back into `build_report.solutes`. If the measured ions already explain more than the measured acidosis, `uma` hits its floor of 0 and the BE target is reported missed with its lever at bound.
 
 **Echo inputs:**
 
@@ -5049,7 +5049,7 @@ None; its own uptake and production factors.
 
 - **Reads:** `AA.solutes.glucose`; Metabolism's `metabolic_active_models`; `model.weight`.
 - **Writes:** `solutes.glucose` of the beds and of `IVCI` (and the seed in every blood compartment).
-- **Written by:** the user (rates, switch); Fluids (dextrose, indirectly).
+- **Written by:** the user (rates, switch); Fluids (dextrose, indirectly); `build_patient.mjs` (`glucose_setpoint`, `isf_glucose` for a glucose target, see [Calibrator](./Calibrator.md)).
 - **Read by:** `DataCollector` watchers, the Monitor.
 
 ## Assumptions and limitations
