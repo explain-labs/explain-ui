@@ -99,6 +99,21 @@ export const useMonitorsStore = defineStore("monitors", () => {
   );
   // active dashboard's groups — the editable list panels render
   const groups = computed<MonitorGroup[]>(() => activeDashboard.value?.groups ?? []);
+  // every dashboard's groups with their dashboard name (export, slow-watch subscription)
+  const allGroups = computed(() =>
+    dashboards.value.flatMap((d) => d.groups.map((group) => ({ dashboard: d.name, group }))),
+  );
+
+  // the chosen dashboard (tab) is remembered per browser by NAME, so it survives a reload and a
+  // scenario switch where a dashboard of that name exists. View state only, never in the scenario.
+  const ACTIVE_KEY = "explain.monitors.activeDashboard";
+  function rememberedName(): string | null {
+    try {
+      return localStorage.getItem(ACTIVE_KEY);
+    } catch {
+      return null;
+    }
+  }
 
   function scenarioName(): string {
     return (model as any).loadedFileData?.name || modelStore.current || "snapshot";
@@ -118,7 +133,8 @@ export const useMonitorsStore = defineStore("monitors", () => {
       // migrate the legacy single `configuration.monitors` object
       dashboards.value = [{ id: newId(), name: "Monitor", groups: parseMonitors(cfg?.monitors) }];
     }
-    activeId.value = dashboards.value[0]?.id ?? "";
+    const remembered = rememberedName();
+    activeId.value = (dashboards.value.find((d) => d.name === remembered) ?? dashboards.value[0])?.id ?? "";
   }
 
   // ----- dashboard CRUD -------------------------------------------------------
@@ -150,7 +166,13 @@ export const useMonitorsStore = defineStore("monitors", () => {
     persist();
   }
   function setActive(id: string) {
-    activeId.value = id; // view-only state, not persisted
+    activeId.value = id; // view-only state, not persisted to the scenario
+    const name = dashboards.value.find((d) => d.id === id)?.name;
+    try {
+      if (name) localStorage.setItem(ACTIVE_KEY, name);
+    } catch {
+      /* ignore disabled storage */
+    }
   }
 
   // ----- group / param CRUD (operate on the active dashboard) -----------------
@@ -255,6 +277,7 @@ export const useMonitorsStore = defineStore("monitors", () => {
     activeId,
     activeDashboard,
     groups,
+    allGroups,
     syncFromScenario,
     addDashboard,
     removeDashboard,

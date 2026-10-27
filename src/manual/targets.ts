@@ -103,7 +103,8 @@ export const TOUR_TARGETS = [
   "monitoring.toolbar",
   "monitoring.manage",
   "monitoring.addgroup",
-  "monitoring.dashboards", // dashboard management box (manage mode only)
+  "monitoring.dashboards",
+  "monitoring.tabs", // dashboard tabs above the groups (several dashboards)
   "numerics.group", // first numeric group (read-only view)
   "numerics.card", // first numeric card
   "numerics.group-edit", // first group's edit pencil (manage mode only)
