@@ -131,7 +131,7 @@ The **Vue UI layer** (everything under `src/`) is documented in [`docs/ui/`](doc
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 A framework-agnostic, dependency-free physiological simulation engine (whole-body neonatal
-and fetal cardiorespiratory model; the adult scenarios are archived). It runs in a dedicated Web Worker (`ModelEngine.js`) and
+cardiorespiratory model; the one shipped scenario is the healthy term neonate at 72 h). It runs in a dedicated Web Worker (`ModelEngine.js`) and
 is controlled from the main thread through the `Model` wrapper (`Model.js`).
 
 This repository is self-contained: it has no runtime or build dependencies, and the tooling
@@ -832,7 +832,7 @@ Every scenario (term_neonate_72h values; the set-points are re-anchored per scen
 
 So a fall in pressure (low baroreceptor firing) raises heart rate, vascular tone and contractility, and a rise in pCO2 raises minute ventilation. A fall in pO2 raises it too, through the negative weight on `CR_PO2`.
 
-**Hypoxic bradycardia** (added by `scripts/_add_apnea.mjs`; it was in the preterm scenarios, removed on 2026-10-25 to be rebuilt): `CR_PO2_HR` (`AA.po2`, set-point a few mmHg below the resting pO2) → `EF_HR_CHEMO` → `Heart.hr_chemo_factor`, with effect 0.5 at firing 0 and 1 at 1, so it only slows the heart. See [Apnea](./Apnea.md).
+**Hypoxic bradycardia** (in no shipped scenario): `CR_PO2_HR` (`AA.po2`, set-point a few mmHg below the resting pO2) → `EF_HR_CHEMO` → `Heart.hr_chemo_factor`, with effect 0.5 at firing 0 and 1 at 1, so it only slows the heart. See [Apnea](./Apnea.md).
 
 ## Factor system
 
@@ -874,7 +874,7 @@ From `term_neonate_72h.json`, `models.Ans` (trimmed; `components` holds the eigh
 
 ## Usage in the scenarios
 
-One instance in every scenario, with the network above. No shipped scenario has the hypoxic-bradycardia arc at present (the preterm scenarios that had it were removed on 2026-10-25 to be rebuilt).
+One instance in every scenario, with the network above. No shipped scenario has the hypoxic-bradycardia arc.
 
 ## References
 
@@ -982,7 +982,7 @@ From `term_neonate_72h.json`, `models.Ans.components.BR_MAP` (trimmed to the con
 
 ## Usage in the scenarios
 
-`BR_MAP`, `CR_PCO2`, `CR_PO2` and `CR_PH` in every scenario; `CR_PO2_HR` (hypoxic bradycardia) in none at present (the preterm scenarios that had it were removed on 2026-10-25 to be rebuilt). Their settings are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
+`BR_MAP`, `CR_PCO2`, `CR_PO2` and `CR_PH` in every scenario; `CR_PO2_HR` (hypoxic bradycardia) in none. Their settings are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
 
 ## References
 
@@ -1084,7 +1084,7 @@ From `term_neonate_72h.json`, `models.Ans.components.EF_HR` (trimmed to the conf
 
 ## Usage in the scenarios
 
-`EF_HR`, `EF_SVR`, `EF_HEART` and `EF_MV` in every scenario; `EF_HR_CHEMO` (hypoxic bradycardia) in none at present (the preterm scenarios that had it were removed on 2026-10-25 to be rebuilt). Their targets, ranges and time constants are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
+`EF_HR`, `EF_SVR`, `EF_HEART` and `EF_MV` in every scenario; `EF_HR_CHEMO` (hypoxic bradycardia) in none. Their targets, ranges and time constants are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
 
 ## References
 
@@ -1169,10 +1169,8 @@ Each step:
 
 **Desaturation and bradycardia** are emergent:
 - the lungs stop refreshing alveolar gas, so [GasExchanger](./GasExchanger.md) loads less O2 and the arterial saturation falls;
-- in the scenarios patched by `scripts/_add_apnea.mjs`, a pO2 heart-rate chemoreceptor (`CR_PO2_HR`, reading `AA.po2`) drives `EF_HR_CHEMO` onto `Heart.hr_chemo_factor` (see [Ans](./Ans.md));
+- where the scenario has one, a pO2 heart-rate chemoreceptor (`CR_PO2_HR`, reading `AA.po2`) drives `EF_HR_CHEMO` onto `Heart.hr_chemo_factor` (see [Ans](./Ans.md));
 - its set-point is a few mmHg below the baseline pO2, so the reflex is neutral at rest.
-
-**Current behaviour** (`node scripts/probe_apnea.mjs preterm_28wk`, 2026-10-24, FiO2 0.25, no device in the model definition): 3 central episodes of 11.5–13.3 s in 5 min. SpO2 falls only from 93.3 to ~91.6 % and the heart rate from 153 to ~152 /min: no bradycardia. That is milder than clinical apnoeas of that length, which often desaturate below 85 %. It is listed for the scenario re-validation.
 
 ## Factor system
 
@@ -1182,8 +1180,8 @@ None. It switches `Breathing.breathing_enabled` and the airway resistor's `no_fl
 
 - **Reads:** `Breathing.breathing_enabled` (baseline, once).
 - **Writes:** `Breathing.breathing_enabled` (via `switch_breathing`), `MOUTH_DS.no_flow`.
-- **Written by:** the user and bot (`apnea_enabled`, the settings); `scripts/_add_apnea.mjs`.
-- **Read by:** `scripts/probe_apnea.mjs`; `DataCollector` watchers.
+- **Written by:** the user and bot (`apnea_enabled`, the settings).
+- **Read by:** `DataCollector` watchers.
 
 ## Assumptions and limitations
 
@@ -1194,7 +1192,7 @@ None. It switches `Breathing.breathing_enabled` and the airway resistor's `no_fl
 
 ## Example definition (JSON)
 
-From the removed `preterm_28wk.json` (no shipped scenario has an Apnea model), `models.Apnea` (trimmed to the config props):
+No shipped scenario has an Apnea model; a `models.Apnea` entry (config props only) looks like:
 
 ```json
 {
@@ -1215,7 +1213,7 @@ From the removed `preterm_28wk.json` (no shipped scenario has an Apnea model), `
 
 ## Usage in the scenarios
 
-In no shipped scenario at present: the three preterm scenarios that had it (dormant, `apnea_enabled` false) were removed on 2026-10-25 to be rebuilt. `scripts/_add_apnea.mjs` adds it to a scenario. Verification: `node scripts/probe_apnea.mjs <scenario>` reports per-episode duration, SpO2 and HR nadirs and the desaturation → bradycardia lag; `--no-chemoreflex` disables `EF_HR_CHEMO` for comparison. See [TESTING](./TESTING.md).
+Not used by any shipped scenario: `term_neonate_72h` has no Apnea model.
 
 ## References
 
@@ -1377,7 +1375,7 @@ BaseModelClass
 | `solutes` | object | `{}` | Solute set seeded into fresh compartments (mmol/L; `albumin` g/L): `na`, `k`, `ca`, `cl`, `mg`, `lact`, `phosphates`, `uma` (unmeasured anions), `albumin`, `hemoglobin`, `glucose`. |
 | `temp` | °C | 37.0 | Temperature seeded into fresh compartments (not the live temperature, see `set_temperature`). |
 | `blood_temp_tc` | s | 10 | Time constant with which each compartment relaxes toward its perfusion target `body_temp`. |
-| `P50_0` | mmHg | 20.0 | O2–Hb affinity at standard conditions, given to every compartment that has none: fetal ~18.8, neonatal 20, adult 26.7. Scenarios 18.5–20. |
+| `P50_0` | mmHg | 20.0 | O2–Hb affinity at standard conditions, given to every compartment that has none: fetal ~18.8, neonatal 20, adult 26.7. term_neonate_72h 20. |
 | `haldane_coeff` | – | 1.0 | Haldane-effect strength in the CO2 solver (0 = off), given to every compartment. **2.2 in every scenario.** |
 | `viscosity_plasma` | cP | 1.3 | Plasma viscosity. |
 | `viscosity_hct_k` | per unit Hct | 3.13 | Exponential haematocrit coefficient (low-shear, in vivo). |
@@ -1424,7 +1422,7 @@ A neonatal Hb of 10 mmol/L gives Hct 0.49 and ~6 cP. [BloodVessel](./BloodVessel
 | `set_perfusion_target(core)` | Called by Thermoregulation: `body_temp` of every compartment not under device control (`temp_ext_override`). |
 | `get_thermal_state(density, cp)` | Heat capacity and mean temperature of the enabled, non-fixed blood, for Thermoregulation's heat balance. |
 | `calc_viscosity(hb)` | The viscosity law above. |
-| `calibrate_viscosity_ref()` | Re-takes `viscosity_ref` from the volume-weighted Hb of the circulating blood and copies it to every compartment (what `init_model` does at build). For tools that change the Hb of a scenario they then save (`build_patient.mjs`, `_make_term_transition.mjs`): otherwise they calibrate at viscosity / viscosity_ref ≠ 1 and the saved scenario loads with different resistances. A live Hb change (bleeding, transfusion) must not call it, since that is when the resistances should follow the viscosity. |
+| `calibrate_viscosity_ref()` | Re-takes `viscosity_ref` from the volume-weighted Hb of the circulating blood and copies it to every compartment (what `init_model` does at build). For tools that change the Hb of a scenario they then save (`build_patient.mjs`): otherwise they calibrate at viscosity / viscosity_ref ≠ 1 and the saved scenario loads with different resistances. A live Hb change (bleeding, transfusion) must not call it, since that is when the resistances should follow the viscosity. |
 
 ## Factor system
 
@@ -1441,7 +1439,7 @@ None. Viscosity reaches the resistances through `BloodVessel`'s viscosity term.
 
 ## Assumptions and limitations
 
-- **Setters reach every blood compartment, the maternal pool included.** `set_solute`, `set_P50`, `set_to2` and `set_tco2` without a site also change `PL_MAT` and the ECLS circuit. See [Placenta](./Placenta.md#assumptions-and-limitations) for why the generators restore `PL_MAT`.
+- **Setters reach every blood compartment, the maternal pool included.** `set_solute`, `set_P50`, `set_to2` and `set_tco2` without a site also change `PL_MAT` and the ECLS circuit. See [Placenta](./Placenta.md#assumptions-and-limitations) for why `build_patient.mjs` restores `PL_MAT`.
 - **Membership is by `model_type` string.** A custom subclass of a blood compartment with its own `model_type` must be added to `blood_containing_modeltypes`, or it is never seeded, warmed or given a viscosity.
 - **Fixed sampling sites.** The scenario must have `AA` and `AD`; `IVCI`, `SVC`, `RAIVCI`, `RASVC` and `PA` are used when present (until 2026-10-27 `RASVC` was not, so its gas read-outs kept a stale value). Other compartments' gases are solved only by whoever needs them.
 - **Blood gases are refreshed once per second.**
@@ -1839,7 +1837,7 @@ Additive layers (as Capacitance and Resistor), on `dif_o2`, `dif_co2` and one sh
 
 - **Reads:** both compartments' `po2`, `pco2`, `to2`, `tco2`, `solutes`, `vol`, `fixed_composition`.
 - **Writes:** `to2`, `tco2`, `solutes` of the non-fixed compartment(s); their solved `ph`, `pco2`, `po2`, `so2`, … through `calc_blood_composition`.
-- **Written by:** [Placenta](./Placenta.md) (`dif_o2`, `dif_co2`, `is_enabled` every 15 ms); the fetal generators set the Placenta values.
+- **Written by:** [Placenta](./Placenta.md) (`dif_o2`, `dif_co2`, `is_enabled` every 15 ms); the scenario sets the Placenta values.
 - **Read by:** `DataCollector` watchers.
 
 ## Assumptions and limitations
@@ -1868,7 +1866,7 @@ From `term_neonate_72h.json`, `models.Placenta.components.PL_GASEX` (trimmed to 
 
 ## Usage in the scenarios
 
-One instance, `PL_GASEX`, owned by `Placenta`, disabled in term_neonate_72h (it runs only in a fetus with the placenta running; the fetal scenarios were removed on 2026-10-25 to be rebuilt).
+One instance, `PL_GASEX`, owned by `Placenta`, disabled in term_neonate_72h (it runs only in a fetus with the placenta running).
 
 | Scenario | `dif_o2` | `dif_co2` |
 |---|---|---|
@@ -1876,7 +1874,7 @@ One instance, `PL_GASEX`, owned by `Placenta`, disabled in term_neonate_72h (it 
 
 ## References
 
-No literature values; the diffusing capacities are calibrated per fetal scenario (see [fetal_circulation](./fetal_circulation.md)).
+No literature values; the diffusing capacities are set per scenario on [Placenta](./Placenta.md).
 
 ````
 
@@ -2020,7 +2018,7 @@ Inherited unchanged: `u_vol`, `el_min`, `el_max` and `el_k` carry the three laye
 
 - **One compartment for the whole coronary circulation.** Left and right coronary beds, and epicardial versus intramyocardial vessels, aren't separated.
 - **Compression follows the LV activation for the whole bed.** The right-ventricular activation (`rvaf`) doesn't act on it.
-- **Two compression effects.** The bed's own elastance swing (`el_max/el_min` = 3) squeezes blood *out* in systole. Holding inflow back is done by `Heart.cor_r_systolic_factor`, which raises the inflow resistance `AA_COR` by `(1 + 5·vaf)` in systole. With both, 73 % of the coronary inflow arrives in diastole at term (60–62 % in the preterm and fetal scenarios, which have shorter diastoles). This compares with ~75–85 % for an adult left coronary, which a lumped left+right bed should sit below. An intramyocardial-*pressure* variant was tried and dropped: with this bed's compliance it squeezed the bed empty in systole.
+- **Two compression effects.** The bed's own elastance swing (`el_max/el_min` = 3) squeezes blood *out* in systole. Holding inflow back is done by `Heart.cor_r_systolic_factor`, which raises the inflow resistance `AA_COR` by `(1 + 5·vaf)` in systole. With both, 73 % of the coronary inflow arrives in diastole at term. This compares with ~75–85 % for an adult left coronary, which a lumped left+right bed should sit below. An intramyocardial-*pressure* variant was tried and dropped: with this bed's compliance it squeezed the bed empty in systole.
 - **Active only since the two-phase build** (`302ed76`). Before that, `Heart` never found `COR` (owned by `Mob`), and `act_factor` stayed 0.
 
 ## Example definition (JSON)
@@ -2440,7 +2438,7 @@ BaseModelClass
 | `minute_volume_ref_factor`, `minute_volume_ref_scaling_factor` | – | 1.0 | Persistent multipliers on the reference (no engine model writes them). |
 | `vt_rr_ratio` | L·min/kg | 1.212e-4 | Mecklenburgh ratio: `Vt / RR` per kg (term 1.298e-4). |
 | `vt_rr_ratio_factor`, `vt_rr_ratio_scaling_factor` | – | 1.0 | Multipliers on `vt_rr_ratio`. |
-| `ie_ratio` | – | 0.3 | Inspiratory **fraction** of the breath (Ti/Ttot), not an I:E ratio. Term 0.40, preterm 0.38. |
+| `ie_ratio` | – | 0.3 | Inspiratory **fraction** of the breath (Ti/Ttot), not an I:E ratio. term_neonate_72h 0.40. |
 | `rmp_gain` | mmHg/L | calibrated | Muscle pressure per litre of target tidal volume. |
 | `rmp_calibrated` | boolean | `false` | `rmp_gain` holds a calibrated value (true in every scenario). |
 | `rmp_gain_max` | mmHg | 100 | Cap on the peak muscle pressure. |
@@ -2562,7 +2560,7 @@ None of the engine's factor layers. Its own multipliers (`*_factor`, `*_scaling_
 - **Central vs obstructive apnoea.** A central apnoea switches breathing off; an obstructive one keeps the drive and closes `MOUTH_DS` (see [Apnea](./Apnea.md)).
 - **One muscle-pressure shape** (linear ramp); infants reach peak flow earlier in inspiration, so peak inspiratory flow is ~15 % low at term.
 - **`resp_rate_measured` has a start-up transient** over the first breaths; the settled value is correct.
-- **Verification:** `npm run validate:resp` (see [TESTING](./TESTING.md)) checks the spontaneous steady state, the chemoreflex, resistive and elastic loads, CPAP and pressure support against clinical ranges. The known failures are the missing vagal and Hering–Breuer reflexes, plus listed ventilator and preterm calibration items.
+- **Verification:** `npm run validate:resp` (see [TESTING](./TESTING.md)) checks the spontaneous steady state, the chemoreflex, resistive and elastic loads, CPAP and pressure support against clinical ranges. The one known failure is the missing vagal rate response to stiff lungs (adult class).
 
 ## Example definition (JSON)
 
@@ -2659,7 +2657,7 @@ The live levers built by `buildLiveControllers` deliberately use the persistent 
 | `co` | `LV.el_max_factor_ps` and `RV.el_max_factor_ps` | ventricular contractility; reads `lvo` |
 | `hr` | `Heart.heart_rate_ref` | HR reference setpoint |
 | `po2` / `spo2` | `GASEX_LL/RL.dif_o2_factor_ps`, below `DIF_O2_FLOOR` `Shunts.ips_res` | the builder's continuous oxygen lever: alveolar O2 diffusion down to ×0.1, then the intrapulmonary shunt opens in proportion, to a tenth of its value at the start of the tune; one controller, reads `po2` or `spo2_pre` |
-| `sys` + `dia` (→ `pp`, `map`) | `AA`, `AAR`, `AD` `el_base_factor_ps` | large-artery stiffness, as in the builder. Its upper bound is `0.95 · ARTERIAL_EL_MAX / scaling`, where `scaling` is any size stiffening still in `el_base_factor_scaling_ps`. The shipped scenarios have it baked into `el_base` (v1.0, see [ModelScaler](./ModelScaler.md)), so the bound is ×5.7 on top of the loaded stiffness; preterm_25wk is stable there (ABP 76/14 with the implicit aorta); the live tuner first calls `enableImplicitAorta` on the running model (a loaded scenario may predate it), because a live tune cannot discard a failed run. MAP is tuned by its own lever, which then leaves the large arteries' resistance alone: stability goes roughly with elastance / resistance, and lowering their resistance while stiffening them blew up a term neonate (×0.68 resistance, ×1.63 stiffness) although each alone was stable |
+| `sys` + `dia` (→ `pp`, `map`) | `AA`, `AAR`, `AD` `el_base_factor_ps` | large-artery stiffness, as in the builder. Its upper bound is `0.95 · ARTERIAL_EL_MAX / scaling`, where `scaling` is any size stiffening still in `el_base_factor_scaling_ps`. The shipped scenarios have it baked into `el_base` (v1.0, see [ModelScaler](./ModelScaler.md)), so the bound is ×5.7 on top of the loaded stiffness; the live tuner first calls `enableImplicitAorta` on the running model (a loaded scenario may predate it), because a live tune cannot discard a failed run. MAP is tuned by its own lever, which then leaves the large arteries' resistance alone: stability goes roughly with elastance / resistance, and lowering their resistance while stiffening them blew up a term neonate (×0.68 resistance, ×1.63 stiffness) although each alone was stable |
 | `pap_m` / `pap_s` | pulmonary bed (`scaler_config.blood_pulmonary.resistance`) on `r_factor_ps`, `IPSL`/`IPSR` on `r_factor_scaling_ps` | pulmonary resistance, moving the intrapulmonary shunt with the bed as the builder does, so the shunt's share of pulmonary flow stays put. The lever multiplies each resistor's effective resistance relative to the start of the tune, applied as a delta (BloodVessel multiplies its layers, Resistor adds them); IPSL/IPSR use the scaling layer because Surfactant owns their `r_factor_ps`. `pap_m` wins when both are given |
 | `pco2` | `Breathing.minute_volume_ref` (× multiplier) | spontaneous ventilatory drive; `sign: -1` (↓ drive raises pCO2) |
 | `be` / `ph` | `Blood.set_solute("uma", …)` | Stewart unmeasured anions; `sign: -1` (↑ uma lowers BE/pH) |
@@ -2671,15 +2669,15 @@ The builder shares `makeController`/`runCalibration` but has its **own** control
 starts from a freshly built baseline rather than a running patient. Two differ from the live table:
 `map` scales the `systemic_resistances` `ModelScaler` group (and `pap_m` the `pulmonary_resistances`
 group), and it adds `cvp` ← venous unstressed volume (`VLB`/`VUB` `u_vol`). On a fetal baseline the
-oxygen and CO2 levers are the placental maternal pool instead (see [fetal_circulation](./fetal_circulation.md)).
+oxygen and CO2 levers are the placental maternal pool instead.
 
 Two builder-only targets:
 
 - **`sys` + `dia`** (a pair; one alone is ignored with a note): the builder derives the pulse pressure `pp = sys − dia` and, if `map` is absent, `map = dia + pp/3` (both listed under `build_report.derived_targets`). MAP keeps its resistance lever; `pp` gets **large-artery stiffness** — `el_base_factor_ps` on `AA`, `AAR`, `AD`, bounds 0.3 to `ARTERIAL_EL_MAX / size factor`. Stiffening raises systolic and lowers diastolic around a nearly unchanged mean, so the two levers barely interact. The MAP tolerance is at most 5 % of the target (±3 mmHg would be 10 % of a 720 g infant's MAP). Every neonatal build integrates the intra-aortic resistors implicitly (`enableImplicitAorta`); before that the integrator failed at about ×2 total arterial elastance, which capped small infants' pulse pressure.
 
-**Arterial stiffness follows size (builder only).** `weight_scale` shrinks arterial volumes but leaves their elastance, so a small baby's arteries would be as compliant as a term baby's: a 1.08 kg / 28 wk build had a pulse pressure of 11 mmHg against a reference of about 15–27. Measured aortic pulse-wave velocity falls far less with size than vessel volume does (term ~4.2–4.6 m/s, preterm at 32 wk corrected ~3.2 m/s), and preterm arteries are intrinsically stiffer than term ones ([Tauzin et al., Pediatr Res 2006](https://www.nature.com/articles/pr2006354)). By Bramwell-Hill (PWV² = V·E/ρ) a roughly constant PWV with V ∝ W needs E to rise as W falls. The builder sets `el_base_factor_scaling_ps` on the systemic arteries (`AA`, `AAR`, `AD`, `RLB`, `RUB`, `*_ART`) to **(W/W0)^-0.5**, where W0 is the term reference weight 3.545 kg (not the baseline's, so an already-small baseline made before this rule, such as `bischoff_cohort` or `preterm_*wk`, is sized too; the factor is set absolutely, so a baseline that already carries it is unchanged). On the 1.08 kg case that is ×1.81: implied PWV 0.74 of term, matching the measured preterm/term ratio of 0.70–0.76. Without a pressure-pair target the pulse pressure then lands at about 16–18 mmHg, up from 11. It depends on heart rate: about 16 at the ~170/min an untargeted build settles at, about 18 with HR 158 targeted.
+**Arterial stiffness follows size (builder only).** `weight_scale` shrinks arterial volumes but leaves their elastance, so a small baby's arteries would be as compliant as a term baby's: a 1.08 kg / 28 wk build had a pulse pressure of 11 mmHg against a reference of about 15–27. Measured aortic pulse-wave velocity falls far less with size than vessel volume does (term ~4.2–4.6 m/s, preterm at 32 wk corrected ~3.2 m/s), and preterm arteries are intrinsically stiffer than term ones ([Tauzin et al., Pediatr Res 2006](https://www.nature.com/articles/pr2006354)). By Bramwell-Hill (PWV² = V·E/ρ) a roughly constant PWV with V ∝ W needs E to rise as W falls. The builder sets `el_base_factor_scaling_ps` on the systemic arteries (`AA`, `AAR`, `AD`, `RLB`, `RUB`, `*_ART`) to **(W/W0)^-0.5**, where W0 is the term reference weight 3.545 kg (not the baseline's, so an already-small baseline is sized too; the factor is set absolutely, so a baseline that already carries it is unchanged). On the 1.08 kg case that is ×1.81: implied PWV 0.74 of term, matching the measured preterm/term ratio of 0.70–0.76. Without a pressure-pair target the pulse pressure then lands at about 16–18 mmHg, up from 11. It depends on heart rate: about 16 at the ~170/min an untargeted build settles at, about 18 with HR 158 targeted.
 
-The factor is capped at ×2.5 (0.57 kg), the edge of the pulse-wave-velocity data it extrapolates; the old ×1.9 cap was the explicit integrator's limit and is gone with the implicit aortic resistors. The pulse-pressure lever multiplies on top (`BloodVessel` composes elastance factors multiplicatively), so its upper bound is `ARTERIAL_EL_MAX / size factor`. On the 0.72 kg Bischoff infant a 45/25 target now converges (it stopped at about 35/24 with the lever at the old bound). Term builds (no weight change), fetal mode and the live `ModelScaler.scale_to_weight` are unchanged. As a backstop, a build whose final pressures are non-finite, negative diastolic, systolic above 250 or output above 10 L/min is refused (exit 1) instead of emitted.
+The factor is capped at ×2.5 (0.57 kg), the edge of the pulse-wave-velocity data it extrapolates; the old ×1.9 cap was the explicit integrator's limit and is gone with the implicit aortic resistors. The pulse-pressure lever multiplies on top (`BloodVessel` composes elastance factors multiplicatively), so its upper bound is `ARTERIAL_EL_MAX / size factor`. Term builds (no weight change), fetal mode and the live `ModelScaler.scale_to_weight` are unchanged. As a backstop, a build whose final pressures are non-finite, negative diastolic, systolic above 250 or output above 10 L/min is refused (exit 1) instead of emitted.
 - **`rvo`** (L/min) — right-ventricular output via `Shunts.diameter_fo`. With the duct closed the two
   outputs differ only by the atrial shunt (RVO = LVO + Q_fo), so the foramen is the one lever that sets
   RVO given LVO; a given `fo_mm` is the starting point, a closed foramen starts at 0.25 mm. Tolerance
@@ -2705,7 +2703,7 @@ The factor is capped at ×2.5 (0.57 kg), the edge of the pulse-wave-velocity dat
 Before calibrating it applies the **structural** targets: `weight`, `gestational_age` (a seed bundle),
 `height`, `age`, `hb`/`hb_gdl`, `temp`, `pda`/`pda_mm`, `fo_mm` and **`fio2`**. A spec with only structural targets (or none) is still built: there is nothing to iterate, so the patient is settled for `settle_seconds + final_seconds`, measured and emitted with an empty `targets` list and a note saying nothing was calibrated.
 
-The gestational-age seed is for a term baseline. A baseline that is already preterm (`preterm_*wk`, `bischoff_cohort`: its `gestational_age` is below 37) carries the seed's multiplicative adjustments, so a spec that adds `gestational_age` below 37 to it is refused (exit 1) instead of applying prematurity twice. Use `term_neonate_72h` + `gestational_age`, or the preterm baseline without it. Fetal baselines use their own seed table and are exempt.
+The gestational-age seed is for a term baseline. A baseline that is already preterm (its `gestational_age` is below 37) carries the seed's multiplicative adjustments, so a spec that adds `gestational_age` below 37 to it is refused (exit 1) instead of applying prematurity twice. Use `term_neonate_72h` + `gestational_age`, or the preterm baseline without it. Fetal baselines use their own seed table and are exempt.
 
 **`targets.fio2`** (fraction, 0.21–1.0) sets the inspired oxygen the patient breathes, via
 `Gas.set_fio2`, before the loop runs. This matters for what the oxygen lever means: alveolar diffusion
@@ -2726,7 +2724,7 @@ the human-readable one):
 | `postnatal_age_days` | the postnatal age the flags assumed: `spec.postnatal_age_days`, else `targets.age` × 365, else the baseline's age (term baselines: 0 = day 1) |
 | `structural` | the structural targets that were applied |
 
-**Age-dependent PAP ranges (term neonate).** Pulmonary artery pressure falls steeply over the first days, so the `neonate` profile's `pap_s`/`pap_d`/`pap_m` ranges follow postnatal age (`NEONATE_PAP_BY_AGE` in `_probe.mjs`): under 36 h systolic 28–60, diastolic 5–37, mean 15–54; 36–60 h 22–55, 5–25, 11–41; from 60 h the table's 18–40, 5–20, 12–30. These are mean ± 2 SD of 76 healthy term newborns by echo (Medicine 2016, [PMID 26817918](https://pubmed.ncbi.nlm.nih.gov/26817918/): systolic 43.8 ± 7.9 at 24 h, 38.1 ± 8.3 at 48 h, upper 95 % limit 40 at 72 h). Without them a normal day-1 baby was flagged HIGH: `term_neonate_72h`, described as 24 h old, measures 40/17 (mean 27), and a 3 mm PFO took it to 41.5. Preterm, fetal and adult ranges are not age-dependent. The age is metadata (`spec.postnatal_age_days`, which also sets `model.age` in years when `targets.age` is absent); no model reads it.
+**Age-dependent PAP ranges (term neonate).** Pulmonary artery pressure falls steeply over the first days, so the `neonate` profile's `pap_s`/`pap_d`/`pap_m` ranges follow postnatal age (`NEONATE_PAP_BY_AGE` in `_probe.mjs`): under 36 h systolic 28–60, diastolic 5–37, mean 15–54; 36–60 h 22–55, 5–25, 11–41; from 60 h the table's 18–40, 5–20, 12–30. These are mean ± 2 SD of 76 healthy term newborns by echo (Medicine 2016, [PMID 26817918](https://pubmed.ncbi.nlm.nih.gov/26817918/): systolic 43.8 ± 7.9 at 24 h, 38.1 ± 8.3 at 48 h, upper 95 % limit 40 at 72 h). Without them a normal day-1 baby was flagged HIGH: `term_neonate_72h`, described as 24 h old, measures 40/17 (mean 27), and a 3 mm PFO took it to 41.5. The adult ranges are not age-dependent. The age is metadata (`spec.postnatal_age_days`, which also sets `model.age` in years when `targets.age` is absent); no model reads it.
 | `derived_targets` | `pp` (and `map`) computed from `sys`/`dia` |
 | `solutes` | per solute set: `{ set, value }`, the arterial (AA) value after calibration |
 | `ignored_targets` | `targets` keys the builder does not know. They are **ignored**, so they are listed |
@@ -2736,8 +2734,6 @@ the human-readable one):
 `lever_at_bound: true` means the lever ran into its limit: the target is out of that lever's reach,
 which is different from "needs more iterations". The scenario's `provenance` is set to
 `"calibrator-fitted"` (it used to inherit the baseline's).
-
-**Check on the baked preterm_25wk** (v1.0): `POST "calibrate"` with `{targets: {map: 42, hr: 150}}` converges in one iteration (MAP 40.5, HR 153, both within tolerance).
 
 ## Notes / caveats
 
@@ -3909,7 +3905,7 @@ displayed circuit pressure reads 23.4 mmHg higher:
 
 Before, the same VA run gave 0.47 L/min at 2800 rpm. VV with two single-lumen cannulas gave 0.47 L/min
 at ≈ 1800 rpm. At ≈ 0.45 L/min VV now needs ≈ 10 % more rpm than VA, and ≈ 20 % more at 0.6 L/min.
-Adult (`adult_female`, CentriMag, 25/19 Fr): 4000 rpm → 4.0 L/min (was 6.6), 5000 rpm → 6.0 (was 10.9).
+Adult (CentriMag, 25/19 Fr): 4000 rpm → 4.0 L/min (was 6.6), 5000 rpm → 6.0 (was 10.9).
 The realistic adult cannula losses also remove most of the implausibly high adult flows noted on
 2026-10-01.
 
@@ -4202,8 +4198,7 @@ sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
   entries were removed from the single-lumen libraries (their resistances were unsourced, and a VV
   cannula is one device).
 - **Scenario clean-up.** `tubing_in_res` is live (in series on the pump inlet). The read-outs
-  `drainage_dp`/`return_dp` were added. Eight scenarios (`fetus_30wk`, `term_fetus`, `tapvc`,
-  `tapvc_obstructed`, `tof`, `tof_pa`, `tof_pink`, `tof_severe`) still embedded cannula (and some
+  `drainage_dp`/`return_dp` were added. Eight scenarios still embedded cannula (and some
   pump/oxygenator) library copies that override the class libraries. These were removed.
 - **Effect.** VV (13 Fr DL) now needs about the same or slightly more rpm than VA (12/10 Fr) for the
   same flow, instead of ≈ 35 % fewer. Adult VA flows at high rpm are much lower and more plausible.
@@ -4229,7 +4224,7 @@ sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
   [HeartChamber](./HeartChamber.md#the-split-right-atrium)).
 - `term_neonate_72h` VA (RASVC → AAR), PediMag: 4000 rpm → ≈ 1.06 L/min (p_ven ≈ −12 mmHg, was 0.45 at −135);
   5500 rpm → ≈ 1.5 L/min. Native LVO falls toward 0 as ECMO takes over the circulation.
-- Follow-up: with the merged atrium, very high rpm now gives implausibly high flows, e.g. `adult_female`
+- Follow-up: with the merged atrium, very high rpm now gives implausibly high flows, e.g. the adult
   CentriMag ≈ 11 L/min at 5000 rpm. Neither caval/atrial collapse around the cannula (inflow limitation)
   nor possibly realistic adult cannula resistances are modelled yet.
 
@@ -4240,7 +4235,7 @@ sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
   Manual (PL-0047 Rev 11, Fig. 14), RMS error 4.8 mmHg; the old coefficients were off by ≈ 216 mmHg
   RMS. The deadhead was about right (rpm² scaling holds, `hq_a` ≈ 23); the flow falloff was 5–7× too
   steep.
-- Effect in `adult_female` (VA, RASVC → AAR): the crossover is unchanged at ≈ 2000 rpm. Flow rises much
+- Effect in the adult (VA, RASVC → AAR): the crossover is unchanged at ≈ 2000 rpm. Flow rises much
   faster with rpm (≈ 2.6 L/min at 3000 vs 1.8 before) and reaches the drainage-limited plateau
   (≈ 2.7 L/min, RASVC empties) by ≈ 3000 rpm. That plateau is the venous-return / no-atrial-collapse
   limitation noted under "PediMag head corrected" below, and it is more apparent in the adult.
@@ -4256,7 +4251,7 @@ sub-models (and nothing refreshes the `Ecls.*` read-outs the UI watches).
   `hq_b` is unchanged; with it the corrected head reproduces the published PediVAS operating points
   (0.6 L/min @ 2800 rpm, 0.8 L/min @ 3200 rpm, 10 Fr return cannula). The class default, the standby
   `BloodPump` default and the six scenarios that set `pump_hq_a` explicitly were updated too. Those six
-  (`fetus_30wk`, `term_fetus`, `tof*`) also embedded a full copy of the `pumps`/`oxygenators` libraries,
+  also embedded a full copy of the `pumps`/`oxygenators` libraries,
   which `init_model` copies over the class library and so pinned the old value. The copies were otherwise
   identical to the class libraries and have been removed, so these scenarios now inherit the library.
 - Effect: in VA mode the centrifugal pump is non-occlusive, so flow reverses (aorta → circuit → RA)
@@ -4672,14 +4667,7 @@ A single well-mixed compartment is a poor dead space: mixing makes part of it "v
 - **Ends.** `_end_conc(neighbour)` / `_end_add(neighbour, dn)` read and change the sub-tank facing a neighbour; the gas `mix_flow` of a [Resistor](./Resistor.md#mixing-without-net-flow-mix_flow) uses them.
 - **Bulk.** The bulk concentrations equal the mean of the DS sub-tanks, so heat, water and the gas law work unchanged.
 
-Calibration when it was introduced (`scripts/probe_dead_space.mjs`, preterm_28wk, PRVC 5 mL/kg; HFOV with a 2.5 mm tube):
-
-| Check | Well-mixed (1) | Series (32, dispersion 0.015) |
-|---|---|---|
-| PaCO2 with DS +0 / +50 / +100 % | 67 / 70 / 72 | 81 / 98 / 122, as (Vt − VD)·rate predicts |
-| HFOV PaCO2 at 6 / 10 / 15 Hz | 10 / 11 / 11 (no frequency effect) | f·Vt² law: PaCO2·DCO2 constant within ±8 % over 8–15 Hz × amplitude 15–30 |
-| Sub-tank count | – | 8 → 16 → 32 still changes HFOV (numerical dispersion), so the count is fixed at 32 and the dispersion term carries the transport |
-| Runtime | – | +7–9 % |
+The sub-tank count is fixed at 32: 8 → 16 → 32 still changed HFOV PaCO2 (numerical dispersion), so the dispersion term carries the transport. Runtime cost +7–9 %. `scripts/probe_dead_space.mjs` checks it.
 
 ## Factor system
 
@@ -5100,7 +5088,7 @@ From `term_neonate_72h.json`, `models.Glucose` (trimmed to the config props; gai
 
 ## Usage in the scenarios
 
-One instance in every scenario, running with use = production = 0.03 mmol/kg/min. The set-points equal each scenario's `Blood.solutes.glucose`: term 4.0, fetus 3.7–4.2, preterm 5.5–7.0 mmol/L.
+One instance in every scenario, running with use = production = 0.03 mmol/kg/min. The set-points equal each scenario's `Blood.solutes.glucose`: term_neonate_72h 4.0 mmol/L.
 
 ## References
 
@@ -5164,7 +5152,7 @@ BaseModelClass
 | `qt_time` | s | 0.4 | QT at 60 bpm (a QTc), from QRS onset; rate-corrected each beat with Bazett, `cqt_time = qt_time·√(60/HR)`. Sets both the ECG QT and how long the ventricles contract. 0.4 in every scenario (neonatal QTc ~0.40 s). |
 | `act_peak` | – | 0.85 | Fraction of the QT at which ventricular activation peaks (end-systole). |
 | `relax_frac` | – | 0.06 | Relaxation after end-systole: the activation decays with τ = `relax_frac`·RR (30 ms at 120/min). 0 = a raised-cosine fall to zero at the end of the QT. |
-| `rv_delay` | s | 0.0 | RV activation lag behind the LV; 0 = both together; negative = the LV (and the coronaries) lag the RV by \|`rv_delay`\|. `term_neonate_1h` uses −0.035 (early systolic right-to-left ductal flow); the removed `bischoff_bidir_pda` used 0.008. |
+| `rv_delay` | s | 0.0 | RV activation lag behind the LV; 0 = both together; negative = the LV (and the coronaries) lag the RV by \|`rv_delay`\|. term_neonate_72h uses 0. |
 
 ### Config: rhythm and conduction
 
@@ -5209,7 +5197,7 @@ BaseModelClass
 | `hr_mob_factor` | – | 1.0 | `Mob`: myocardial-oxygen-balance effect on rate. |
 | `hr_temp_factor` | – | 1.0 | `Thermoregulation`: temperature effect on rate. |
 | `hr_drug_factor` | – | 1.0 | `Drugs`: chronotropy. |
-| `hr_chemo_factor` | – | 1.0 | `EF_HR_CHEMO` efferent: hypoxic bradycardia (in no shipped scenario at present). |
+| `hr_chemo_factor` | – | 1.0 | `EF_HR_CHEMO` efferent: hypoxic bradycardia (in no shipped scenario). |
 
 ### Outputs
 
@@ -5310,9 +5298,9 @@ Each is applied as a delta to the *shared* persistent layer, so the chamber's fa
 
 ## Assumptions and limitations
 
-- **QT sets both the ECG and the contraction.** With `qt_time` 0.40 the ECG QTc is 0.40 s and the ventricles eject for 157–180 ms (LV) in the postnatal and fetal scenarios at rest (term 180 ms at 121/min; fetus_term 166 ms; the fetal reference is 169 ms, Peixoto 2024, doi:10.1017/S1047951124025927). Until the 2026-10 re-validation QT was 0.25 s and the contraction lasted QRS + QT with a late-peaking `x·sin(πx)` pulse: ejection lasted only 118–131 ms, so peak flows and valve gradients were too high, and lengthening QT alone ate into diastolic filling (term mitral inflow 213 → 104 ms per beat). Counting the QT from QRS onset and the raised-cosine pulse keep filling, EF and output (≤1.4 % change).
-- **Relaxation scales with the beat.** τ = `relax_frac`·RR, so relaxation speeds up with heart rate (the frequency-dependent acceleration of relaxation). A fixed τ was rejected: term output peaked at 150/min and fell to below rest at 210/min, while with τ ∝ RR it rises to ~180/min and plateaus. Sympathetic and drug lusitropy act on the passive stiffness only, not on τ. With the AV-valve inertance ([Resistor](./Resistor.md#inertance-inertance)) relax_frac 0.06 gives term mitral E/A 0.61/0.59 m/s (E/A 1.04); the since-removed preterm and fetal scenarios had 0.27–0.91; before the relaxation tail and inertance E/A was 1.8–5.4 everywhere.
-- **The same timings in every scenario.** `pq_time` 0.1, `qrs_time` 0.075, `qt_time` 0.4, `act_peak` 0.85, `relax_frac` 0.06 and `av_delay` 0.0005 are used from 25 weeks to term and in the fetus.
+- **QT sets both the ECG and the contraction.** With `qt_time` 0.40 the ECG QTc is 0.40 s and the LV ejects for 180 ms in term_neonate_72h at rest (121/min). Until the 2026-10 re-validation QT was 0.25 s and the contraction lasted QRS + QT with a late-peaking `x·sin(πx)` pulse: ejection lasted only 118–131 ms, so peak flows and valve gradients were too high, and lengthening QT alone ate into diastolic filling (term mitral inflow 213 → 104 ms per beat). Counting the QT from QRS onset and the raised-cosine pulse keep filling, EF and output (≤1.4 % change).
+- **Relaxation scales with the beat.** τ = `relax_frac`·RR, so relaxation speeds up with heart rate (the frequency-dependent acceleration of relaxation). A fixed τ was rejected: term output peaked at 150/min and fell to below rest at 210/min, while with τ ∝ RR it rises to ~180/min and plateaus. Sympathetic and drug lusitropy act on the passive stiffness only, not on τ. With the AV-valve inertance ([Resistor](./Resistor.md#inertance-inertance)) relax_frac 0.06 gives term mitral E/A 0.61/0.59 m/s (E/A 1.04); before the relaxation tail and inertance E/A was 1.8–5.4 everywhere.
+- **The same timings at every size.** `pq_time` 0.1, `qrs_time` 0.075, `qt_time` 0.4, `act_peak` 0.85, `relax_frac` 0.06 and `av_delay` 0.0005 are the shipped values; nothing scales them with gestation or weight.
 - **The AV delay is nearly zero.** The PR interval is essentially `pq_time`, and atrial contraction (the `aaf` pulse) spans the whole PQ interval, ending just as the ventricles activate.
 - **`cardiac_cycle_time` is the activation time, not the RR interval** (≈0.28 s against 0.50 s at term). `Mob` therefore uses its own measured beat interval for the stroke-work O2 cost (since v1.0).
 - **End-diastolic and end-systolic pressures are transmural.** They exclude the pericardial (and thoracic) pressure, which is about −3 to −8 mmHg at term, so they read higher than a catheter's cavity pressure. Transmural is the right quantity for wall stress (`HeartFunction`).
@@ -5372,8 +5360,6 @@ Scenario differences:
 ## References
 
 - Bazett HC. An analysis of the time-relations of electrocardiograms. *Heart* 1920;7:353–370. (QT rate correction.)
-- Peixoto AB et al. Influence of pre-existing maternal diabetes mellitus on fetal myocardial performance index and systolic-to-diastolic duration ratio. *Cardiol Young* 2025;35:53–59. doi:10.1017/S1047951124025927 (fetal LV ejection time 0.169 s in controls).
-- Zhu F et al. Cardiopulmonary physiological effects of diuretic therapy in preterm infants with chronic pulmonary hypertension. *J Perinatol* 2023;43:1288–1294. doi:10.1038/s41372-023-01742-0 (preterm RV ejection time ≈ 200 ms from RVET:PAAT 5.9 × PAAT 34 ms).
 - Term calibration sources (Satoh 2016, He 2011, Agata 1994, Jhaveri 2023) are listed in [TermNeonateReference](./TermNeonateReference.md).
 
 ````
@@ -5508,13 +5494,13 @@ The scaling layers are written by `ModelScaler`, and the `Calibrator` also write
 - **One ANS signal, all chambers.** The atria and both ventricles get the same `ans_activity` and `ans_sens`.
 - **Quadratic diastolic relation** (see [The diastolic relation](#the-diastolic-relation)): steeper than linear but less steep than the measured power law.
 - **One unstressed volume** for the diastolic and systolic relations (inherited).
-- **Right-ventricle unstressed volume: 1.64× the LV's in every scenario.** `u_vol` is also the volume intercept of the end-systolic relation, so it sets how stiff the contracting RV is. Until the re-validation the postnatal scenarios had 5.46× (term 4.0 vs 0.73 mL), which made the RV's end-systolic elastance about the LV's (term 28 vs 30 mmHg/mL), where real RVs have roughly ⅓–½ of it, and left the RV almost insensitive to afterload. They now use the fetal scenarios' ratio, with `el_max` and `el_k` refitted (`scripts/_fix_rv_unstressed.mjs`) so the resting RV end-diastolic and end-systolic volumes are unchanged:
+- **Right-ventricle unstressed volume: 1.64× the LV's in every scenario.** `u_vol` is also the volume intercept of the end-systolic relation, so it sets how stiff the contracting RV is. Until the re-validation the postnatal scenarios had 5.46× (term 4.0 vs 0.73 mL), which made the RV's end-systolic elastance about the LV's (term 28 vs 30 mmHg/mL), where real RVs have roughly ⅓–½ of it, and left the RV almost insensitive to afterload. They now use 1.64×, with `el_max` and `el_k` refitted (`scripts/_fix_rv_unstressed.mjs`) so the resting RV end-diastolic and end-systolic volumes are unchanged:
 
   | Scenario | RV `u_vol` (mL) | RV / LV `el_max` (mmHg/mL) | Pulmonary arterioles ×2, RV SV (reflexes off) |
   |---|---|---|---|
   | term_neonate_72h | 4.0 → 1.20 | 9.8 / 30.5 (was 28.1) | −5.7 % (was −3.4 %) |
 
-  The resting state moved ≤0.5 %. An open duct offloads the pulmonary artery, so in the PDA patients of the (since removed) Bischoff scenarios the RV felt less of a pulmonary resistance rise (−2 to −3 %).
+  The resting state moved ≤0.5 %.
 
 ## Example definition (JSON)
 
@@ -5543,8 +5529,6 @@ In every scenario all five chambers use the pure quadratic, with `el_k` from `sc
 - **Right atrium:** the two halves share one `el_k`, and their connector `RAIVCI_RASVC` is `implicit`. With stiffening atria the explicit scheme of that low-resistance connector oscillated.
 - **Effect:** in term_neonate_72h with the reflexes off, +30 mL of blood raises stroke volume +17 % (linear: +34 %) and LV EDP +5.6 mmHg (linear: +3.6). That is the limited preload reserve of the newborn heart.
 
-The since-removed `preterm_25wk` and `bischoff_ltr_pda`, small babies with a left-to-right duct, were not fitted. Their resting atrial pressures and ventricular volumes are set by the circulation around the heart and hardly respond to chamber stiffness, so fitting the atria on volume drove the LA soft until its pressure collapsed (preterm_25wk LA 3.2 → −1.4 mmHg). They use the unfitted start, `el_k = el_min_old / S₀` (`--iter 1 --force`), within 2–4 % of every resting volume and pressure. Against their reference pages nothing moves more than 1.5 % (HR, MAP, SpO2, SvO2, outputs), preterm_25wk's foramen ovale flow returns to left-to-right (−0.9 → +2.4 mL/kg/min) and mitral E/A rises from 0.35/0.42 to 0.69.
-
 ## Usage in the scenarios
 
 Five chambers in every scenario, all owned by `Heart` and inside `PERICARDIUM`. Their elastances and activations are listed on [TimeVaryingElastance → Usage](./TimeVaryingElastance.md#usage-in-the-scenarios).
@@ -5559,7 +5543,7 @@ Each has its own tricuspid half (`RAIVCI_RV`, `RASVC_RV`, both `HeartValve`s) an
 
 | Scenarios | `RAIVCI_RASVC` | Effect |
 |---|---|---|
-| Fetal (no shipped scenario at present) | `no_flow: true` (sealed; `mix_flow` inactive) | Preferential streaming: ductus venosus/IVC blood → foramen ovale → LA; SVC blood → RV. |
+| Fetal | `no_flow: true` (sealed; `mix_flow` inactive) | Preferential streaming: ductus venosus/IVC blood → foramen ovale → LA; SVC blood → RV. |
 | Postnatal (term_neonate_72h) | open both ways, `r_for`/`r_back` 13 mmHg·s/L, `mix_flow` 0.01 L/s | One atrium in pressure (the halves within ≈ 0.01 mmHg) but only **partly mixed**, as IVC/SVC streaming is in a real atrium. `mix_flow` was chosen in the engine review to bring the RA SO2 gap between the halves from 6.1 to 1.5 %. |
 
 Constraints on the resistance and mixing:
@@ -5821,12 +5805,12 @@ Exactly [`Resistor`'s](./Resistor.md#calculation): forward flow `Δp / r_for_eff
 
 - **Reads / writes:** the pressures of the two chambers or vessels it joins; their volumes and composition (as any resistor).
 - **Read by:** `Heart` (`LA_LV` and the active LV outflow valve: their flow starting and stopping marks end-diastole and end-systole for the per-beat analysis), `Monitor` and `DataCollector` watchers.
-- **Written by:** the scenario generators for congenital lesions (`no_flow`, `is_enabled`, `no_back_flow`, `r_back`; e.g. `_make_dtga.mjs`, `_make_hlhs.mjs`, `_make_ta.mjs`, `_make_paivs.mjs`).
+- **Written by:** congenital-lesion scenarios (`no_flow`, `is_enabled`, `no_back_flow`, `r_back`).
 
 ## Assumptions and limitations
 
 - **Ideal valves.** Instant opening and closing, no leaflet dynamics, no closing backflow, no regurgitation unless configured.
-- **One resistance for every valve, and too high at term.** All valves have `r_for` 55 mmHg·s/L in all scenarios. At term that gives peak open-valve gradients of mitral 7.8, aortic 7.1, tricuspid 5.3 and pulmonary 4.7 mmHg. Normal neonatal velocities (about 0.5–0.7 m/s across the atrioventricular valves, 0.8–1.0 m/s across the outflow valves; ΔP ≈ 4v²) suggest roughly 1–2 and 3–4 mmHg. In the 1 kg preterm the gradients are 1.4–5.3 mmHg. A linear resistance also gives a gradient proportional to flow, where a real valve's grows with flow². The valve resistances are to be retuned per scenario in the scenario re-validation session.
+- **One resistance for every valve, and too high at term.** All valves have `r_for` 55 mmHg·s/L in all scenarios. At term that gives peak open-valve gradients of mitral 7.8, aortic 7.1, tricuspid 5.3 and pulmonary 4.7 mmHg. Normal neonatal velocities (about 0.5–0.7 m/s across the atrioventricular valves, 0.8–1.0 m/s across the outflow valves; ΔP ≈ 4v²) suggest roughly 1–2 and 3–4 mmHg. A linear resistance also gives a gradient proportional to flow, where a real valve's grows with flow². The valve resistances are to be retuned per scenario in the scenario re-validation session.
 - **The type is a label.** The UI shows the same fields for `HeartValve` and `Resistor`. Nothing in the engine branches on the type.
 
 ## Example definition (JSON)
@@ -5859,7 +5843,7 @@ Seven valves in term_neonate_72h, all owned by `Heart`:
 | Mitral | `LA_LV` | enabled |
 | Pulmonary | `RV_PA` | enabled |
 | Aortic | `LV_AA` | enabled, implicit |
-| Alternative outflows | `RV_AA`, `LV_PA` | disabled; switched on by the transposition generator (`_make_dtga.mjs`) |
+| Alternative outflows | `RV_AA`, `LV_PA` | disabled; switched on for a transposition (d-TGA) |
 
 ## References
 
@@ -5981,8 +5965,8 @@ Hormones writes **its own channels**, so it composes with the other writers inst
 
 ## Assumptions and limitations
 
-- **Set-points are the healthy reference of the patient's size and gestation.** A lesion keeps its size's reference, so a coarctation's low renal pressure activates RAAS (angiotensin ≈ 2.5), as it should. `scripts/_reference.mjs` (`scaleHormoneReferences`) derives them: volume scales with weight, perfusion with the gestation's defended MAP (`BR_MAP.set_value`). `_make_preterm.mjs`, `_make_bischoff.mjs`, `_make_fetus*.mjs` and `build_patient.mjs` apply it; below 34 weeks the [Kidneys](./Kidneys.md) renal reference replaces `perfusion_setpoint`.
-- **Near-neutral at rest** in term_neonate_72h (300 s from build): angiotensin, aldosterone and ADH 0.99–1.03. (The since-removed fetus_term was not: its fetal renal pressure, 39 mmHg, sat above its 35 mmHg reference, so angiotensin settled at 0.70.)
+- **Set-points are the healthy reference of the patient's size and gestation.** A lesion keeps its size's reference, so a coarctation's low renal pressure activates RAAS (angiotensin ≈ 2.5), as it should. `scripts/_reference.mjs` (`scaleHormoneReferences`) derives them: volume scales with weight, perfusion with the gestation's defended MAP (`BR_MAP.set_value`). `build_patient.mjs` applies it; below 34 weeks the [Kidneys](./Kidneys.md) renal reference replaces `perfusion_setpoint`.
+- **Near-neutral at rest** in term_neonate_72h (300 s from build): angiotensin, aldosterone and ADH 0.99–1.03.
 - **Aldosterone's volume effect is small:** water transport isn't osmotically coupled to Na, so aldosterone shows as lower urinary Na rather than volume. ADH and angiotensin carry the volume and pressure defence. With the physiologic `aldosterone_tc`, aldosterone barely moves in a short session.
 - **The owned channels are overwritten** while running: edit them through the hormones, or switch them off (`hormones_running`, `raas_enabled`, `adh_enabled`), which releases them to 1.
 - **Not modelled:** natriuretic peptides, thirst and intake, catecholamines (the ANS and Drugs cover those).
@@ -6059,7 +6043,7 @@ BaseModelClass
 |---|---|---|---|
 | `kidneys_running` | boolean | `true` | Switch for filtration. |
 | `kid_cap_name`, `urine_name` | – | `"KID_CAP"`, `"URINE"` | Glomerular capillary and the bladder compartment (a component, kept out of the blood pool). |
-| `kf` | L/(s·mmHg) | 6.6e-6 | Filtration coefficient. term 6.0e-6, preterm 2.1–3.4e-6 (scaled by body surface). |
+| `kf` | L/(s·mmHg) | 6.6e-6 | Filtration coefficient. term 6.0e-6; scaled by body surface below 34 weeks. |
 | `p_bowman` | mmHg | 8 | Bowman's capsule pressure (preterm lower, scaled by the gestation's MAP). |
 | `oncotic_base`, `albumin_ref` | mmHg, g/L | 18, 25 | Plasma oncotic pressure at the reference albumin (preterm 15). |
 | `reabsorption_fraction` | – | 0.985 | Water reabsorption fraction. term_neonate_72h 0.98. |
@@ -6148,7 +6132,7 @@ Each step (nothing while off; skipped if `KID_CAP` or `URINE` is missing):
 ### Calibration
 
 - **Term:** `kf` was back-solved for a GFR of ~4 mL/min at a net filtration pressure of ~11 mmHg (a thin margin, so `p_bowman + oncotic` must stay well below `KID_CAP.pres`).
-- **Preterm (below 34 weeks) — the kidney of its own gestation and size:** `scripts/_renal_reference.mjs` with `scripts/_renal_bed.mjs`, applied by `reseed_preterm.mjs`, `build_patient.mjs` and `_fix_renal_bed.mjs`. The rules were chosen with the model's author:
+- **Preterm (below 34 weeks) — the kidney of its own gestation and size:** applied by `build_patient.mjs` (the renal bed solve is `scripts/_renal_bed.mjs`). The rules were chosen with the model's author:
 
   | Quantity | Rule | Basis |
   |---|---|---|
@@ -6325,20 +6309,9 @@ A scenario file is a single JSON document that describes one complete patient/ex
 
 > **This repo is the source of truth for scenarios — edit `model_definitions/` here.**
 >
-> **Only the term neonate is shipped** (since 2026-10-25). The 72 h baby was `term_neonate` until 2026-10-26; `Model.load` and `build_patient.mjs` still accept that name (`helpers/ScenarioAliases.js`). `term_neonate_72h` is the literature-validated healthy term
+> **Only `term_neonate_72h` is shipped.** It was `term_neonate` until 2026-10-26; `Model.load` and `build_patient.mjs` still accept that name (`helpers/ScenarioAliases.js`). `term_neonate_72h` is the literature-validated healthy term
 > neonate at 72 h ([TermNeonateReference](./TermNeonateReference.md)) and the root every other patient is
-> built from. `term_neonate_1h` is the same baby 1 h after a vaginal birth with delayed cord clamping (open
-> bidirectional duct, near-systemic pulmonary pressure, high output), `term_neonate_12h` the same baby at
-> 12 h (closing left-to-right duct, PAP 41) and `term_neonate_24h` at 24 h (small restrictive duct, PAP 34),
-> all generated from it by `scripts/_make_term_transition.mjs --age 1|12|24` ([TermTransitionReference](./TermTransitionReference.md)). The preterm scenarios (`preterm_25wk`, `preterm_28wk`, `preterm_30wk`, 2026-10-18/19), the
-> fetal scenarios (`fetus_25wk`, `fetus_30wk`, `fetus_term`, 2026-10-19/20) and the three Bischoff 2021
-> scenarios (2026-10-22/23) were removed on 2026-10-25, during the re-validation, together with their
-> generators (`_make_preterm_validated.mjs`, `_make_fetus_validated.mjs`), lever profiles, reference pages and
-> probe targets: term is finished first, then they are rebuilt from scratch. Git history holds them.
-> The frozen set that the P1 companion and the ToF lesson used (`bischoff_cohort`, `p1_baseline`,
-> `p1_pda_none`, `tof_severe`) was built on the older engine and was archived on 2026-10-20. Everything else
-> is in [`model_definitions/archive/`](../model_definitions/archive/README.md) until it is rebuilt from
-> the fixed term baby.
+> built from.
 >
 > Consumers generate their own copy from it. In the [explain-ui](https://github.com/explain-labs/explain-ui)
 > web app, `scripts/sync-scenarios.mjs` copies this directory into its `public/model_definitions/`
@@ -6551,7 +6524,7 @@ Both are `{ settings, components }` objects. `settings` holds canvas-level optio
 A flat JSON array of scenario filename stems, e.g.:
 
 ```json
-["fetus_25wk", "preterm_25wk", "preterm_28wk", "term_neonate_72h", "..."]
+["term_neonate_72h"]
 ```
 
 Each entry `X` maps to `model_definitions/X.json` and is a valid argument to `Model.load("X")`. Add a scenario here to make it selectable in consuming apps. (In explain-ui, `sync-scenarios.mjs` rebuilds its served `index.json` as the union of the canonical set and any local snapshots.)
@@ -6563,7 +6536,7 @@ Each entry `X` maps to `model_definitions/X.json` and is a valid argument to `Mo
 ````markdown
 # MaternalPlacenta
 
-> **Experimental.** Used only by the archived `adult_female_uterus` scenario (the Pregnancy panel is hidden in the app as unfinished). It builds and runs on the current engine, but its physiology isn't calibrated; see [Assumptions and limitations](#assumptions-and-limitations).
+> **Experimental.** Not used by any shipped scenario (the Pregnancy panel is hidden in the app as unfinished). It builds and runs on the current engine, but its physiology isn't calibrated; see [Assumptions and limitations](#assumptions-and-limitations).
 
 `MaternalPlacenta` is the **mother's** side of the placenta in the adult pregnancy model: the intervillous space (`PL_IVS`), a low-resistance blood lake fed by the spiral arteries off the uterine artery and drained by the uterine veins. It owns no blood. It controls `PL_IVS` and its resistors:
 - the spiral arteries dilate with gestational age, so placental flow grows;
@@ -6604,9 +6577,9 @@ BaseModelClass
 | `mp_running` | boolean | `true` | Master switch (flow also needs a pregnancy). |
 | `preg_ga_threshold` | weeks | 4 | Below this gestational age the placenta is absent (no flow). |
 | `preg_ga_term` | weeks | 40 | Age at which the term dilation is reached. |
-| `spiral_res_term_factor` | – | 0.01 | `PL_IVS` resistance multiplier at term (archived scenario 0.0075). |
+| `spiral_res_term_factor` | – | 0.01 | `PL_IVS` resistance multiplier at term. |
 | `met_active` | boolean | `true` | Switches the placental O2 consumption. |
-| `mp_vo2` | mL O2/kg/min | 0.04 | Placental O2 consumption at full perfusion, per kg maternal weight (archived scenario 0.33, i.e. ~20 mL/min at 60 kg). |
+| `mp_vo2` | mL O2/kg/min | 0.04 | Placental O2 consumption at full perfusion, per kg maternal weight. |
 | `vo2_factor`, `vo2_factor_ps` | – | 1.0 | Non-persistent (reset each step) and persistent VO2 multipliers. |
 | `resp_q` | – | 0.8 | Respiratory quotient (CO2 added per O2 used). |
 | `contraction_pres_gain` | – | 0.6 | Fraction of the uterine pressure applied to `PL_IVS`. |
@@ -6637,7 +6610,7 @@ Each step (references resolved lazily, so build order doesn't matter):
 
 ## Factor system
 
-It writes the **scaling layer** `PL_IVS.r_factor_scaling_ps`, the layer that belongs to `ModelScaler`. That is safe only while `PL_IVS` isn't in a scaler group (it isn't in the archived scenario). Its own `vo2_factor`/`vo2_factor_ps` are a simple multiplier pair.
+It writes the **scaling layer** `PL_IVS.r_factor_scaling_ps`, the layer that belongs to `ModelScaler`. That is safe only while `PL_IVS` isn't in a scaler group (it isn't in the shipped scaler config). Its own `vo2_factor`/`vo2_factor_ps` are a simple multiplier pair.
 
 ## Inputs and outputs
 
@@ -6655,7 +6628,7 @@ It writes the **scaling layer** `PL_IVS.r_factor_scaling_ps`, the layer that bel
 
 ## Example definition (JSON)
 
-From `archive/adult_female_uterus.json`, `models.MaternalPlacenta` (trimmed to the physiology props; the wiring props are the defaults):
+No shipped scenario has a MaternalPlacenta model; a `models.MaternalPlacenta` entry (physiology props only; the wiring props are the defaults) looks like:
 
 ```json
 {
@@ -6675,7 +6648,7 @@ From `archive/adult_female_uterus.json`, `models.MaternalPlacenta` (trimmed to t
 
 ## Usage in the scenarios
 
-Only `archive/adult_female_uterus` (60 kg adult female), with `PL_IVS` between `UT_ART` and `UT_VEN` in parallel with the uterine tissue bed (`UT_CAP`). The shipped scenario (term_neonate_72h) doesn't include it.
+Not used by any shipped scenario: `term_neonate_72h` has no MaternalPlacenta model.
 
 ## References
 
@@ -6710,7 +6683,7 @@ BaseModelClass
 | Property | Unit | Default | Description |
 |---|---|---|---|
 | `met_active` | boolean | `true` | Switch. |
-| `vo2` | mL O2/kg/min | 8.1 | Whole-body O2 use excluding the myocardium (STPD). term_neonate_72h 7.73 (all four term babies; the 1–24 h babies add brown fat on top). |
+| `vo2` | mL O2/kg/min | 8.1 | Whole-body O2 use excluding the myocardium (STPD). term_neonate_72h 7.73. |
 | `vo2_factor` | – | 1.0 | Persistent user/scenario multiplier; no model writes it. |
 | `vo2_temp_factor` | – | 1.0 | Q10 temperature effect; written by [Thermoregulation](./Thermoregulation.md). |
 | `vo2_bat_factor` | – | 1.0 | O2 cost of brown-fat thermogenesis; written by Thermoregulation. |
@@ -6777,7 +6750,6 @@ Its own multipliers on `vo2`: `vo2_factor` (user), `vo2_temp_factor` and `vo2_ba
 
   See `scripts/_fix_term_vo2.mjs`.
 - **Brain share 0.313** (was 0.42–0.45, a Holliday-type estimate from adult CMRO2 per gram). Neonatal MRI finds a term CBF of 106 mL/min (Kooi 2019) and CMRO2 well below adult values (Liu 2014). Brain flow and O2 use were brought down together, keeping its extraction at ~35 %: CBF 144 → 106 mL/min, brain VO2 11.0 → 8.1 mL/min. The other beds took over the rest proportionally. See `scripts/_fix_term_brain_mri.mjs` and [TermNeonateReference](./TermNeonateReference.md).
-- **The since-removed fetal scenarios** gave the brain 0.65 (see [fetal_circulation](./fetal_circulation.md)).
 
 ## Example definition (JSON)
 
@@ -6808,7 +6780,6 @@ One instance in every scenario, with the same eight beds.
 | Scenario | `vo2` | `resp_q` | Brain share |
 |---|---|---|---|
 | term_neonate_72h | 7.73 | 0.80 | 0.255 |
-| term_neonate_1h / _12h / _24h | 7.73 (+ brown fat 0.45 / 0.3 / 0.3 W/kg at `RUB`) | 0.80 | 0.255 |
 
 ## References
 
@@ -6845,7 +6816,7 @@ BaseModelClass
 | Property | Unit | Default | Description |
 |---|---|---|---|
 | `mob_active` | boolean | `true` | Switch. |
-| `bm_vo2_per_g` | mmol O2/g/s | 3.7e-5 | Basal O2 use per gram of heart. |
+| `bm_vo2_per_g` | mmol O2/g/s | 3.7e-5 | Basal O2 use per gram of heart. term_neonate_72h 6.1716e-5 (2026-10-27): with the stroke-work part, a myocardial VO2 of 14 mL/100 g/min, between adult rest (~8–10) and newborn lambs (18.9; Smolich 1996). |
 | `hw_intercept`, `hw_slope` | g, g/g | 7.799, 0.004296 | Heart weight = intercept + slope · body weight (g): 23 g at 3.5 kg, 10.8 g at 0.7 kg. |
 | `mech_efficiency` | – | 0.35 | Incremental (contractile) efficiency: stroke work / O2 energy. With the basal part included, whole-heart efficiency is the textbook ~15–20 %. |
 | `caloric_equiv_o2` | J/mL O2 | 20.1 | Energy per mL O2 (STPD). |
@@ -6898,13 +6869,13 @@ None of its own; it writes the hypoxia channels above. `el_max_mob_factor` is on
 
 ## Assumptions and limitations
 
-- **Coronary flow is set by a resting O2 extraction** (re-validation, `scripts/_fix_coronary_extraction.mjs`): `AA_COR`'s resistance gives 55 % extraction in the postnatal scenarios (between newborn lambs, ~50 %, and adults, ~70 %) and 50 % in the fetal ones. Before, every scenario had about the same flow per kg body weight (10.5–11.4 mL/kg/min), so extraction ranged from 30 % (term, ~2× Aburawi's estimate) to 70 % (fetus_term). Values at rest (10 s averages after 2 min; MVO2 in mL O2/min/100 g, flow in mL/min):
+- **Coronary flow is set by a resting O2 extraction** (re-validation, `scripts/_fix_coronary_extraction.mjs`): `AA_COR`'s resistance gives 55 % extraction in term_neonate_72h (between newborn lambs, ~50 %, and adults, ~70 %). Before, the flow was set per kg body weight, so the term extraction was 30 % (~2× Aburawi's estimate). Values at rest (10 s averages after 2 min; MVO2 in mL O2/min/100 g, flow in mL/min):
 
   | Scenario | Heart weight | MVO2 | Coronary flow (per 100 g), before → after | Extraction |
   |---|---|---|---|---|
   | term_neonate_72h | 23.0 g | 10.6 | 37.4 (163) → 18.1 (79 per 100 g) | 30 → 55 % |
 
-  The term flow (18 mL/min) is close to the ~20–25 mL/min whole-heart flow that Aburawi's healthy-neonate LAD flow of 8.2 mL/min suggests; the since-removed fetal scenarios got 105–195 per 100 g at 50 %, in the range of fetal-lamb microsphere data (Smolich 1996, Dalshaug 2002), and the preterm ones 59–64 at 55 %. The flow is a fixed resistance (plus the systolic compression): it does not follow MVO2 when demand rises (no metabolic coronary regulation).
+  The term flow (25.9 mL/min since the MVO2 raise of 2026-10-27, `scripts/_fix_term_mvo2.mjs`) sits at the upper end of the ~18–26 mL/min whole-heart flow that Aburawi's healthy-neonate LAD flow of 8.2 mL/min suggests. The flow is a fixed resistance (plus the systolic compression): it does not follow MVO2 when demand rises (no metabolic coronary regulation).
 - **The hypoxia effects start only at a very low `COR.to2`** (0.2 mmol/L, ~2 % saturation). At rest they are inactive, and they engage only in profound coronary hypoxia.
 - **Contractility is depressed twice** under hypoxia: `cont_factor` lowers `el_max`, and `ans_activity_factor` lowers the sympathetic inotropy. Their combined strength is set by `cont_factor_min` and `ans_factor_min`.
 - **Heart weight follows body weight only** (no hypertrophy).
@@ -6940,13 +6911,19 @@ From `term_neonate_72h.json`, `models.Mob` (trimmed to the config props; `compon
 
 ## Usage in the scenarios
 
-One instance in every scenario, with the defaults above, owning the coronary bed (`AA` → `AA_COR` → `COR` → right atrium).
+One instance in every scenario, owning the coronary bed (`AA` → `AA_COR` → `COR` → right atrium).
+
+| Scenario | `bm_vo2_per_g` | Myocardial VO2 (mL/100 g/min) | Coronary flow | Extraction |
+|---|---|---|---|---|
+| term_neonate_72h | 6.1716e-5 | 14.0 (basal 8.3 + stroke work 5.7) | 25.9 mL/min (113 mL/100 g/min, 3.6 % of LVO) | 0.55 |
+
+Until 2026-10-27 the term baby had the default (3.7e-5): 10.7 mL/100 g/min, an adult-like 80 mL/100 g/min and 2.6 % of LVO. The basal part was raised and the inflow resistance `AA_COR` re-fitted to the same 55 % extraction (`scripts/_fix_term_mvo2.mjs`; the extraction target is re-validation item (h), `scripts/_fix_coronary_extraction.mjs`). Healthy 1-week-old controls have an LAD flow of 8.2 ± 3.0 mL/min, ~18–23 mL/min for the whole heart (Aburawi 2012), and LAD flow per gram of LV is highest in young infants (Yasuoka 2002).
 
 ## References
 
 - Aburawi EH, Malcus P, Thuring A, Fellman V, Pesonen E. Coronary flow in neonates with impaired intrauterine growth. *J Am Soc Echocardiogr* 2012;25(3):313–8. doi:10.1016/j.echo.2011.11.019 (healthy controls: LAD flow 8.2 ± 3.0 mL/min at 1 week).
+- Yasuoka K, Harada K, Tamura M, Takada G. Left anterior descending coronary artery flow and its relation to age in children. *J Am Soc Echocardiogr* 2002;15:69–75. doi:10.1067/mje.2002.115537 (LAD flow per gram of LV highest in young infants).
 - Smolich JJ, Berger PJ, Walker AM. Interrelation between ventricular function, myocardial blood flow, and O2 consumption changes at birth in lambs. *Am J Physiol* 1996;270:H741–9. doi:10.1152/ajpheart.1996.270.2.H741 (LV myocardial flow 234 → 199 mL/min/100 g fetus → 4 h; LV AV O2 difference 3.6 → 7.5 mL/dL).
-- Dalshaug GB, Scholz TD, Smith OM, et al. Effects of gestational age on myocardial blood flow and coronary flow reserve in pressure-loaded ovine fetal hearts. *Am J Physiol Heart Circ Physiol* 2002;282:H1359–69. doi:10.1152/ajpheart.00686.2001 (LV 258 vs 172, RV 341 vs 230 mL/min/100 g at 100 vs 128 days).
 
 ````
 
@@ -7031,7 +7008,7 @@ Each method skips a name the scenario lacks or a component without that property
 
 | Group | Effect |
 |---|---|
-| `weight_scale` | `scale_to_weight(kg)`: the five volume groups by `kg / _baseline_weight`, then `model.weight = kg`. Volumes only: elastances, resistances, heart rate and VO2 are not scaled (the inverse-scaling lines are deliberately commented out); the generators calibrate those separately. The placenta is not in any group. |
+| `weight_scale` | `scale_to_weight(kg)`: the five volume groups by `kg / _baseline_weight`, then `model.weight = kg`. Volumes only: elastances, resistances, heart rate and VO2 are not scaled (the inverse-scaling lines are deliberately commented out); the builder (`build_patient.mjs`) calibrates those separately. The placenta is not in any group. |
 | `weight` | Sets `model.weight` only. |
 | `add_volume` | Adds litres to `IVCI.vol`. |
 | `incorporate` | Bakes every scaling layer into the base values (below). |
@@ -7051,11 +7028,7 @@ Three rules keep the baked model exactly as it was:
 
 What the bake cannot preserve exactly is the heart chambers' ANS term, which is additive as a fraction of the base. Once baked it acts on the actual contractility rather than the unscaled base, so after a bake the sympathetic inotropy and lusitropy are proportional.
 
-**Why the shipped scenarios are baked.** The factor groups write the layer absolutely, so a calibration left in it is overwritten by the first `scale` command. Before v1.0 the non-term scenarios carried their size calibration there (preterm_25wk: systemic resistances ×2–3.96, `el_max` ×4.86, lung elastance ×7.1). As a result:
-- "scale systemic_resistances 1.2" *lowered* its MAP (36.7 → 31.5 mmHg);
-- `reset` dropped it to 30 mmHg.
-
-`scripts/_bake_scaling.py` baked the nine non-term scenarios; the same command now raises MAP (35.6 → 37.5) and `reset` is a no-op. The generators and `build_patient.mjs` end with `incorporate`.
+**Why the shipped scenarios are baked.** The factor groups write the layer absolutely, so a calibration left in it is overwritten by the first `scale` command. A scenario that carried its size calibration there would see "scale systemic_resistances 1.2" *lower* its MAP, and `reset` would undo the calibration. `scripts/_bake_scaling.py` bakes such a scenario, and `build_patient.mjs` ends with `incorporate`.
 
 ## Methods
 
@@ -7070,7 +7043,7 @@ Private helpers:
 
 ModelScaler owns the `*_factor_scaling_ps` layer of the components in `scaler_config`. Other writers of that layer:
 - **the Calibrator:** `IPSL`/`IPSR` `r_factor_scaling_ps`;
-- **the archived Uterus and MaternalPlacenta:** pregnancy.
+- **Uterus and MaternalPlacenta:** pregnancy.
 
 Volume scaling and `add_volume` change the base volumes instead.
 
@@ -7143,7 +7116,7 @@ A bedside monitor shows the vital signs a neonatal team watches: heart rate (fro
 | `etco2` | end-tidal CO₂; mirrored from `Ventilator.etco2` while the ventilator is enabled, otherwise derived from the spontaneous breath (see below) |
 | `temp` | blood temperature (°C), mirrored each step from `AA.temp` (last value kept if AA is absent) |
 | `sao2_pre`, `sao2_post` | pre-/post-ductal arterial O₂ saturation, from `AA.so2` / `AD.so2` |
-| `svo2` | mixed-venous O₂ saturation, from the pulmonary artery (`PA.so2`). Falls back to `RAIVCI.so2` when there is no PA; `RAIVCI` holds IVC-side blood, which misses the brain's extraction where the right-atrial halves don't mix (the fetal scenarios). In `term_neonate_72h` the two agree (81.9 %). |
+| `svo2` | mixed-venous O₂ saturation, from the pulmonary artery (`PA.so2`). Falls back to `RAIVCI.so2` when there is no PA; `RAIVCI` holds IVC-side blood, which misses the brain's extraction where the right-atrial halves don't mix (a fetal circulation). In `term_neonate_72h` the two agree (81.9 %). |
 
 **Heart rate** — on each ventricular beat (`Heart.ncc_ventricular === 1`), the beat-to-beat rate is
 `60 / interval` (interval = time since the previous beat). A running window of the last `hr_avg_beats`
@@ -7350,7 +7323,7 @@ Shipped settings, for example:
 
 - **Only the kinetic term.** `jet_velocity` uses the Bernoulli coefficient and the flow, not the total pressure drop, so the viscous loss along a long duct isn't attributed to the jet. Through an open, non-restrictive duct the jet velocity is low even when the total gradient isn't zero.
 - **Semi-implicit use.** Both callers fold B into the linear resistance using last step's flow (`B·|Q_prev|`), because the old turbulent `r_k` term of `Resistor` was unstable. `Resistor` now solves `r_k` exactly each step, so passing B as `r_k` is an option, to be reviewed with Pda and Shunts.
-- **Cd is a model constant**, not computed from the orifice geometry. The removed Bischoff scenarios used a low Cd (0.25) as a calibration lever for the ductal flow pattern; every shipped scenario now uses 0.9.
+- **Cd is a model constant**, not computed from the orifice geometry. term_neonate_72h uses 0.9.
 
 ````
 
@@ -7386,7 +7359,7 @@ BaseModelClass
 |---|---|---|---|
 | `diameter_ao_max` | mm | 3.0 | Fully open diameter at the aortic end. |
 | `diameter_pa_max` | mm | 2.0 | Fully open diameter at the pulmonary (narrowest) end. **Equal to `diameter_ao_max` in every shipped scenario**, so the duct is a cylinder there. |
-| `diameter_relative` | – | 0.0 | Patency fraction 0–1, scaling both ends together; 0 = closed. term 0, preterm 0.27–0.33, fetal 1. |
+| `diameter_relative` | – | 0.0 | Patency fraction 0–1, scaling both ends together; 0 = closed. term_neonate_72h 0. |
 | `length` | mm | 20 | Length of the duct (the Poiseuille term). A restrictive jet needs a short throat (~1–2 mm). term_neonate_72h 14. |
 | `discharge_coeff` | – | 0.9 | Vena-contracta coefficient of the pulmonary-end orifice; lower = tighter jet. 0.9 in every shipped scenario. |
 
@@ -7451,14 +7424,14 @@ None of its own. It writes the **base** `r_for`/`r_back`/`r_k`/`no_flow` of `AAR
 - **Written by:** `Drugs` (`diameter_drug_factor`); the user and the scenario generators (diameters, length, `discharge_coeff`).
 - **Read by:**
   - `probe_vitals` (duct shunt), and `Monitor` through its configurable `flow_targets`;
-  - `scripts/probe_pda.mjs`, `probe_term_reference.mjs` and the P1 paper scripts (Doppler envelope);
+  - `scripts/probe_pda.mjs`, `probe_term_reference.mjs` (Doppler envelope);
   - `DataCollector` watchers.
 
 ## Assumptions and limitations
 
 - **No closure physiology.** Constriction by oxygen and falling PGE2, closure from the pulmonary end first, and the wall's passive and active elastance aren't computed. The duct's size is a scenario or user setting.
 - **Symmetric patency.** `diameter_relative` scales both ends together. The shipped scenarios also set both ends equal, so the duct is a cylinder.
-- **Absolute millimetres.** The diameters and `length` aren't scaled with body size; each scenario sets them (the since-removed fetal scenarios used Szpinda's gestational regressions, see [fetal_circulation](./fetal_circulation.md)).
+- **Absolute millimetres.** The diameters and `length` aren't scaled with body size; each scenario sets them.
 - **PGE1 cannot reopen a closed duct** (`diameter_relative` 0 is a hard stop).
 - **Reopening transient.** On the first step after reopening, the Bernoulli term is 0 (no previous flow), so flow briefly overshoots for one step.
 
@@ -7488,11 +7461,8 @@ One instance in every scenario, owning `AAR_DA` (`AAR` → `PA`, implicit):
 |---|---|---|---|---|
 | term_neonate_72h | 0 | 14 | 0.9 | closed |
 
-The archived `pda_restrictive_ltr` uses a short throat (`length` 1.5 mm, `discharge_coeff` 0.35, `diameter_relative` 0.13) for a restrictive jet.
-
 ## References
 
-- Szpinda M. Morphometric study of the ductus arteriosus during human development. 2007 (fetal diameter and length regressions).
 
 The orifice constant is derived in [Orifice](./Orifice.md).
 
@@ -7560,18 +7530,18 @@ None of its own. It writes the base `r_for`/`r_back` of its vessels; their own f
 ## Inputs and outputs
 
 - **Writes:** its sub-models (above).
-- **Written by:** the user and the fetal scenario generators (`scripts/_make_fetus*.mjs`, from the per-gestation table in `scripts/_ga_tables.mjs`); `Uterus` sets `skip_mat_gas_write` when coupled.
+- **Written by:** the user and `build_patient.mjs` in fetal mode (from the per-gestation table in `scripts/_ga_tables.mjs`); `Uterus` sets `skip_mat_gas_write` when coupled.
 - **Read by:** nothing reads Placenta directly. The fetal oxygenation follows from its sub-models.
 
 ## Assumptions and limitations
 
-- **No gestational age inside.** The constants in the code are term values (cord 55 cm, umbilical-artery cross-section 0.147 cm²). Fetal scenarios set the props per gestation (`_ga_tables.mjs`, see [fetal_circulation](./fetal_circulation.md)).
+- **No gestational age inside.** The constants in the code are term values (cord 55 cm, umbilical-artery cross-section 0.147 cm²). A fetal build sets the props per gestation (`_ga_tables.mjs`).
 - **Gas exchange runs at full equilibration.** At the shipped settings fetal capillary blood equilibrates completely with the maternal pool: umbilical-vein pCO2 equals `PL_MAT` pCO2. So `mat_to2`/`mat_tco2` are the effective gas setpoints, and `dif_o2`/`dif_co2` have little authority. Calibrate fetal gases through the maternal contents.
 - **The maternal pool is an infinite reservoir.** `PL_MAT` is `fixed_composition` with adult blood (`P50_0` 26.7). `mat_to2`/`mat_tco2` are contents (mmol/L), not partial pressures; they must be consistent with the pool's haemoglobin and P50.
   - **term_neonate_72h** ships haemoglobin 7.5 mmol/L with 3.825 / 24.29 mmol/L. The code defaults (6.85 / 23) date from a pool with neonatal blood.
-  - **`Blood` writes to `PL_MAT` too** (`set_solute`, `set_P50`). Changing a fetal haemoglobin changes the maternal pool as well; the generators snapshot and restore it.
-- **Not in any scaler group.** `ModelScaler.scale_to_weight` doesn't shrink the placenta; each fetal scenario sets its placental volumes explicitly.
-- **The return resistor stays a standalone `Resistor`.** `PL_UMB_VEN_IVCI` must **not** be an entry in `IVCI.inputs`. As a vessel-owned connector, `IVCI` would rewrite its `is_enabled`/`no_flow` every step, and stopping or clamping the placenta would leak placental blood into the fetal IVC. Its resistance (49 mmHg·s/L) is a scenario value that Placenta doesn't set, and it is the same in every fetal scenario. The ductus venosus isn't modelled separately.
+  - **`Blood` writes to `PL_MAT` too** (`set_solute`, `set_P50`). Changing a fetal haemoglobin changes the maternal pool as well; `build_patient.mjs` snapshots and restores it.
+- **Not in any scaler group.** `ModelScaler.scale_to_weight` doesn't shrink the placenta; a fetal scenario sets its placental volumes explicitly.
+- **The return resistor stays a standalone `Resistor`.** `PL_UMB_VEN_IVCI` must **not** be an entry in `IVCI.inputs`. As a vessel-owned connector, `IVCI` would rewrite its `is_enabled`/`no_flow` every step, and stopping or clamping the placenta would leak placental blood into the fetal IVC. Its resistance (49 mmHg·s/L) is a scenario value that Placenta doesn't set. The ductus venosus isn't modelled separately.
 - **No placental transfusion.** At clamping, the blood in the cord and placenta (~83 mL at term) stays there; delayed cord clamping and cord milking can't be represented.
 
 ## Example definition (JSON)
@@ -7780,9 +7750,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 
 | Doc | What it covers |
 |---|---|
-| [fetal_circulation](./fetal_circulation.md) | (The fetal scenarios were removed on 2026-10-25 to be rebuilt; kept as the design record.) Fetal scenarios (`fetus_term`, `fetus_30wk`): the fetal invariants, why a gestational age costs a calibration pass, measured operating points, known limitations. |
 | [TermNeonateReference](./TermNeonateReference.md) | Literature reference values for a healthy term neonate at ~72 h (hemodynamics, heart, flows, breathing, gases, metabolism, shunts), graded by evidence, with the matching JSON for validating `term_neonate_72h`. |
-| [TermTransitionReference](./TermTransitionReference.md) | Reference values for the healthy term neonate in transition at 1, 12, 24 and 72 h (vaginal birth, delayed cord clamping, skin-to-skin): duct, PAP, LV output, lungs, gases, glucose, haematocrit, graded, with a JSON set per age. |
 | [chd_duct_fo_dependent](./chd_duct_fo_dependent.md) | Duct- & foramen-ovale-dependent CHD taxonomy, lesion catalog, engine-lever mapping, build roadmap, bibliography. |
 
 ```
@@ -8215,15 +8183,9 @@ Inertance is used on the atrioventricular valves (`LA_LV`, `RAIVCI_RV`, `RASVC_R
 
 `implicit` switches one resistor from the explicit `Δp / R` to the backward-Euler solution for the two compartments it joins, `Δp / (R + dt·(E_from + E_to))`. It does this by adding `dt·(E_from + E_to)` to `r_for_eff`/`r_back_eff` each step. `E` is the compartment's current **local** elastance: `el_eff`, or a time-varying elastance's instantaneous value, plus the slope `2·el_k_eff·S` of the non-linear term above the unstressed volume (for a time-varying elastance on its diastolic curve). It is a numerical scheme, not a change of the resistor law. Both forms are first-order accurate and agree when `R >> dt·ΣE`.
 
-Explicit integration of two capacitances joined by a small resistance is stable only while `dt·(E_from + E_to)/R < 2`. For three equal capacitances in a row, as in the aorta (AA → AAR → AD, joined by `AA_AAR` and `AAR_AD`, R ≈ 70 mmHg·s/L), the limit is 4/3. Stiffening the large arteries, which a small infant's pulse pressure needs, crosses that limit at about ×2–3. Measured on the 0.72 kg Bischoff infant (AA pressure range, mmHg):
+Explicit integration of two capacitances joined by a small resistance is stable only while `dt·(E_from + E_to)/R < 2`. For three equal capacitances in a row, as in the aorta (AA → AAR → AD, joined by `AA_AAR` and `AAR_AD`, R ≈ 70 mmHg·s/L), the limit is 4/3. Stiffening the large arteries, which a small infant's pulse pressure needs, crosses that limit at about ×2–3.
 
-| Arterial stiffness | Explicit | Implicit `AA_AAR`, `AAR_AD` | Explicit, half time step |
-|---|---|---|---|
-| ×1.8 | 23.6–35.7 | 23.6–35.8 | 23.7–35.7 |
-| ×3 | unstable | 21.4–39.8 | 21.5–39.6 |
-| ×5 | unstable | 18.4–44.7 | 18.2–44.4 |
-
-term_neonate_72h sets it on 13 resistors: the outflow valves (`LV_AA`, `RV_AA`), the aortic chain (`AA_AAR`, `AAR_AD`) and the aortic branches (`AA_COR`, `AA_BR_ART`, `AA_RUB`, `AAR_DA`, `AD_LS_ART`, `AD_KID_ART`, `AD_INT_ART`, `AD_RLB`, `AD_PL_UMB_ART`). The 8 scenarios with quadratic heart chambers also set it on `RAIVCI_RASVC`, the low-resistance (13 mmHg·s/L) link between the two right-atrial halves: their stiffness grows with filling, and the explicit scheme then flipped the flow's sign every step. The patient builder and the live tuner set it the same way on the aorta.
+term_neonate_72h sets it on 14 resistors: the outflow valves (`LV_AA`, `RV_AA`), the aortic chain (`AA_AAR`, `AAR_AD`) and the aortic branches (`AA_COR`, `AA_BR_ART`, `AA_RUB`, `AAR_DA`, `AD_LS_ART`, `AD_KID_ART`, `AD_INT_ART`, `AD_RLB`, `AD_PL_UMB_ART`) and `RAIVCI_RASVC`, the low-resistance (13 mmHg·s/L) link between the two right-atrial halves: the quadratic chambers' stiffness grows with filling, and the explicit scheme then flipped the flow's sign every step. The patient builder and the live tuner set it the same way on the aorta.
 
 ## Mixing without net flow (`mix_flow`)
 
@@ -8326,7 +8288,7 @@ BaseModelClass
 | `intrapulmonary_shunt_left`, `intrapulmonary_shunt_right` | `["IPSL"]`, `["IPSR"]` | atelectasis perfusion |
 | `pulmonary_capillaries_left`, `pulmonary_capillaries_right` | `xL_ART_xL_CAP`, `xL_CAP_xL_VEN` | atelectasis perfusion |
 
-Older (archived) scenarios spell `gas_exchangers` as `gas_echangers`; `init_model` accepts it.
+Older scenario files spell `gas_exchangers` as `gas_echangers`; `init_model` accepts it.
 
 ### Config: system levers
 
@@ -8409,7 +8371,7 @@ Each shunt resistor is scaled by `G_ips / (s'·G_tot')` and each capillary resis
 `IPSL`/`IPSR` belongs to [Surfactant](./Surfactant.md) and the scaling layer to the Calibrator and
 `ModelScaler`, and the factors are computed against those layers so they compose. Because the split is
 set from conductance ratios, the shunt share does not depend on the scenario's `Shunts.ips_res`
-(preterm 1600–4200, term 5000). With `c = 0` nothing is written.
+(term_neonate_72h 20 400). With `c = 0` nothing is written.
 
 On `term_neonate_72h`, right lung, room air (`scripts/probe_atelectasis.mjs`, measured when atelectasis was introduced, 2026-10):
 
@@ -8481,9 +8443,7 @@ With `atelectasis_recruitable = false` (a mucus plug, resorption atelectasis) th
 pressure. Where a scenario has [Surfactant](./Surfactant.md), it keeps its own whole-lung
 recruitment on the non-persistent layer. The two run independently and their effects add.
 
-The thresholds are calibrated on the term lung. In the since-removed `preterm_28wk`, recruitment with PIP 28 or sighs
-works the same way, but PEEP 8 already lets some re-collapse. At PEEP ≤ 5, Surfactant derecruits the
-whole lung as well, so a surfactant-deficient lung needs more PEEP, as at the bedside.
+The thresholds are calibrated on the term lung.
 
 Because the factor layers add up, Surfactant's derecruitment and atelectasis together can take a
 lung's effective unstressed volume or diffusion constant below zero. [Capacitance](./Capacitance.md)
@@ -8535,7 +8495,7 @@ None of its own. It writes:
 
 - **Levers add.** The persistent layers are shared, so simultaneous writers add their changes. A layer driven to the 0 clamp loses the part of the change below 0.
 - **Membership is by name.** Only models named in the lists are affected.
-- **Atelectasis is per lung, not regional,** and calibrated on the term lung. In preterm lungs, [Surfactant](./Surfactant.md)'s own whole-lung recruitment runs in parallel; their effects add.
+- **Atelectasis is per lung, not regional,** and calibrated on the term lung. Where a scenario has [Surfactant](./Surfactant.md), its own whole-lung recruitment runs in parallel; their effects add.
 - **The perfusion split assumes the shunt and capillary paths share one pressure drop** (`xL_ART` → `xL_VEN`).
 
 ## Example definition (JSON)
@@ -8564,7 +8524,7 @@ From `term_neonate_72h.json`, `models.Respiration` (trimmed: groups and atelecta
 
 ## Usage in the scenarios
 
-One instance in every scenario, owning `MOUTH`, `DS`, `ALL`, `ALR`, `THORAX`, `GASEX_LL` and `GASEX_RL`. term_neonate_72h uses the defaults above for every lever (1) and for atelectasis (0); disease (in the since-removed preterm scenarios) is carried by the compartments' own values and by Surfactant (enabled there).
+One instance in every scenario, owning `MOUTH`, `DS`, `ALL`, `ALR`, `THORAX`, `GASEX_LL` and `GASEX_RL`. term_neonate_72h uses the defaults above for every lever (1) and for atelectasis (0); disease is carried by the compartments' own values and, where a scenario has one, by Surfactant.
 
 ## References
 
@@ -8833,7 +8793,7 @@ scenario instead of failing.
 
 | Export | Description |
 |---|---|
-| `SCENARIO_ALIASES` | `{ oldName: currentName }`. Currently `term_neonate` → `term_neonate_72h` (2026-10-26, when the transitional babies `term_neonate_1h` / `_12h` / `_24h` were added). |
+| `SCENARIO_ALIASES` | `{ oldName: currentName }`. Currently `term_neonate` → `term_neonate_72h` (2026-10-26). |
 | `resolveScenarioName(name)` | The current name for `name`, or `name` itself when it was never renamed. |
 
 ## Used by
@@ -8943,13 +8903,12 @@ None of its own. It writes the **base** `r_for`/`r_back` of its resistors every 
 
 - **Reads:** `LA.viscosity`; the flows of its five resistors.
 - **Writes:** `r_for`, `r_back`, `no_flow` of `LA_RAIVCI`, `LA_RASVC`, `VSD`; `r_for`, `r_back` of `IPSL`, `IPSR`.
-- **Written by:** the user and scenario generators (diameters, `ips_res`); the `Calibrator` (`ips_res`).
+- **Written by:** the user and `build_patient.mjs` (diameters, `ips_res`); the `Calibrator` (`ips_res`).
 - **Read by:** `Monitor` (`fo_flow`), `DataCollector` watchers, `scripts/probe_*` (Qp:Qs, Doppler).
 
 ## Assumptions and limitations
 
 - **Echo-measured diameter, no flap.** All scenarios use `fo_lr_factor` 1: a diameter from an echo colour jet already reflects the flap's restriction. With 25, an FO was almost one-way (5 mm: Qp:Qs 0.99, Doppler 0.2 m/s). With 1, a 3 mm FO carries ~18 mL/kg/min (Qp:Qs 1.04, Doppler 0.66 m/s) and 5 mm ~32 mL/kg/min (Qp:Qs 1.14). Hiraishi 1991 finds a predominantly left-to-right PFO in most term newborns; Evans & Iyer 1994 a measurable Qp:Qs above ~3 mm.
-- **The foramen is not the lever for the fetal ventricular split.** At fetal sizes `res_fo` is ~13× below the tricuspid valve's resistance, so the two ventricles draw on a common atrial pressure. 6 → 3 mm moves RV:LV by 0 points; only below 2 mm does it bite, and then violently (1 mm: 73:27). See [fetal_circulation](./fetal_circulation.md).
 - **Absolute millimetres, not scaled.** `diameter_*` and the septal widths are set per scenario; no scaler touches them. Leaving `atrial_septal_width` at term thickness in a small body makes the foramen restrictive.
 - **Intrapulmonary shunt behaviour.**
   - Pulmonary hypertension on its own shouldn't raise it: the hypoxaemia of PPHN comes from right-to-left flow across the duct and foramen, and in pulmonary vascular disease inert-gas studies find little shunt (Dantzker & Bower 1979).
@@ -8984,7 +8943,6 @@ One instance in every scenario. It owns `LA_RAIVCI`, `LA_RASVC` (LA → right-at
 
 **term_neonate_72h calibration (2026-10):**
 - **Foramen:** `diameter_fo` 1.5 mm, a small left-to-right PFO of ~6 mL/kg/min (Qp:Qs ~1.03). Basis: no PFO has closed by day 3 (He 2011), and neonatal CMR finds RV output a few mL/kg/min above LV output with the duct closed (Jhaveri 2023, Groves 2011). It also lets the scenario shunt right-to-left at atrial level when right-sided pressures rise. See `scripts/_fix_term_fo.mjs` and [TermNeonateReference](./TermNeonateReference.md).
-- **Fetal scenarios:** `fo_svc_fraction` 0, the crista dividens. Before that, a third of the foramen flow came from the SVC half, and the aorta was only 0.9 saturation points above the pulmonary artery; with it the gap is 6.0 points (reference ~8). They also close the intrapulmonary shunts (`ips_res` 10⁸).
 
 ## References
 
@@ -9021,7 +8979,7 @@ oscillation pause, and HFOV+CMV (see [HFO](#hfo-phase-2)). The closed-loop O2 co
 ## Using it in a scenario
 
 The SLE6000 is the ventilator of every scenario up to 30 kg, the device's patient range of 0.3–30 kg
-(manual). The adult scenarios (`adult_female`, `adult_female_uterus`) keep the generic `Ventilator`,
+(manual). Adult patients keep the generic `Ventilator`,
 and the app shows no ventilator screen for them.
 
 The scenario's ventilator block has `"model_type": "Sle6000"` and keeps the instance name
@@ -9033,10 +8991,8 @@ working.
   `sle_start`) starts it.
 - **Ventilating.** A scenario that starts ventilated has `is_enabled` true, `sle_mode` and the
   `sle_*` settings. `init_model` then applies the mode.
-  - Example: the CDH phenotypes and `pphn` start in CMV with `sle_rr`, `sle_ti`, `sle_peep`,
-    `sle_pip` and `sle_o2`.
   - The switched-on circuit (`VENT_*` parts enabled, `MOUTH_DS` closed) is still written into the
-    JSON, by the generators' `applyVentilator`.
+    JSON.
   - Without `sle_mode`, the device shows whatever the generic settings are doing.
 
 ## Settings (device units)
@@ -9389,7 +9345,6 @@ The gains are plain properties (`oxy_kp`, `oxy_ki`, `oxy_kd`), not device settin
 
 | Case | Result |
 |---|---|
-| preterm_26wk on air, SpO2 ≈ 70 % | O2 41 % after 60 s; SpO2 91.8 % after 10 min (O2 ≈ 53 %), never above 92 % |
 | term_neonate_72h on 60 %, SpO2 ≈ 100 % | weaned to 21 % in about 8 min, SpO2 never below 97.9 % |
 
 The O2 → SpO2 response of the model is slow and flat in shunt-dominated disease: right-lung
@@ -9430,8 +9385,6 @@ isn't either.
 - **Rise time.**
   - The scenarios start with Rise **0.1 s** (`"sle_rise": 0.1`, a usual clinical starting value
     for a term neonate). The device's factory default of 0.04 s (p165) stays in `SLE_PARAMS`.
-  - Together with the pressure response it brings the ventilated scenarios' PaCO2 up about
-    1 mmHg: cdh_severe 63.8, cdh_moderate 51.7, cdh_lv_dysfunction 52.9, pphn 46.2.
 
 - **Pneumatics.** The device's valveless jet principle (forward and reverse jets, p158) is
   approximated by the generic demand servo with an open expiratory limb. That reproduces the
@@ -9451,8 +9404,7 @@ isn't either.
 
 ## Verification
 
-`node scripts/probe_oxygenie.mjs` runs pass/fail checks of OxyGenie: titration of a hypoxaemic
-preterm into the range, weaning a hyperoxic term neonate to air, the manual override and its bumpless
+`node scripts/probe_oxygenie.mjs` runs pass/fail checks of OxyGenie: weaning a hyperoxic term neonate to air, the manual override and its bumpless
 restart, the fallback hold and drift, the "O2 > N %" flag and the interlocks.
 
 `node scripts/probe_sle6000.mjs` runs pass/fail checks on `term_neonate_72h`: 90 pass, 0 fail (2026-10-24, re-validation). Two earlier failures were resolved then:
@@ -9573,8 +9525,6 @@ Each step:
 
 `administer_surfactant(target = 1.0)` sets `surfactant_target` (clamped 0–1); it is callable through `callModelFunction` or the TaskScheduler.
 
-**Example** (the since-removed preterm_25wk, surfactant given): after 15 min the open fraction is 1.0, `el_lung_factor` 0.65, `ips_factor` 4. SaO2 rises 90.9 → 97.8 %, PaO2 55 → 89 and PaCO2 falls 48 → 43 mmHg; left alveolar volume 7.1 → 11.4 mL.
-
 ## Factor system
 
 | Target | Layer | Note |
@@ -9593,14 +9543,14 @@ Each step:
 ## Assumptions and limitations
 
 - **Whole-lung, one open fraction.** No regional or gravity-dependent collapse; both lungs share one state. [Respiration](./Respiration.md#atelectasis)'s per-lung atelectasis runs independently, and their effects add.
-- **Relative to the baseline.** Effects are deviations from the open fraction at capture (0.5 in every scenario), so the scenario's static RDS phenotype stays its baked values plus these deviations.
+- **Relative to the baseline.** Effects are deviations from the open fraction at capture, so the scenario's static RDS phenotype stays its baked values plus these deviations.
 - **Calibrated for a low operating pressure.** A spontaneously breathing preterm runs at a mean transpulmonary pressure of ~1–3 mmHg, so the margins are small and the surfactant gains large: a dose must pull the opening threshold clearly below the prevailing pressure to recruit.
 - **No surfactant kinetics.** Maturity only ramps toward the target. There is no inactivation (meconium, protein leak), no redosing decay, no effect on the airway.
 - **The first 30 s of a fresh build** hold the open fraction while the baseline is captured.
 
 ## Example definition (JSON)
 
-From the removed `preterm_25wk.json` (no shipped scenario has a Surfactant model), `models.Surfactant` (trimmed to the config props):
+No shipped scenario has a Surfactant model; a `models.Surfactant` entry (config props only) looks like:
 
 ```json
 {
@@ -9630,11 +9580,11 @@ From the removed `preterm_25wk.json` (no shipped scenario has a Surfactant model
 
 ## Usage in the scenarios
 
-In no shipped scenario at present: the three preterm scenarios that had it (`surfactant` 0.2–0.3) were removed on 2026-10-25 to be rebuilt. `scripts/_add_surfactant.mjs` adds it to a scenario.
+Not used by any shipped scenario: `term_neonate_72h` has no Surfactant model.
 
 ## References
 
-No literature values; the gains and thresholds are calibrated on the (since-removed) preterm scenarios' response to CPAP and surfactant.
+No literature values; the gains and thresholds are teaching calibrations.
 
 ````
 
@@ -9727,7 +9677,7 @@ A probe is a self-contained `.mjs` that boots the engine, runs a scripted physio
 6. **Perturb (optional)** — apply an insult between phases (e.g. remove a volume fraction from every blood compartment for a haemorrhage, then `calc` again and re-measure) to compare baseline vs perturbed.
 7. **Report** — print a labelled table with normal-range flags (`ok` / `LOW` / `HIGH`).
 
-`probe_vitals.mjs` is the canonical example: it reports HR, ABP (sys/dia/mean), CVP, PAP, CO/RV-output, cardiac index, SpO2 (pre/post-ductal), PDA shunt, SvO2, RR, etCO2, temperature, and a full arterial blood gas, each flagged against a `RANGES` table selected by `--profile adult|neonate|neonate_1h|neonate_12h|neonate_24h|preterm_24|…|preterm_36` (auto-picked from body weight when omitted; a term baby under 6 h old gets `neonate_1h`, one from 6 to under 18 h `neonate_12h` and one from 18 to under 48 h `neonate_24h`, the ranges of the transition references). The measurement loop, the `RANGES` tables, and `selectProfile()`/`flagOf()` are shared via `scripts/_probe.mjs` so the generic builder (`build_patient.mjs`) measures identically.
+`probe_vitals.mjs` is the canonical example: it reports HR, ABP (sys/dia/mean), CVP, PAP, CO/RV-output, cardiac index, SpO2 (pre/post-ductal), PDA shunt, SvO2, RR, etCO2, temperature, and a full arterial blood gas, each flagged against a `RANGES` table selected by `--profile adult|neonate` (auto-picked from body weight when omitted: every patient under 10 kg gets `neonate`). The measurement loop, the `RANGES` tables, and `selectProfile()`/`flagOf()` are shared via `scripts/_probe.mjs` so the generic builder (`build_patient.mjs`) measures identically.
 
 ### Run examples
 
@@ -9747,7 +9697,7 @@ Probes are **interactive verification tools, not pass/fail test cases.** They pr
 ## The respiratory validation suite
 
 `npm run validate:resp` (`scripts/validate_respiratory.mjs`) **is** a pass/fail gate: it exits `1` when a
-check fails. It runs a fixed battery on term_neonate_72h, term_neonate_1h, term_neonate_12h and term_neonate_24h (classes `term_1h`, `term_12h` and `term_24h`: the age's pH, PaCO2, SpO2 and, at 1 and 12 h, a static compliance floor 15 % lower for residual lung liquid; preterm_28wk was removed on 2026-10-25 to be rebuilt, so the preterm-class checks, HFOV among them, wait for the rebuild; adult_female is archived), one child process per
+check fails. It runs a fixed battery on term_neonate_72h (class `term`; an adult class is kept for patients over 20 kg), one child process per
 scenario, and checks each result against clinical ranges per patient class in
 `scripts/_resp_targets.mjs` (each range carries its literature source; the ranges are not fitted to the
 model). The battery:
@@ -9764,7 +9714,6 @@ model). The battery:
 | `simv` | SIMV at half the spontaneous rate, PS 5, flow trigger, 5 % termination | one mandatory or synchronised breath per window, the other efforts supported |
 | `apnea` | drive off | no muscle pressure |
 | `cstat` | drive off, PC 15/5 with a pause | static compliance per kg |
-| `hfov` | preterm only: f 8/10/12 Hz, amplitude 20 → 30 | PaCO2·DCO2 constant, PaCO2 falls with amplitude |
 
 Volumes are measured at the lungs (ALL + ALR swing per breath) and effort as the THORAX pressure swing,
 so the suite does not depend on how Breathing or the Ventilator measure their own tidal volume.
@@ -9775,19 +9724,17 @@ fail the run. One that starts passing reports `XPASS`: remove its entry. Options
 
 ## Probe inventory
 
-35 `probe_*.mjs` scripts. Group by what they verify:
+The `probe_*.mjs` scripts, grouped by what they verify:
 
 | Group | Scripts | Verifies |
 |---|---|---|
 | **Core vitals / calibration** | `probe_vitals.mjs`, `probe_tune.mjs`, `probe_ea.mjs` | Regulated vitals + ABG vs normal ranges; the live closed-loop tuner; mitral E/A ratio. |
-| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_surfactant.mjs`, `probe_derecruitment.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_apnea.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); RDS recruitment/derecruitment + surfactant; thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; apnea of prematurity (episode count, SpO2/HR nadirs, desat→brady lag; `--no-chemoreflex` attribution); conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
+| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
 | **Devices** | `probe_ventilator.mjs`, `probe_sle6000.mjs`, `probe_ecls.mjs`, `probe_resuscitation.mjs` | Pressure-control ventilation with spontaneous drive off, sweeping FiO2 / rate / PEEP; veno-arterial ECMO rescue under near-abolished alveolar diffusion, sweeping pump speed / sweep-gas flow (both report the **emergent** blood gas from the gas-exchange physics, not the device); the SLE6000 device model — pass/fail checks of its modes, settings validation, VTV, CPAP backup, O2 Boost and monitored values (exit 1 on failure); CPR — under a simulated arrest, verifies the compression waveform, that compressions drive forward aortic flow via `pres_ext`, the `vent_no`-breaths-per-pause timing, and a clean `switch_cpr` re-toggle. |
-| **Fetal / maternal** | `probe_fetus.mjs [scenario]`, `probe_uterus.mjs`, `probe_placenta.mjs` | Fetal circulation (takes a scenario stem; no fetal scenario is shipped at present, see [fetal_circulation.md](./fetal_circulation.md)); uterine bed / pregnancy adaptation / contractions; maternal placenta. |
-| **PDA / CDH** | `probe_p1.mjs` | Reproduces the cardiovascular paper's validation experiments from `papers/p1/experiments.json` (paper vs engine vs literature) |
-| `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
+| **PDA / CDH** | `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
 | **CHD family** | `probe_as.mjs`, `probe_coarc.mjs`, `probe_dtga.mjs`, `probe_hlhs.mjs`, `probe_paivs.mjs`, `probe_pavsd.mjs`, `probe_ps.mjs`, `probe_ta.mjs`, `probe_tapvc.mjs`, `probe_tof.mjs` | Duct/FO-dependent congenital heart disease scenarios (aortic stenosis, coarctation, d-TGA, HLHS, PA-IVS, PA-VSD, pulmonary stenosis, tricuspid atresia, TAPVC, tetralogy of Fallot). |
 
-> Every probe defaults to `term_neonate_72h`. Until the preterm and fetal scenarios are rebuilt, `probe_apnea`, `probe_surfactant` and `probe_derecruitment` (they need an Apnea or Surfactant model) `probe_fetus`/`probe_placenta` (they need a running placenta), `probe_oxygenie` (it titrates a hypoxaemic preterm, `preterm_26wk`) and `probe_pge1` (it needs a duct-dependent lesion, `pa_ivs`) have no shipped scenario to run on. `probe_tune` takes the scenario first: `probe_tune.mjs term_neonate_72h --map 50 --co x0.8`. Check the script's `Usage:` header.
+> Every probe defaults to `term_neonate_72h`. `probe_pge1` (it needs a duct-dependent lesion) has no shipped scenario to run on. `probe_tune` takes the scenario first: `probe_tune.mjs term_neonate_72h --map 50 --co x0.8`. Check the script's `Usage:` header.
 
 ## Other engine-dev tooling
 
@@ -9796,11 +9743,10 @@ The remaining `scripts/*.mjs` support calibration, scenario authoring, and stead
 | Group | Scripts | Role |
 |---|---|---|
 | **Calibration** | `build_patient.mjs`, `probe_build_patient.mjs`, `probe_tune.mjs` | Closed-loop calibration via [`helpers/Calibrator.js`](../helpers/Calibrator.js) (see [Calibrator](./Calibrator.md)) — `build_patient.mjs` builds a new calibrated patient from target vitals; `probe_build_patient.mjs` runs it on a few SPECs, reloads each emitted scenario in a fresh engine and checks it against its own `build_report` (targets still within tolerance, FiO2 persisted, desaturation in room air, derived blood-pressure targets, solutes held after reload) and prints levers that ended on a bound; `probe_tune.mjs` exercises the same live tuner headlessly. |
-| **Reseeding** | `reseed_*.mjs` (e.g. `reseed_term_neonate`) | Warm a scenario to steady state and serialize it back into `model_definition` (baking equilibrium seeds, clearing startup transients). `reseed_term_neonate` changes no parameter: it settles 600 s, steps to a sinus-node firing (the phase a loaded heart restarts in) and serializes; it used to re-apply old calibration deltas first, which would now undo later calibrations. Each shares `_serialize_state.mjs` (replicates `Model._processModelState`). **Default is a dry run to `/tmp`**; pass `--write` to overwrite the scenario file in place. Only `reseed_term_neonate` remains here; the reseeders of the archived scenarios are in `scripts/archive/` (see below). |
-| **Archived generators** | `scripts/archive/` (`_make_preterm`, `_make_fetus`, `_make_cdh_phenotypes`, `_make_dtga`, `_make_pda_patterns`, …, and their `reseed_*`) | The scripts of the archived scenarios: they derive a scenario from `term_neonate_72h` by phenotype-specific lever edits and read and write `model_definitions/archive/` only. Unvalidated against the current engine; see their README. New scenario titles still go in `_titles.mjs` (`setDiagramTitle`). |
-| **Gestational-age tables** | `scripts/_ga_tables.mjs` | The per-GA seed levers used by `build_patient.mjs`. (The validated preterm/fetal generators and their profiles were removed on 2026-10-25 to be rebuilt.) |
-| **Feature patchers** | `_add_neonatal_core.mjs`, `_add_brain.mjs`, `_add_surfactant.mjs`, `_add_titles.mjs` | Patch a model/feature into many existing scenario JSONs at once (without reseeding, to preserve calibration). `_add_titles.mjs` re-applies the `_titles.mjs` diagram titles in place. |
-| **Shared internals** | `_harness.mjs`, `_probe.mjs`, `_serialize_state.mjs`, `_titles.mjs`, `resolve-extensionless.mjs` | `createEngine`; `measureVitals`/`RANGES`/`selectProfile`/`flagOf`; the `serializeState` baker; the scenario diagram-title map; the ESM `.js`-retry resolve hook. |
+| **Reseeding** | `reseed_*.mjs` (e.g. `reseed_term_neonate`) | Warm a scenario to steady state and serialize it back into `model_definition` (baking equilibrium seeds, clearing startup transients). `reseed_term_neonate` changes no parameter: it settles 600 s, steps to a sinus-node firing (the phase a loaded heart restarts in) and serializes; it used to re-apply old calibration deltas first, which would now undo later calibrations. Each shares `_serialize_state.mjs` (replicates `Model._processModelState`). **Default is a dry run to `/tmp`**; pass `--write` to overwrite the scenario file in place. Only `reseed_term_neonate` remains. |
+| **Gestational-age tables** | `scripts/_ga_tables.mjs` | The per-GA seed levers used by `build_patient.mjs`. |
+| **Feature patchers** | `_add_neonatal_core.mjs`, `_add_brain.mjs` | Patch a model/feature into many existing scenario JSONs at once (without reseeding, to preserve calibration). |
+| **Shared internals** | `_harness.mjs`, `_probe.mjs`, `_serialize_state.mjs`, `resolve-extensionless.mjs` | `createEngine`; `measureVitals`/`RANGES`/`selectProfile`/`flagOf`; the `serializeState` baker; the ESM `.js`-retry resolve hook. |
 
 For the calibration math these tools drive, see [Calibrator](./Calibrator.md); for the signals the probes read, see [Monitor](./Monitor.md); for the message envelope they all speak, see [ARCHITECTURE](./ARCHITECTURE.md).
 
@@ -9969,6 +9915,8 @@ HR 142. RVEDV/LVEDV is 1.2 ± 0.2.
 | Brain | **28.5** (median; term 106 mL/min) | 9.8–94 | PC-MRA at TEA ~41 wk, n=344 | B | Kooi 2019; Liu 2014 14.9 ± 4.9 mL/100 g/min |
 | Intestine (SMA) | **43 ± 13** | — | Doppler volume flow, preterm + term | B | Van Bel 1990; Agata 1994 ~48 at 96 h |
 | Kidney | no credible absolute value | — | Doppler, left renal artery only: ~32 (24 h) / ~37 (96 h), unchanged over 1–96 h | C | Agata 1994 (Fig 2) |
+| Coronary (whole heart) | **~22 mL/min** (absolute) | 18–28 | LAD volume flow by transthoracic Doppler, healthy controls at 1 week (8.2 ± 3.0 mL/min), scaled by the LAD's ~35–45 % share | C | Aburawi 2012 ([doi](https://doi.org/10.1016/j.echo.2011.11.019)); per gram highest in young infants (Yasuoka 2002) |
+| Myocardial O₂ use | **~14 mL/100 g/min** | 10–19 | between adult rest (~8–10) and newborn lambs at 1 h (LV 18.9, efficiency 31–35 %) | C | Smolich 1996 ([doi](https://doi.org/10.1152/ajpheart.1996.270.2.H741)) |
 | Liver/spleen (coeliac) | no credible absolute value | — | Doppler, coeliac: ~75 (24 h) / ~72 (96 h) | C | Agata 1994 (Fig 2) |
 
 **Doppler volume flows are upper estimates.** Agata's single vessels (left MCA ~46, coeliac ~72,
@@ -10065,9 +10013,10 @@ outside `model_definitions/`).
 | 2026-10-18 | Breathing pattern (`scripts/_fix_term_breathing_pattern.mjs`): `ie_ratio` 0.30 → 0.40; `vt_rr_ratio` → 1.29795e-4; `minute_volume_ref` and chemoreceptor set-points re-anchored | Ti/Ttot 0.30 → 0.40; RR 37.7 → 40.0; Vt 5.51 → 5.34; MV 208 → 213; peak flows 0.90/0.58 → 0.70/0.66 L/min/kg | Schmalisch 2005 (Ti, Vt, MV, peak flows); Hannover 2018 (RR) |
 | 2026-10-18 | Heart rate and contractility (`scripts/_fix_term_hr_contractility.mjs`): `heart_rate_ref` 131.15 → 120.33; LV `el_max` ×1.15, RV ×1.3; chemoreflex and HeartFunction stress references re-anchored | HR 131 → 120; LV ESV/SV/EF 1.01/1.51/59.9 → 0.92/1.66/64.4; RV 1.65/1.51/47.8 → 1.54/1.66/51.8; output unchanged; PAP 38.9 → 40.6 systolic | Satoh 2016, He 2011, Agata 1994 (HR); Jhaveri 2023 (CMR volumes) |
 | 2026-10-18 | Whole-body VO₂ (`scripts/_fix_term_vo2.mjs`): `Metabolism.vo2` 7.288 → 6.1396 (Mob's ~0.81 for the heart kept); `minute_volume_ref` and chemoreceptor set-points re-anchored | total VO₂ 8.1 → 7.0 mL/kg/min; MV 235 → 207; RR 40.4 → 37.5; Vt 5.8 → 5.5; SvO₂ 78.7 → 81.5; PaO₂ 73 → 76 | 6.26 ± 1.51 (first week, rest); REE 45–50 kcal/kg/d ≈ 6.5–7.2; calm mixed state |
-| 2026-10-18 | Probe only: blood volume leaves out the bladder (URINE is a BloodCapacitance), found during the preterm 6.5 step | reported blood volume ~82–86 → 80.6 mL/kg; the scenario is unchanged | Whole-body volume balance (blood + bladder vs maintenance intake) closes exactly |
+| 2026-10-18 | Probe only: blood volume leaves out the bladder (URINE is a BloodCapacitance) | reported blood volume ~82–86 → 80.6 mL/kg; the scenario is unchanged | Whole-body volume balance (blood + bladder vs maintenance intake) closes exactly |
 | 2026-10-25 | Blood volume (`scripts/_fix_blood_volume.mjs --factor 1.06`, re-validation re-anchoring): `vol`/`u_vol` of the 31 blood-volume compartments ×1.06, `Hormones.volume_setpoint` 0.286 → 0.3011 L (the new resting volume) | CVP 1.93 → 2.47 mmHg (was below 2 after the heart re-validation: valves, inertance, RV, coronary flow); blood volume 80.6 → 85.0 mL/kg (mid-reference); LVO 196 → 200, HR 118.1 → 116.9, MAP 60.2 → 60.9 | Reference ranges CVP 2–8, blood volume 80–90 mL/kg (textbook, grade C) |
 | 2026-10-27 | Venous oxygen extraction (`scripts/_fix_term_venous_vo2.mjs`): per-bed O₂ use +0.6 upper body, +0.6 lower body, +0.15 gut, +0.08 liver mL/kg/min (brain and kidney keep their absolute use), `Metabolism.vo2` 6.30 → 7.73; `minute_volume_ref` and chemoreceptor set-points re-anchored; heat-loss trim re-seeded | lung VO₂ 7.07 → 8.51 mL/kg/min; mixed venous (PA) 82.0 → 78.5 %, SVC 82.6 → 79.0, IVC 82.7 → 79.0, brain venous 67.6 → 67.2; extraction 0.155 → 0.19; MV 213 → 250; RR 40 → 43.7; Vt 5.31 → 5.72; PaO₂ 75 → 72; PaCO₂, pH, BE, BP, HR, output unchanged | van der Hoeven 1996 (right atrium 73.6 ± 5.3 %, extraction 0.21); Wolfsberger 2023 (peripheral extraction 0.22–0.26). Partly reverses the 2026-10-18 VO₂ step (calorimetry); the ventilation now exceeds the quiet-sleep 215 (accepted) |
+| 2026-10-27 | Myocardial O₂ use and coronary flow (`scripts/_fix_term_mvo2.mjs`): `Mob.bm_vo2_per_g` 3.7e-5 → 6.1716e-5 (basal 5.0 → 8.3 mL/100 g/min; stroke-work part and efficiency 0.35 unchanged); `AA_COR` R 107 112 → 75 149 for the same 55 % extraction; breathing and chemoreceptors re-anchored, heat-loss trim re-seeded | myocardial VO₂ 10.7 → 14.0 mL/100 g/min; coronary flow 18.5 → 25.9 mL/min (80 → 113 mL/100 g/min; 2.6 → 3.6 % of LVO); lung VO₂ 8.51 → 8.71; SvO₂ 78.5 → 78.1; MV 250 → 256; HR, BP, output, gases unchanged | Aburawi 2012 (LAD 8.2 ± 3.0 mL/min → ~18–23 for the heart); Yasuoka 2002; Smolich 1996 (newborn lambs 18.9 mL/100 g/min). User: the coronary flow looked low |
 | 2026-10-25 | Re-bake of the stored state (re-validation (g)): HeartFunction set-points re-learned (`_relearn_heartfunction.mjs`: LV σ_ed 21.6 → 26.0, RV 57.0 → 63.1), then `scripts/reseed_term_neonate.mjs` (settle 600 s, save at a sinus-node firing); Heart fires on the first step after a load, Brain resumes its smoothers | Stored controller state now where it settles (Brain `autoreg_factor` 1.009 → 1.12, renal afferent 0.995 → 1.11, TGF 1.00 → 1.04, baroreflex firing 0.500 → 0.526, Thermoregulation `loss_trim` persisted); no phantom LV remodelling at rest; no MAP dip at load (was 61 → 53 mmHg for ~2 s); reference values within 0.5 % (CVP 2.47 → 2.44) | Stale state from before the heart re-validation; the load transient was a skipped beat |
 | 2026-10-25 | Reflexes (re-validation (l)): baroreflex folded neutral at rest and `BR_MAP.set_value` 57.81 → 60.56 (`scripts/_fix_baro_setpoint.mjs`, now folding `el_k` and the venous `u_vol` too); `BR_MAP.tc` 4 → 0.5 s, `EF_HR.tc` 2 → 0.5 s; `CR_PO2.effect_weight` −0.15 → −0.4; state re-baked | Baroreflex firing at rest 0.524 → 0.499; baroreflex sensitivity 1.5 → 6.0 ms/mmHg; FiO₂ 0.15: ventilation +5 % flat → +19 % at 1 min, +11 % at 5 min; rest within 1 % (MAP 60.9 → 61.2) | Andriessen 2005, Yiallourou 2010 (6.4 ms/mmHg at 2–4 wk, user's target); Rigatto 1982, De Boeck 1984 |
 | 2026-10-25 | Brain (re-validation (f)): ICP acts as a pressure (excess added to the venous outflow pressure, the waterfall, and to the cerebral vessels' external pressure) instead of an outflow resistance (`icp_outflow_gain`/`_factor_max` removed); `cbf_tc` 3 → 1 s, `autoreg_tc` 4 → 1 s; resting autoregulation folded into `BR_ART` (r ×1.1228, factor 1.12 → 1.00); `cbv0` 3.784 → 3.990 mL; state re-baked | Pressure-passive CBF follows CPP and stops as ICP reaches MAP (was 92 mL/min with ICP > MAP); intact autoregulation holds CBF to CPP ~35, lower limit ~30; CBF returns ~5 s after a pressure step without ringing; rest unchanged (CBF 106 mL/min) | Monro–Kellie, vascular waterfall (Starling resistor) |
@@ -10079,407 +10028,6 @@ outside `model_definitions/`).
 ## Open items
 
 - **Koch & Wendel 1968** (arterial gases, first week): unavailable, so PaO₂ and BE stay grade C.
-
-```
-
-### FILE: explain-engine/docs/TermTransitionReference.md
-
-```markdown
-# Term neonate in transition: reference values at 1, 12, 24 and 72 h
-
-Reference values for the transitional term scenarios: a healthy term neonate of about 3.5 kg after an
-uncomplicated **vaginal birth with delayed cord clamping (~1 min)**, breathing room air and nursed
-**skin-to-skin or dressed at room temperature**, not yet fed at 1 h. The 72 h column is the
-`term_neonate_72h` set ([TermNeonateReference](./TermNeonateReference.md)); the earlier ages describe what
-changes on the way there. Compiled 2026-10-25 from PubMed.
-
-The machine-readable sets are [`term_neonate_1h.json`](../scripts/reference/term_neonate_1h.json),
-[`term_neonate_12h.json`](../scripts/reference/term_neonate_12h.json) and
-[`term_neonate_24h.json`](../scripts/reference/term_neonate_24h.json), in the
-same format as [`term_neonate_72h.json`](../scripts/reference/term_neonate_72h.json). Variables without
-data at an age are reference-only there (no numbers) or carry the 72 h range, marked C.
-
-**Grades**
-- **A**: healthy term infants measured at (or within a few hours of) that age
-- **B**: a nearby age, a mixed cohort or delivery mode, or direction only
-- **C**: textbook, derived, or the 72 h value carried
-
-## Each scenario is a snapshot
-
-A baby at 1 h is mid-transition: the duct is closing, pulmonary pressure is falling, lung liquid is
-being absorbed, and catecholamines are still high. Each transitional scenario is a **steady state of
-that moment**. Its controllers (chemo- and baroreflex, Brain, Hormones, Glucose, HeartFunction and the
-thermal loss trim) are re-anchored to the age's values, so the scenario holds them when loaded instead of
-drifting toward 72 h. The time course is the series of scenarios, not something one scenario runs through.
-
-## Decisions (2026-10-25)
-
-- **Pulmonary artery pressure at 1 h:** near-systemic, PAP:SAP ~0.9. Every baby has a bidirectional duct
-  at 2 h (Kang 2016), and bidirectional ductal flow goes with a ratio of 0.88–1.22 (Skinner 1991). Kang's
-  absolute 2 h values (77/63 mmHg, from the ductal gradient plus cuff pressure) are above systemic
-  pressure and would force right-to-left flow, so they are not used as targets.
-- **Haematocrit and blood volume:** the delayed-clamping values (Hct ~55 % at 1 h, 57 % at 6 h). The 72 h
-  baby (Hct 49.5, a mixed-clamping population) is left unchanged, so the series is not continuous in Hct.
-- **Blood gases at 1 h:** textbook values, grade C. No quotable values were found: Weisbrot 1958, Koch &
-  Wendel 1968 and Jovandaric 2018 (arterialized capillary gases at 1 and 2 h in 50 healthy newborns) give
-  their numbers only in tables.
-- **Blood volume at 1 h: ~80 mL/kg** (corrected from a textbook 92). At birth the baby's volume is the
-  feto-placental volume (taken as 115 mL/kg) minus what stays in the placenta: 63–73 mL/kg after early
-  clamping, 96–100 after 3-min clamping (Linderkamp 1992, Nelle 1995), so ~85 after ~1 min. In the first
-  hours plasma leaves the circulation at a constant red cell mass, which is why Hct rises: 85 × 0.50/0.55 ≈ 77 at 1 h
-  (3-min clamping at 2 h: 100 × 0.50/0.63 ≈ 79). The extra placental blood shows up as red cells, not as
-  volume. Red cell mass 0.55 × 80 = 44 mL/kg then runs smoothly into the 72 h baby's 0.49 × 85 = 42.
-- **VO2 (superseded 2026-10-27, see "Venous oxygenation" below):** 7.0 mL/kg/min at every age. The only human early value (~5 under 12 h, Hill & Robinson 1968)
-  comes mostly from low-birth-weight infants, and lambs reach their postnatal VO2 within an hour.
-
-## The 1 h scenario
-
-`model_definitions/term_neonate_1h.json`, generated by `node scripts/_make_term_transition.mjs --age 1 --write`
-from `term_neonate_72h`. The levers (factors relative to 72 h), in the script's profile:
-
-| Lever | Value | Why |
-|---|---|---|
-| Duct | 4.6 mm at the pulmonary end, 5.1 mm at the aortic end | Kang 2016 at 2 h |
-| Pulmonary resistance (and `Shunts.ips_res` alike) | x1.2 | with a 4.6 mm duct the pulmonary pressure follows the aorta, so a small rise gives the bidirectional flow |
-| Systemic resistance | x0.5, but brain, gut, liver and kidney beds kept at 72 h | the high output runs through the duct, not the organs (Agata 1994; see below) |
-| Heart `el_max` / `heart_rate_ref` | x1.6 / x1.07 | the catecholamine surge: high output |
-| Blood volume / Hct | 80 mL/kg / 55 % | delayed clamping after the first plasma shift |
-| Lactate / unmeasured anions | 2.2 / +2.1 mmol/L | GLOW; BE -5 |
-| Glucose | 3.3 mmol/L (also the Glucose set-point) | GLOW, Hoseth |
-| Minute volume reference | x1.11 | pCO2 ~36 |
-| Lung liquid: alveolar (ALL/ALR) `u_vol` / `el_base` | x0.85 / x1.11 | see below |
-| Brain | settles pressure-passive; `cbf_setpoint` re-anchored last | see below |
-| Glomerular filtration coefficient (`Kidneys.kf`) | x0.8 | GFR at the day-1 value (see below) |
-| `Heart.rv_delay` / main and branch PA `el_base` | −35 ms (the LV lags) / x2.5 | early systolic right-to-left ductal flow (see below) |
-| Environment | 24 °C, 50 % humidity | dressed / skin-to-skin in the room (loss trim re-seeded) |
-
-Then the controllers are re-anchored at rest: the baroreflex activity is folded into the base values
-(BR_MAP set-point 46.3), the chemoreceptor set-points become the resting gases, the Hormones set-points
-the resting volume and renal pressure, and HeartFunction re-learns its wall-stress set-points (RV
-es 174 vs 124 at 72 h: the RV pumps against near-systemic pressure). Loaded, it holds for 10 min
-(HR 137, MAP 47.7, duct 32–34 mL/kg/min, pH 7.345).
-
-**First comparison (2026-10-25): 37 of 39 numeric targets in range.** Out: CVP 1.8 (2–8, carried from
-72 h, C) and urine 1.1 mL/kg/h (most babies have not voided at 1 h). LV output 300 (346 ± 68), HR 137,
-MAP 47.6, PAP 46.5 (ratio 0.98), duct net left-to-right 33 mL/kg/min with right-to-left flow 27 % of the
-time, FO -1.4 mL/kg/min, SpO2 97.4 / 96.1, SvO2 88, pH 7.35 / pCO2 36.8 / BE -5.0, Hct 55, blood volume
-80.4. Not yet addressed: FRC 30 (reference 23 at 4–6 h, lung liquid), compliance (lower on day 0),
-brain autoregulation strongly constricted (factor 1.7: CBF held at its 72 h set-point while the
-reference says it is lower at 1 h).
-
-**Step 3a, lung liquid.** After a vaginal birth most lung liquid is gone within hours: Lee 1999 measured
-FRC (argon) 23.1 mL/kg at 4–6 h and 24.9 at 24 h (−7 %, P = 0.08), and Lødrup Carlsen 1993 found Crs
-lower on day 0 (first measured at 1 h) than later, with no size we could use. The model reads FRC
-about 10 % above its helium reference even at 72 h (29.9 vs 27.1), so the 1 h baby is set relative to
-its 72 h self: the residual liquid is a smaller aerated lung that is proportionally stiffer (liquid-filled
-alveoli do not ventilate), alveolar `u_vol` x0.85 and `el_base` x1.11, which keeps the specific
-compliance (Crs/FRC) about constant. Result: FRC 30.1 → 26.9 mL/kg (−11 %), Crs 3.41 → 3.14 mL/cmH2O
-(−8 %, grade C). Tidal volume (5.4) and SpO2 (97.4 / 96.0) do not change: the breathing controller holds
-its targets, and a smaller FRC only shrinks the oxygen store (the model has no V/Q effect of
-interstitial liquid). Side effect: the smaller lung volume makes the pleural pressure more negative and
-CVP falls from 1.8 to 1.4 (still 37 of 39 in range).
-
-**Step 3b, where the high output goes.** Agata 1994 (23 term babies, Doppler flow volume at 1, 4–8, 24
-and 96 h): middle cerebral, coeliac and superior mesenteric flow are significantly lower at 1 and 4–8 h
-than after 24 h, renal flow does not change, LV output is 365 ± 69 at 1 h; the low organ flow comes with
-low diastolic flow that correlates with the ductal diameter (diastolic steal), and LV output correlates
-with the ductal diameter too. With the SVR halved in every bed the model did the opposite: brain held at
-its 72 h set-point by autoregulation (factor 1.73), gut and coeliac +39 %, kidney +65 %. Now the organ
-beds keep their 72 h resistance, the high output runs through the duct (net left-to-right 74 mL/kg/min,
-Drayton 1987 62, 43–82) and the brain settles pressure-passive and takes that flow as its set-point.
-Lowering PVR further (x1.0, x0.85) made the shunt too large (111, 143) and ended the bidirectional flow.
-
-| mL/kg/min | 72 h | 1 h before | 1 h now | Agata, 1 h vs ≥ 24 h |
-|---|---|---|---|---|
-| LV output | 200 | 298 | 306 | ↑ (365 ± 69) |
-| Duct net left-to-right | 0 | 34 | 74 | (Drayton ~62) |
-| Brain | 29.9 | 30.0 (autoreg 1.73) | 24.9 (autoreg 1.00) | ↓ |
-| Gut (SMA) | 27.2 | 37.9 | 23.3 | ↓ |
-| Kidney | 28.2 | 46.4 | 29.6 | unchanged |
-| SVC | 83.7 | 104 | 108 | 99 (day 1) |
-
-The brain set-point (24.9 mL/kg/min, 88 mL/min) is close to the ultrasound values for term babies
-(Kehrer 2003, carotid + vertebral: 69 ± 14 mL/min at 39–40 weeks, 83 ± 16 at 41–42). FO now runs left-to-right (+6), MAP 50.2, PAP 48.3, SpO2 97.5 / 96.8;
-CVP falls to 1.0. Still 37 of 39 in range (CVP, urine); loaded, it holds for 10 min with the brain
-autoregulation at 1.00 and the baroreflex firing at 0.47–0.52.
-
-*Generator fix found on the way:* `Blood.init_model` calibrates the vessel resistances at the viscosity
-of the blood the scenario loads with. The generator raised Hct to 55 % in the live model without moving
-that reference, so it settled and re-anchored at ~21 % higher vascular resistance than the saved
-scenario has on load (MAP 52.0 live vs 50.3 reloaded, brain autoregulation 1.21 and a slow baroreflex
-drift after loading). It now takes the viscosity reference at the new Hb, as a load does.
-
-**Step 3c, CVP: the reference, not the model.** The 2–8 mmHg carried from 72 h is a textbook range from
-sick, catheterised infants. The only measurements in healthy newborns in the first hours are Siassi
-1980: right atrial mean pressure +1.6 mmHg (−3 to +4), A-wave +4.9 (2–8), every 6 h from 2 to 24 h in
-24 healthy spontaneously breathing preterm infants, not related to birth weight or gestation (grade C
-for a term baby). The model's 1.0 mmHg sits in it, and it is low for physiological reasons: the residual
-lung liquid makes the pleural pressure more negative and the ductal circuit returns more of the output
-through the lungs and the left heart. The 1 h CVP reference is now 1.6 (−3 to +4); the 72 h one is
-unchanged, and the model's 2.4 there gives the rise over the first days.
-
-**Step 3d, urine and GFR.** The 0–1 mL/kg/h urine range came from first-void timing (Ogala 1986), but
-that times the first emptying of the bladder, not production; the model has no bladder to fill and its
-urine output is production. Production is low before the postnatal diuresis: urine flow stays low for
-the first 7–22 h and then rises for ~12 h (Hogg 1977, 7 term babies), and before the diuresis it is
-1.6 mL/kg/h on average with periods under 1 (Lorenz 1995, ELBW). The 1 h urine reference is now
-0.5–1.5 mL/kg/h (C), and GFR gets a real target, 19.6 mL/min/1.73 m² on day 1 (Smeets 2022, A/B). The
-model filtered 24.7 at 1 h (31.0 at 72 h). The glomerular filtration coefficient matures over the first
-days, so the 1 h kidney has `Kidneys.kf` x0.8: GFR 20.7, urine 0.93, renal flow unchanged (29.4).
-Re-anchoring the renal autoregulation to its 72 h afferent tone was tried and rejected: at the slightly
-lower 1 h renal pressure GFR collapsed to ~8 and renal flow to 23 (against Agata's unchanged renal
-flow), so the 1 h kidney keeps a near-maximally dilated afferent arteriole (factor 0.50) and has little
-dilator reserve if the pressure falls. **All 40 numeric targets are now in range**; loaded, it holds for
-10 min (BE drifts −5.15 → −5.19).
-
-**Step 4a, the ductal Doppler pattern.** The duct was bidirectional, but in the wrong order: the aortic
-valve opened 33 ms before the pulmonary valve, so each beat began with a left-to-right surge and the
-right-to-left flow came in mid–late systole. The classic transitional pattern (bidirectional in all
-babies at 2 h, Kang 2016) is right-to-left in early systole and left-to-right in late systole and
-diastole. A stronger RV did not change the order (it has to reach almost the same diastolic pressure
-as the LV through the open duct), so `Heart.rv_delay` now also takes negative values (the LV
-activation lags the RV's). The 1 h baby has the LV lagging by 35 ms and main/branch pulmonary arteries
-2.5x stiffer (the sharper systolic PA pressure peak of a small, high-resistance pulmonary tree):
-
-| One beat (459 ms) | After QRS | Duct |
-|---|---|---|
-| Pulmonary valve opens | 61 ms (aortic 69 ms) | |
-| Early systole | 63–175 ms | right-to-left, peak −230 mL/kg/min (−0.9 m/s) at 80 ms |
-| Late systole | 180–240 ms | turns left-to-right |
-| Diastole | 240–459 ms | left-to-right, ~0.75 m/s after aortic closure, easing to 0.4 m/s |
-
-`probe_pda`: bidirectional signature confirmed (systolic peak −0.60 m/s right-to-left, diastolic
-+0.78 m/s left-to-right), right-to-left for 19 % of the cycle, net 74 mL/kg/min left-to-right.
-Nothing else moved: 40 of 40 in range (PAP 69/32/50, BP 70/33/51, SpO2 97.5 / 96.6); loaded, it holds
-for 10 min. The 72 h baby (`rv_delay` 0) is unchanged.
-
-**Step 4b, blood pressure by the ⅓ rule (2026-10-26).** The 1 h BP reference was the Kent 2007 day-1
-median (65/45/50); medians do not add up to a consistent set, and 45 diastolic sat above every first-day
-value in Taiwo 2022. It is now Taiwo's healthy term babies within 1 h of birth: 67.4/37.1, MAP 47.2
-(dia + PP/3, as the Monitor now reports it; grade A). The baroreflex set-point used while the levers
-settle was a time-averaged 50, i.e. a clinical MAP of ~45; it is now 53.5, the time-averaged equivalent of
-47.2. Result: 71.4/33.8 (46.4), HR 133, PAP 45.6, LV output 313, duct 80 left-to-right with right-to-left
-flow 15 % of the cycle (bidirectional signature confirmed). The diastolic stays ~3 mmHg low and the pulse
-pressure ~7 mmHg wide: the large unrestrictive duct and the dilated systemic circulation run off the
-aorta in diastole (accepted; raising SVR would also change the output and the duct). All 40 in range;
-loaded, it holds for 10 min; respiratory battery 24/24.
-
-## The 12 h scenario
-
-`model_definitions/term_neonate_12h.json`, generated by `node scripts/_make_term_transition.mjs --age 12 --write`
-from `term_neonate_72h` (built 2026-10-26). The levers (factors relative to 72 h):
-
-| Lever | Value | Why |
-|---|---|---|
-| Duct | 2.47 mm at the pulmonary end, 2.72 mm at the aortic end; discharge coefficient 0.3 | Kang 2016 at 12 h; the duct constricts from the pulmonary end (see below) |
-| Pulmonary resistance (and `Shunts.ips_res` alike) | x1.5 | PAP mean 41 (Kang 2016) |
-| Systemic resistance | x0.65, brain, gut, liver and kidney beds kept at 72 h | output past the surge but still high |
-| Heart `el_max` / `heart_rate_ref` | x1.5 / x1.025 | BP 69.8/40.4 (Taiwo 2022), HR 121 |
-| Blood volume / Hct | 77 mL/kg / 57 % | the 1 h red cell mass after a further plasma shift |
-| Lactate / unmeasured anions | 2.0 / +1.6 mmol/L | GLOW; BE -4 |
-| Glucose | 3.2 mmol/L | GLOW |
-| Minute volume reference | x1.11 | pCO2 ~35 |
-| Lung liquid: alveolar `u_vol` / `el_base` | x0.92 / x1.05 | mostly cleared (Lee 1999) |
-| Brain, kidney | as at 1 h (pressure-passive brain re-anchored; `Kidneys.kf` x0.8) | |
-| Baroreflex set-point while settling | 56 | the time-averaged equivalent of a clinical MAP of 50 (see below) |
-| `Heart.rv_delay` / PA `el_base` | 0 / x1 | no transitional timing: the flow is left-to-right throughout |
-| Environment | 24 °C, 50 % humidity | dressed in the room |
-
-**Mean arterial pressure by the ⅓ rule.** Taiwo's MAP is diastolic + pulse pressure / 3 at every time
-point (69.8/40.4 → 50.2), as most clinical MAPs are. The model's ascending-aortic waveform has a broad
-systolic peak and a nearly linear diastolic fall (form factor (mean − dia)/PP ≈ 0.5, at every age), so
-its time-averaged mean sat 5–7 mmHg above the clinical one. Since 2026-10-26 the Monitor reports the
-arterial means (`abp_pre`, `abp`, `pap`) by the ⅓ rule and keeps the time-average as
-`<name>_pres_mean_int`; the baroreflex still senses the time-averaged pressure, so its set-point is the
-time-averaged equivalent of the target (here 56 while settling, 52.7 after re-anchoring).
-
-**The duct.** At 2.47 mm with the open-duct discharge coefficient (0.9) the duct passed 52 mL/kg/min
-left-to-right (x1.4 PVR), above the 5–40 estimated from the 1 h flow; half of its pressure loss is the
-Bernoulli jet and half viscous. A narrower jet at the constricting pulmonary end (Cd 0.3) with PVR x1.5
-gives 31 mL/kg/min. Lowering the duct flow lowers the pulmonary flow and PAP, which widens the gradient,
-so the duct and PVR were tuned together. At x1.6 PVR with the 0.9 duct a late-diastolic right-to-left
-flow appeared (13 % of the cycle). `probe_pda`: left-to-right 100 % of the cycle, systolic peak 2.0 m/s,
-end-diastolic 0.9 m/s.
-
-**Result: all 40 numeric targets in range.** HR 124, BP 69.6/40.0 (49.8), PAP 62/32 (41.9), LV output
-253 (290 interpolated), stroke volume 2.03, SVC 98, duct 31 left-to-right, FO −1.2, SpO2 97.5 / 97.3,
-SvO2 87, pH 7.362 / pCO2 36.1 / BE −4.4, glucose 3.23, lactate 2.00, Hct 56.9, blood volume 77.7, GFR 24.5,
-urine 1.1, temperature 37.0. Off the mean but in range: LV output, PAP systolic (a wide pulmonary pulse),
-GFR. Loaded, it holds for 10 min (MAP 49.7–49.9, BE −4.39, brain autoregulation 1.00). Respiratory
-battery 24/24 (class `term_12h`), `probe_vitals` clean (profile `neonate_12h`).
-
-## The 24 h scenario
-
-`model_definitions/term_neonate_24h.json`, generated by `node scripts/_make_term_transition.mjs --age 24 --write`
-from `term_neonate_72h` (built 2026-10-26). The levers (factors relative to 72 h):
-
-| Lever | Value | Why |
-|---|---|---|
-| Duct | 1.89 mm at the pulmonary end, 2.08 mm at the aortic end; discharge coefficient 0.25 | Kang 2016 at 24 h (closed in 38 %); constricted a little further than at 12 h |
-| Pulmonary resistance (and `Shunts.ips_res` alike) | x1.3 | PAP mean 34 (Kang 2016) |
-| Systemic resistance | x0.75, brain, gut, liver and kidney beds kept at 72 h | output 258 (Agata) |
-| Heart `el_max` / `heart_rate_ref` | x1.35 / x1.025 | BP 71.3/41.2 (Taiwo 2022), HR 121 |
-| Blood volume / Hct | 77 mL/kg / 57 % | as at 12 h |
-| Lactate / unmeasured anions | 1.8 / +0.9 mmol/L | GLOW (interpolated); BE -3.5 |
-| Glucose | 3.3 mmol/L | GLOW plateau |
-| Minute volume reference | x1.12 | pCO2 ~35 |
-| Lung liquid: alveolar `u_vol` / `el_base` | x0.96 / x1.02 | the last of it (Lee 1999: FRC 24.9 at 24 h) |
-| Brain, kidney | as at 1 and 12 h | |
-| Baroreflex set-point while settling | 57 | the time-averaged equivalent of a clinical MAP of 51.2 |
-| Environment | 24 °C, 50 % humidity | dressed in the room |
-
-**Result: all 40 numeric targets in range** on the first pass except the duct (26.6 mL/kg/min against the
-0–25 estimate); Cd 0.3 → 0.25 brought it to 23. HR 122, BP 71.4/42.1 (51.9), PAP 53/25 (34.4), LV output
-240 (258), stroke volume 1.95, SVC 94, duct 23 left-to-right (`probe_pda`: 100 % of the cycle, 2.26 m/s
-systolic, 1.76 m/s end-diastolic, a restrictive closing duct), SpO2 97.6 / 97.4, pH 7.378 / pCO2 35.9 /
-BE −3.56, glucose 3.33, lactate 1.80, Hct 56.9, blood volume 77.6, GFR 25.3, urine 1.14, temperature 36.98.
-Off the mean but in range: PAP systolic (a wide pulmonary pulse, as at 12 h), FRC 29.6 (24.9; the model
-reads FRC high at every age), GFR. Loaded, it holds for 10 min (MAP 51.8–51.9, BE −3.55 to −3.57).
-`probe_vitals` clean (profile `neonate_24h`); respiratory battery 24/24 (class `term_24h`, static
-compliance floor 0.95: the model's compliance rises 0.94 / 0.975 / 0.998 / 1.014 mL/cmH2O/kg at
-1 / 12 / 24 / 72 h).
-
-## Venous oxygenation and first-day brown fat (2026-10-27)
-
-The venous saturations were high in every baby, most of all in the first day:
-- SVC / RA 87.8 / 85.4 % at 1 h, 82.6 / 82.0 % at 72 h;
-- the brain and the organs fitted the measurements; the excess came from the upper- and lower-body beds (skin, muscle).
-
-Those beds carried more flow at 1 h than at 72 h (85 + 43 against 54 + 28 mL/kg/min: the generator dilated
-everything but the organs), with more haemoglobin (Hct 55–57 %) and the same O2 use.
-
-**Evidence**
-
-| Site | Value | Population | Source |
-|---|---|---|---|
-| Right atrium (fibre-optic catheter) | 73.6 ± 5.3 % (P5–P95 65–82), extraction 0.21 ± 0.04 | 10 stable preterms in room air after RDS | van der Hoeven 1996 ([doi](https://doi.org/10.1136/fn.74.3.f177)) |
-| Peripheral muscle (NIRS) | extraction 0.264 / 0.228 / 0.237 / 0.220 per 6 h, no change over the first 24 h | 55 healthy term babies | Wolfsberger 2023 ([doi](https://doi.org/10.3389/fped.2023.1276769)) |
-| Cerebral (NIRS) | 78.2 % on day 1, 78.3 % on day 2; splanchnic lower, renal higher on day 1 | 38 healthy term babies | Bailey 2013 ([doi](https://doi.org/10.1055/s-0033-1349894)) |
-| Sagittal sinus (MRI, QSM) | 72.4 ± 3.4 % | preterms at term-equivalent age | Carmichael 2025 ([doi](https://doi.org/10.1038/s41390-025-03966-6)) |
-| RQ, energy expenditure | RQ 0.94 at 6 h, 0.88 at 30 h; VO2 ~6.6–7.2 | 46 term babies before milk feeding | Zoppi 1998 ([doi](https://doi.org/10.1038/sj.ejcn.1600564)) |
-
-The direct venous data give an extraction of ~0.21, i.e. a mixed venous saturation of ~76–78 % at SaO2 97 %. The
-indirect route (calorimetry VO2 6.3–7.2 with MRI output ~200 mL/kg/min) gives ~80–84 % by Fick; the measured
-ventilation fits VO2 ~7. User decision: the venous data, 70–80 %.
-
-**What changed**
-1. **72 h** (`scripts/_fix_term_venous_vo2.mjs`):
-   - lung VO2 7.07 → 8.51 mL/kg/min, the extra in the upper and lower body, gut and liver; the brain and kidney keep their absolute use;
-   - mixed venous 82.0 → 78.5 %;
-   - ventilation 213 → 250 mL/kg/min (215 measured in quiet sleep: an accepted deviation).
-2. **Brown-fat O2 at the brown fat:** `Metabolism.bat_site` (`RUB`, the upper body). Before, the brown-fat O2 cost was spread over every bed, the brain included.
-3. **First-day brown fat** (`NST_W_PER_KG` in the generator):
-   - the heat is added to the loss after the trim seeds, and the set-point rises by heat / `bat_gain`, so the core stays at ~37 °C;
-   - brown fat is most active right after birth (birth cooling, catecholamines, the TSH peak);
-   - at 12 and 24 h the upper and lower body also keep part of their tone (bed factor 0.8). At 1 h they stay dilated: toned, they sent the output through the large duct (left-to-right 117 mL/kg/min).
-4. **pCO2:** about 39–40 at every age (within each age's range). At 35–36 the higher CO2 output needed ~295 mL/kg/min.
-
-| | 1 h | 12 h | 24 h | 72 h |
-|---|---|---|---|---|
-| Brown fat (W/kg) / body bed factor | 0.45 / dilated | 0.3 / 0.8 | 0.3 / 0.8 | – |
-| RA (RAIVCI / RASVC) | 80.2 / 79.4 (was 85.4) | 80.1 / 79.5 (85.3) | 80.3 / 79.6 (85.4) | 78.5 / 78.2 (82.0) |
-| SVC / IVC | 79.8 / 81.2 | 78.7 / 81.9 | 78.6 / 82.1 | 79.0 / 79.0 |
-| PA (the probe's SvO2; ductal admixture) | 85.1 | 82.4 | 81.8 | 78.5 |
-| Brain venous | 65.7 | 70.1 | 70.5 | 67.2 |
-| Lung VO2 (mL/kg/min) | 10.1 | 9.5 | 9.6 | 8.5 |
-| Ventilation (mL/kg/min) / pCO2 | 287 / 39.8 | 279 / 39.0 | 281 / 38.8 | 250 / 39.5 |
-
-The 1–2 points the RA stays above 72 h come from the IVC, i.e. the kidney (87–88 %), which the renal NIRS also shows
-higher on day 1. References: SvO2 (pulmonary artery) 82 / 78 / 78 / 76 % at 1 / 12 / 24 / 72 h (70–87 / 70–84 / 70–84 /
-70–80); VO2 10 / 9.5 / 9.5 / 8.4. The higher first-day ventilation through a lung with residual liquid takes the pleural
-swing to 8.2–8.6 cmH2O, so the transitional respiratory classes allow 2–9 (quiet breathing 2–8, Bhutani). Every baby
-still has all its numeric targets in range and holds for 10 min. Not modelled: the rise of brown-fat blood flow with
-thermogenesis, which matters only in a cold room.
-
-## Hemodynamics
-
-| Variable | 1 h | 12 h | 24 h | 72 h | Grade | Source |
-|---|---|---|---|---|---|---|
-| Heart rate (bpm) | 126 (P2–P98 102–162) at 2 h | 120–122 | 120–122; 121 ± 11 | 118 | A at 2/24 h | Tveiten 2021; Agata 1991 |
-| SBP/DBP/MAP (mmHg) | **67.4/37.1/47.2** (SD 7.9/6.1/5.8) within 1 h of birth | **69.8/40.4/50.2** (SD 7.8/6.4/5.8) | 71.3/41.2/51.2 | 74/46/58 | A at 1/12/24 h | Taiwo 2022 (healthy term, at birth, 6, 12, 24, 36, 48 h; MAP = dia + PP/3); Kent 2007 (day-1 median 65/45/50, superseded); He 2011 (66/33/44 → 71/38/49, day 1 → 3) |
-| LV output (mL/kg/min) | **327 ± 66; 365 ± 69** | ~290 (301 at 4–8 h) | 245 ± 56; 272 ± 48 | 196 (MRI) / 258 (echo, 96 h) | A | Agata 1991, 1994 |
-| LV stroke volume (mL/kg) | 2.25 ± 0.37 | – | 2.02 ± 0.42 | 1.6 | A | Agata 1991 |
-| SVC flow (mL/kg/min) | 99 (day 1) | 99 | 99 | 77–83 | B | Lee 2009 |
-| PAP mean (mmHg) | ~45 (ratio ~0.9) | 41 ± 9 | 34 ± 10 | 25 ± 8 | B / A-B | Skinner 1991; Kang 2016 |
-| PAP systolic (mmHg) | ~58 | 52.5 ± 9.1 | 43.8 ± 7.9 | 36 ± 6.5 | B / A-B | Kang 2016 |
-| Cerebral (MCA) flow | lower than after 24 h (gut too; renal unchanged) | – | rises | – | B (direction) | Agata 1994 |
-| CVP / right atrial mean (mmHg) | 1.6 (−3 to +4), 2–24 h | – | – | 2–8 (textbook, sick infants) | C (healthy preterm) | Siassi 1980 |
-
-## Shunts
-
-| Variable | 1 h | 12 h | 24 h | 72 h | Grade | Source |
-|---|---|---|---|---|---|---|
-| Ductal diameter (mm) | 4.60 ± 0.59 (2 h) | 2.47 ± 0.49 | 1.89 ± 0.41 | 1.20 ± 0.24 | A | Kang 2016 |
-| Duct closed | 0 % | 0 % | 38 % (Lim 1992: 20 % day 1) | 95 % (Lim: 96 % day 3) | A | Kang 2016; Lim 1992 |
-| Ductal direction | bidirectional in 100 % (2 h) | L→R only in 88 % | L→R | closed | A | Kang 2016 |
-| Ductal L→R flow (mL/kg/min) | 62 (95 % CI 43–82) shortly after birth | falling fast; ~5–40 (derived from the diameter) | small; ~0–25 (derived) | unmeasurable by 48 h | B (n = 10) | Drayton 1987 |
-| Foramen ovale | shunt in 92 % at ~40 min, mostly L→R, small diastolic R→L in 64 % | – | patent in 22/37 | shunt in 47 % (days 4–5), R→L in 19 % | A | Hiraishi 1991; Lim 1989 (patency) |
-
-## Lungs and breathing
-
-| Variable | 1 h | 12 h | 24 h | 72 h | Grade | Source |
-|---|---|---|---|---|---|---|
-| FRC (mL/kg) | 23.1 at 4–6 h (vaginal); TGV 32.7 < 6 h | – | 24.9 | 27.1 | A | Lee 1999; Milner 1978 |
-| Compliance | lower on day 0 | – | higher from day 1 | 3.6 mL/cmH2O | B (direction) | Lødrup Carlsen 1993 |
-| Tidal volume | lower on day 0 | – | rises from day 0 to day 1 | 5.6 mL/kg | B (direction) | Lødrup Carlsen 1993 |
-| RR, minute ventilation | no data | – | – | 44; 215 mL/kg/min | – | carried from 72 h |
-| SpO2 (%) | 96 ± 1 (1.5–13.5 h); median 98.3 (0–24 h) | 98 | 98 | 97.3 | A | Nikkola 2002; O'Brien 2000 |
-| Pre/post-ductal gradient | gone by 15 min | – | – | – | A | Mariani 2007 |
-
-## Gases and metabolism
-
-| Variable | 1 h | 12 h | 24 h | 72 h | Grade | Source |
-|---|---|---|---|---|---|---|
-| pH / pCO2 / BE | 7.32 / 36 / −5 | 7.36 / 35 / −4 | 7.37 / 35 / −3.5 | 7.395 / 38.7 / −4..2 | C at 1, 12 and 24 h | textbook; cord UA P10 pH 7.21, BD 5.9 (Dudenhausen 1997) |
-| Lactate (mmol/L) | 2.2 (1.1–6.2), 0–12 h | 2.0 | ~1.8 (interpolated) | 1.4 (0.8–3.3) | A | GLOW 2021 |
-| Glucose (mmol/L) | ~3.3; 1 h not lower than later | ~3.2, rising to the plateau by 18 h | 3.3 ± 0.6 plateau | 3.3–4.6 (day 4: 4.6) | A/B | GLOW 2020; Hoseth 2000 |
-| VO2 (mL/kg/min) | 7.0 (decision) | 7.0 | 7.0 | 6.3–7.0 | B | Hill & Robinson 1968 (~5 < 12 h, LBW) |
-| Temperature (°C) | 36.8 (skin-to-skin rewarms 36.3 → 37.0 in 1 h) | 36.9 | rectal lower on day 1 than day 2 | 37.0 | B | Karlsson 1996; Fransson 2005 |
-| Catecholamines | raised plateau to 3 h | adult resting level | resting | resting | B (no numbers) | Eliot 1980 |
-
-## Blood and kidneys
-
-| Variable | 1 h | 12 h | 24 h | 72 h | Grade | Source |
-|---|---|---|---|---|---|---|
-| Haematocrit (%) | ~55 (1-min DCC; 57.0 at 6 h) | ~57 | 56–59 (3-min DCC) | 49.5 (mixed clamping) | A/B | Ceriani Cernadas 2006; Linderkamp 1992; Nelle 1993; Jopling 2009 |
-| Blood volume (mL/kg) | ~80 (75–85) | ~77 (red cell mass 44 at Hct 57) | ~77 | 80–90 | B (derived) at 1 h | Linderkamp 1992; Nelle 1995 |
-| First void | none yet (42 % by 6 h) | 76 % voided | 95 % | – | A | Ogala 1986 |
-| Urine production (mL/kg/h) | low before the diuresis (0.5–1.5) | diuresis starts (7–22 h) | in the diuresis (1–3) | 1–3 (textbook) | C | Hogg 1977; Lorenz 1995 |
-| GFR (mL/min/1.73 m²) | 19.6 (day 1) | – | 19.6 (day 1) | ~30 (day 3) | A/B | Smeets 2022 |
-
-## Sources
-
-All found through PubMed; full citations, DOIs and PMIDs are in the JSON sets.
-
-- Agata Y 1991, J Pediatr 119:441 ([doi](https://doi.org/10.1016/s0022-3476(05)82060-8)); Agata Y 1994, Pediatr Res 36:805 ([doi](https://doi.org/10.1203/00006450-199412000-00022))
-- Tveiten L 2021, Arch Dis Child Fetal Neonatal Ed ([doi](https://doi.org/10.1136/archdischild-2020-320761))
-- Taiwo AB 2022, Glob Pediatr Health 9:2333794X221099263, blood pressure at birth, 6, 12, 24, 36 and 48 h in 123 healthy term controls ([doi](https://doi.org/10.1177/2333794X221099263))
-- Kent AL 2007, Pediatr Nephrol 22:1335 ([doi](https://doi.org/10.1007/s00467-007-0480-8)); He 2011, Chin Med J 124:2284 (PMID 21933558)
-- Kang C 2016, Medicine 95:e2599 ([doi](https://doi.org/10.1097/MD.0000000000002599)); Lim MK 1992, Arch Dis Child ([doi](https://doi.org/10.1136/adc.67.10_spec_no.1217))
-- Drayton MR 1987, Arch Dis Child 62:1030 ([doi](https://doi.org/10.1136/adc.62.10.1030)); Skinner JR 1991, Arch Dis Child 66:386 ([doi](https://doi.org/10.1136/adc.66.4_spec_no.386))
-- Hiraishi S 1991, Br Heart J 65:41 ([doi](https://doi.org/10.1136/hrt.65.1.41)); Lim 1989, Early Hum Dev (PMID 2691234)
-- Kehrer M 2003, Neuropediatrics 34:281, cerebral blood flow volume in preterm and term neonates (PMID 14681752, [doi](https://doi.org/10.1055/s-2003-44663))
-- Hogg MI 1977, Br J Anaesth 49:891, urine flow in the first 24–40 h ([doi](https://doi.org/10.1093/bja/49.9.891)); Lorenz JM 1995, Pediatrics 96:484 (PMID 7651782)
-- Siassi B 1980, Biol Neonate 37:285, right atrial pressure in the first 24 h ([doi](https://doi.org/10.1159/000241288))
-- Lee A 2009, SVC flow ([doi](https://doi.org/10.1136/adc.2009.176883))
-- Lee S 1999, Pediatr Pulmonol 27:318 (PMID 10344710); Milner AD 1978, Arch Dis Child 53:545 ([doi](https://doi.org/10.1136/adc.53.7.545)); Lødrup Carlsen KC 1993 (PMID 8112445)
-- Nikkola E 2002, Acta Paediatr ([doi](https://doi.org/10.1080/080352502760272605)); O'Brien LM 2000 ([doi](https://doi.org/10.1136/fn.83.1.f35)); Mariani G 2007, J Pediatr 150:418 ([doi](https://doi.org/10.1016/j.jpeds.2006.12.015))
-- Dudenhausen JW 1997, cord gases ([doi](https://doi.org/10.1016/s0020-7292(97)02890-7))
-- Harris DL 2020 (GLOW glucose) ([doi](https://doi.org/10.1016/j.jpeds.2020.02.079)); Harris DL 2021 (GLOW lactate) ([doi](https://doi.org/10.1016/j.jpeds.2020.12.063)); Hoseth E 2000 ([doi](https://doi.org/10.1136/fn.83.2.f117))
-- Hill JR, Robinson DC 1968, J Physiol 199:685 ([doi](https://doi.org/10.1113/jphysiol.1968.sp008673))
-- Karlsson H 1996 ([doi](https://doi.org/10.1136/fn.75.2.f130)); Fransson AL 2005 ([doi](https://doi.org/10.1136/adc.2004.066589))
-- Eliot RJ 1980, J Pediatr 96:311 ([doi](https://doi.org/10.1016/s0022-3476(80)80836-5))
-- Nelle M 1995, Am J Perinatol 12:212 ([doi](https://doi.org/10.1055/s-2007-994455))
-- Ceriani Cernadas JM 2006, Pediatrics 117:e779 ([doi](https://doi.org/10.1542/peds.2005-1156)); Linderkamp O 1992, Acta Paediatr ([doi](https://doi.org/10.1111/j.1651-2227.1992.tb12095.x)); Nelle M 1993 ([doi](https://doi.org/10.1016/0002-9378(93)90161-b)); Jopling J 2009 ([doi](https://doi.org/10.1542/peds.2008-2654))
-- Ogala WN 1986 (PMID 3810846)
-
-## Gaps
-
-- Blood gases (pH, pCO2, pO2, BE) at 1, 12 and 24 h: the classic series need full text.
-- Hourly blood pressure in the first hours (Kitterman 1969, Versmold 1981: no abstracts); Taiwo 2022 gives 6-hourly values from birth.
-- Respiratory rate, tidal volume and compliance values in the first hours (direction only).
-- Plasma catecholamine levels by hour (Eliot 1980 full text).
-- Measured blood volume after 1-min clamping (Yao 1969 not in PubMed); the 1 h value is derived.
 
 ```
 
@@ -10523,9 +10071,9 @@ BaseModelClass
 | Property | Unit | Default | Description |
 |---|---|---|---|
 | `thermoregulation_running` | boolean | `true` | Switch. Off releases the owned channels once. |
-| `env_temp` | °C | 32 | Air temperature (term 32, preterm 34–36, fetus 37.3 for the amniotic fluid). |
+| `env_temp` | °C | 32 | Air temperature (term_neonate_72h 32; in a fetus 37.3, the amniotic fluid). |
 | `radiant_temp` | °C or null | null | Radiant warmer temperature; null = `env_temp`. |
-| `rel_humidity` | 0–1 | 0.5 | Ambient humidity (term 0.5, preterm 0.6–0.8, fetus 1). |
+| `rel_humidity` | 0–1 | 0.5 | Ambient humidity (term_neonate_72h 0.5; 1 in a fetus). |
 | `respiratory_heat_loss` | boolean | `true` | Count the airway conditioning heat (off in the fetus). |
 | `resp_window` | s | 30 | Averaging window for the respiratory heat (must span several breaths). |
 | `metabolism_name`, `heart_name`, `blood_name`, `gas_name` | – | the model names | Wiring. |
@@ -10853,7 +10401,7 @@ No other file in the engine hard-codes these numbers.
 ````markdown
 # Uterus
 
-> **Experimental.** Used only by the archived `adult_female_uterus` scenario (the Pregnancy panel is hidden in the app as unfinished). It builds and runs on the current engine, but its pregnancy physiology isn't calibrated; see [Assumptions and limitations](#assumptions-and-limitations).
+> **Experimental.** Not used by any shipped scenario (the Pregnancy panel is hidden in the app as unfinished). It builds and runs on the current engine, but its pregnancy physiology isn't calibrated; see [Assumptions and limitations](#assumptions-and-limitations).
 
 `Uterus` turns the adult uterine vascular bed (`UT_ART` → `UT_CAP` → `UT_VEN`) into an organ. It holds no blood. It controls those vessels and adds:
 - a uterine oxygen consumption, with blood-flow and oxygen read-outs;
@@ -10906,9 +10454,9 @@ BaseModelClass
 | `preg_ga` | weeks | 0 | Gestational age of the pregnancy (not `model.gestational_age`, which is the mother's own). |
 | `preg_ga_threshold`, `preg_ga_term` | weeks | 4, 40 | The adaptations ramp linearly between these ages. |
 | `preg_res_term_factor` | – | 0.083 | Resistance multiplier of `UT_ART`, `UT_VEN` and the drainage at term. |
-| `preg_cap_res_term_factor` | – | 0.083 | Resistance multiplier of `UT_CAP` (myometrium) at term; archived scenario 0.43, so the placenta takes the larger share. |
+| `preg_cap_res_term_factor` | – | 0.083 | Resistance multiplier of `UT_CAP` (myometrium) at term. |
 | `preg_vol_term_factor` | – | 3.0 | Unstressed-volume multiplier of the bed at term (engorgement). |
-| `preg_vo2_term_factor` | – | 8.0 | VO2 multiplier at term (archived scenario 2). |
+| `preg_vo2_term_factor` | – | 8.0 | VO2 multiplier at term. |
 | `couple_placenta` | boolean | `false` | Drive `PL_MAT`'s O2/CO2 content from `UT_ART` while pregnant. Set `Placenta.skip_mat_gas_write` with it. |
 
 ### Config: contractions
@@ -10955,7 +10503,7 @@ Each step (references resolved lazily; skipped without the three vessels; output
 
 ## Factor system
 
-- It writes the **scaling layers** (`r_factor_scaling_ps`, `u_vol_factor_scaling_ps`), which belong to `ModelScaler`. That is safe only while the uterine vessels aren't in a scaler group (they aren't in the archived scenario).
+- It writes the **scaling layers** (`r_factor_scaling_ps`, `u_vol_factor_scaling_ps`), which belong to `ModelScaler`. That is safe only while the uterine vessels aren't in a scaler group (they aren't in the shipped scaler config).
 - It writes the **non-persistent** `r_factor` every step (tone and contractions).
 - It leaves `r_factor_ps` (Circulation's SVR channels) and the ANS alone; BloodVessel multiplies all layers.
 
@@ -10968,17 +10516,7 @@ Each step (references resolved lazily; skipped without the three vessels; output
 
 ## Assumptions and limitations
 
-- **Pregnancy isn't calibrated.** Measured in the archived scenario:
-
-  | Gestation | Uterine flow (mL/min) | Placental share | MAP (mmHg) |
-  |---|---|---|---|
-  | not pregnant | 46 | – | 98 |
-  | 20 wk | 78 | 11 % | 89 |
-  | 28 wk | 96 | 15 % | 81 |
-  | 36 wk | 166 | 25 % | 114 |
-  | 40 wk | 628 | 84 % | 75 |
-
-  The term value is right, but the path isn't. Resistance falls linearly with gestation, so flow (∝ 1/R) stays low until the last weeks and then jumps; real uterine flow rises steadily from the first trimester. MAP is non-monotonic with gestation. The maternal blood volume expansion, cardiac output rise and fall in SVR of pregnancy aren't modelled.
+- **Pregnancy isn't calibrated.** Resistance falls linearly with gestation, so flow (∝ 1/R) stays low until the last weeks and then jumps; real uterine flow rises steadily from the first trimester. MAP is non-monotonic with gestation. The maternal blood volume expansion, cardiac output rise and fall in SVR of pregnancy aren't modelled.
 - **Scaling-layer use** (see [Factor system](#factor-system)).
 - **Contractions are a fixed waveform.** No uterine electrophysiology, no oxytocin; `montevideo_units` restates the settings.
 - **The coupling is plumbing only.** No combined mother + fetus scenario uses it.
@@ -10986,7 +10524,7 @@ Each step (references resolved lazily; skipped without the three vessels; output
 
 ## Example definition (JSON)
 
-From `archive/adult_female_uterus.json`, `models.Uterus` (trimmed to the physiology props; the wiring props are the defaults):
+No shipped scenario has a Uterus model; a `models.Uterus` entry (physiology props only; the wiring props are the defaults) looks like:
 
 ```json
 {
@@ -11015,7 +10553,7 @@ From `archive/adult_female_uterus.json`, `models.Uterus` (trimmed to the physiol
 
 ## Usage in the scenarios
 
-Only `archive/adult_female_uterus` (60 kg adult female, not pregnant at build). There the uterine bed (`AD_UT_ART` → `UT_ART` → `UT_CAP` → `UT_VEN` → `VLB`) runs in parallel with the placental bed `PL_IVS` of [MaternalPlacenta](./MaternalPlacenta.md). With contractions on at term, the smoothed uterine flow swings between ~410 and ~670 mL/min over a cycle. None of the canonical neonatal and fetal scenarios include it.
+Not used by any shipped scenario: `term_neonate_72h` has no Uterus model.
 
 ## References
 
@@ -11463,7 +11001,6 @@ support (down to PEEP + 2) as the patient's own effort takes over the volume.
 
 Verified (`term_neonate_72h` unless noted):
 - PC + VG 15 mL converges to 15.3 mL at 8.6 cmH₂O.
-- preterm 28 wk VG 5 mL converges to 5.3 mL at 7.3 cmH₂O.
 - adult VG 450 mL converges to 451 mL at 13.6 cmH₂O.
 - Lung made twice as stiff mid-run: Vt 9.7 recovers to 14.6 mL within about 5 breaths.
 - Lung made twice as soft: Vt is capped at about 19.5 mL (130 %) while the pressure is trimmed
@@ -11475,9 +11012,7 @@ Verified (`term_neonate_72h` unless noted):
 `trigger_flow` (L/min) during expiration forces the breath, as a ventilator with a proximal flow
 sensor does. It is armed once the minimal expiratory time (`_min_exp_time`) has passed, so the end
 of the previous breath cannot re-trigger. With the 0.6 L/min default it triggers every effort on
-`term_neonate_72h` and `adult_female` in PS (`validate:resp`, case `flowtrig`). A 28-week preterm's
-efforts peak at ~0.5 L/min through the tube on PS, so they need a lower threshold; see the
-suite's known failures.
+`term_neonate_72h` in PS (`validate:resp`, case `flowtrig`).
 
 **Volume trigger** (`trigger_mode = "volume"`, the default) sets `trigger_volume = (tidal_volume/100)·trigger_volume_perc`. When `Breathing.ncc_insp === 1` (the
 onset of a patient effort) and the trigger is not blocked, it arms `_trigger_start` with a zeroed
@@ -11522,7 +11057,6 @@ triggered and backup breaths per minute.
   - The working amplitude stays within 4 cmH₂O and `hfo_amplitude_max_cmh2o`; `pressure_limited`
     flags a target that the limit stops.
   - The set `hfo_amplitude_cmh2o` is never changed, so switching targeting off returns to it.
-  - On preterm_28wk, targeting converges in about 5 s.
 - **Sighs and oscillation pause** (HFOV only).
   - `hfo_sigh()` stops the oscillation and holds the circuit at `hfo_sigh_cmh2o` for
     `hfo_sigh_time`. `hfo_sigh_rate` repeats this automatically.
@@ -11543,7 +11077,7 @@ triggered and backup breaths per minute.
 
 **CO₂ clearance comes from the airway, not the device.** It relies on the series dead space with
 axial dispersion ([GasCapacitance → Series dead space](./GasCapacitance.md#series-dead-space)). With
-the old well-mixed dead space, PaCO₂ sat at 10–14 mmHg at any frequency. Now, on preterm_28wk with a
+the old well-mixed dead space, PaCO₂ sat at 10–14 mmHg at any frequency. Now, with a
 2.5 mm ETT, `PaCO₂·DCO₂` stays constant within about ±8 % over 8–15 Hz × amplitude 15–30. That is
 the clinical relationship: CO₂ elimination ∝ f·Vt², so **raising the frequency reduces CO₂
 clearance** (smaller Vt), and raising the amplitude increases it. The pressure swing is damped from
@@ -11560,8 +11094,7 @@ Limitations:
 While the ventilator is on, it sets the dead-space compartment's `tube_volume` to the lumen volume
 `π·(d/2)²·L` and its `tube_port_model` to `VENT_GASCIRCUIT`. With series dead space on (the default,
 see [GasCapacitance → Series dead space](./GasCapacitance.md#series-dead-space)), gas to and from
-the circuit then passes through that rigid lumen, so a longer or wider tube adds dead space. On
-preterm_28wk, a 2.5 mm tube at 200 mm instead of 110 mm (+0.44 mL) raises PaCO₂ 81 → 91. The leak
+the circuit then passes through that rigid lumen, so a longer or wider tube adds dead space. The leak
 and the natural airway bypass the lumen. Switching the ventilator off sets `tube_volume` back to 0.
 
 ## Expiratory valve
@@ -11604,7 +11137,7 @@ R_leak = (K1(leak_size) + K2(leak_size)·|V̇_leak|) · 20/110          (K1 ∝ 
 The leak therefore grows with airway pressure: it is largest at PIP, and smaller but continuous at
 PEEP. Because conductance scales with d⁴, the useful range is narrow:
 
-| leak_size | term_neonate_72h PC 20/5 (3.5 mm tube) | adult_female PC 20/5 (7.5 mm tube) |
+| leak_size | term_neonate_72h PC 20/5 (3.5 mm tube) | adult PC 20/5 (7.5 mm tube) |
 |---|---|---|
 | 0.5 mm | 7 % | — |
 | 0.75 mm | 23 % | — |
@@ -11943,23 +11476,23 @@ In these lesions the right-heart outflow to the lungs is obstructed or absent, s
 
 - **A1 — Pulmonary atresia with intact ventricular septum (PA-IVS).** *Also FO-dependent.* The RV outflow is blind; lungs are fed only by the PDA, and all systemic venous return must cross the foramen ovale right→left to reach the left heart. RV and tricuspid valve are hypoplastic; ~10% have an RV-dependent coronary circulation, the key risk modifier (Chikkabyrappa 2018 [#9]; Jaggers AATS consensus 2025 [#10]).
   *Engine:* `RV_PA.no_flow = true`; `Pda.diameter_relative > 0`; `Shunts.diameter_fo > 0` (R→L); RV hypoplasia via `Heart.components.RV` `el_min`↑ / `u_vol`. **Fully buildable.**
-  **✅ BUILT** as `pa_ivs` — `scripts/archive/_make_paivs.mjs` → `reseed_paivs.mjs` → `probe_paivs.mjs`. Calibrated: **zero antegrade flow** (atretic `RV_PA`), the **duct is the sole pulmonary supply** (≈ 590 mL/min, aorta→PA L→R), a **suprasystemic hypertensive blind RV** (peak ≈ 70 mmHg) that decompresses only through a restrictive **tricuspid-regurgitation jet** (≈ 500 mL/min — its single outlet), and an **obligate R→L FO** (≈ 500 mL/min = the whole systemic venous return) feeding the LV-only output → cyanosis (SpO₂ ≈ 74%, pO₂ ≈ 32 mmHg), MAP preserved at 50. Levers: `RV_PA.no_flow` (atresia, not stenosis — contrast `critical_ps`), `diameter_vsd: 0` (intact septum), RV hypoplasia (`el_min: 2500`, `u_vol: 0.002`), **tricuspid regurgitation** (`RAIVCI_RV`/`RASVC_RV` `no_back_flow: false`, `r_back: 5000` — a restrictive r_back lets the blind RV pressurize to suprasystemic levels yet stay volume-stable; free TR leaves it flaccid at ~12 mmHg, no TR traps volume), `diameter_fo: 6` (left at baseline `fo_lr_factor: 25` — R→L easy), `Pda.diameter_relative: 1.0`. Left heart structurally normal → no engine change. RV-dependent coronary circulation (sinusoids, ~10% of cases) not modeled.
+  **✅ BUILT** as `pa_ivs` (validator `probe_paivs.mjs`). Calibrated: **zero antegrade flow** (atretic `RV_PA`), the **duct is the sole pulmonary supply** (≈ 590 mL/min, aorta→PA L→R), a **suprasystemic hypertensive blind RV** (peak ≈ 70 mmHg) that decompresses only through a restrictive **tricuspid-regurgitation jet** (≈ 500 mL/min — its single outlet), and an **obligate R→L FO** (≈ 500 mL/min = the whole systemic venous return) feeding the LV-only output → cyanosis (SpO₂ ≈ 74%, pO₂ ≈ 32 mmHg), MAP preserved at 50. Levers: `RV_PA.no_flow` (atresia, not stenosis — contrast `critical_ps`), `diameter_vsd: 0` (intact septum), RV hypoplasia (`el_min: 2500`, `u_vol: 0.002`), **tricuspid regurgitation** (`RAIVCI_RV`/`RASVC_RV` `no_back_flow: false`, `r_back: 5000` — a restrictive r_back lets the blind RV pressurize to suprasystemic levels yet stay volume-stable; free TR leaves it flaccid at ~12 mmHg, no TR traps volume), `diameter_fo: 6` (left at baseline `fo_lr_factor: 25` — R→L easy), `Pda.diameter_relative: 1.0`. Left heart structurally normal → no engine change. RV-dependent coronary circulation (sinusoids, ~10% of cases) not modeled.
 
 - **A2 — Pulmonary atresia with VSD.** Lungs fed by the PDA and/or major aortopulmonary collateral arteries (MAPCAs). With a VSD the RV decompresses into the LV/aorta (Soquet 2019 [#11]; Presnell 2015 [#12]).
   *Engine:* `RV_PA.no_flow = true`; `Shunts.diameter_vsd > 0`; `Pda` open. **Buildable without MAPCAs** — collateral vessels are not modelable (see [limitations](#3-engine-lever-summary--limitations)).
-  **✅ BUILT** as `pa_vsd` — `scripts/archive/_make_pavsd.mjs` → `reseed_pavsd.mjs` → `probe_pavsd.mjs`. Calibrated: **zero antegrade flow** (atretic `RV_PA`), a large VSD lets the **RV decompress into the LV/aorta** (`diameter_vsd: 5`, VSD flow RV→LV ≈ 450 mL/min, **RV/LV peaks equilibrated at 71/70 mmHg** — *not* a blind hypertensive RV, contrast PA-IVS), so the atrial septum stays intact (`diameter_fo: 0` — **not** FO-dependent); the **duct is the sole pulmonary supply** (`Pda.diameter_relative: 1.0`, fat 4 mm duct, ≈ 750 mL/min, no MAPCAs), mixed aortic blood → cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34), MAP 47. **Profoundly duct-dependent** — closing the duct crashes SpO₂ to ≈ 14% (the duct is the *only* pulmonary flow). *Calibration:* both ventricles eject into one aortic outlet, which the lumped model over-pumps, so `Heart.cont_factor_left/right: 0.6` normalizes the combined systemic output (a geometry compensation, not intrinsic weakness). Left heart normal → no engine change. **Limitation:** MAPCAs (a real alternative pulmonary supply) are not modelable — so duct closure here is more catastrophic than a MAPCA-supplied patient.
+  **✅ BUILT** as `pa_vsd` (validator `probe_pavsd.mjs`). Calibrated: **zero antegrade flow** (atretic `RV_PA`), a large VSD lets the **RV decompress into the LV/aorta** (`diameter_vsd: 5`, VSD flow RV→LV ≈ 450 mL/min, **RV/LV peaks equilibrated at 71/70 mmHg** — *not* a blind hypertensive RV, contrast PA-IVS), so the atrial septum stays intact (`diameter_fo: 0` — **not** FO-dependent); the **duct is the sole pulmonary supply** (`Pda.diameter_relative: 1.0`, fat 4 mm duct, ≈ 750 mL/min, no MAPCAs), mixed aortic blood → cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34), MAP 47. **Profoundly duct-dependent** — closing the duct crashes SpO₂ to ≈ 14% (the duct is the *only* pulmonary flow). *Calibration:* both ventricles eject into one aortic outlet, which the lumped model over-pumps, so `Heart.cont_factor_left/right: 0.6` normalizes the combined systemic output (a geometry compensation, not intrinsic weakness). Left heart normal → no engine change. **Limitation:** MAPCAs (a real alternative pulmonary supply) are not modelable — so duct closure here is more catastrophic than a MAPCA-supplied patient.
 
 - **A3 — Critical pulmonary stenosis.** Severe but not complete RVOT obstruction; duct-dependent when critical. A right→left atrial "pop-off" across the FO offloads the pressured RA (Latson 2001 [#13]; Aggarwal 2018 [#14]).
   *Engine:* `RV_PA.r_for`↑ (stenosis, keep some antegrade flow); `Pda` open; `Shunts.diameter_fo` for the atrial pop-off. **Fully buildable.**
-  **✅ BUILT** as `critical_ps` — `scripts/archive/_make_cps.mjs` → `reseed_cps.mjs` → `probe_ps.mjs`. Calibrated: **suprasystemic, pressure-loaded RV** (peak ≈ 110 mmHg) with an 84 mmHg trans-valvular gradient and a low post-stenotic PA; antegrade flow is a trickle (≈ 180 mL/min) while the **duct supplies the majority of pulmonary flow** (≈ 310 mL/min, aorta→PA L→R — close it and pulmonary flow halves); a **right→left FO pop-off** (≈ 340 mL/min) drives cyanosis (SpO₂ ≈ 77%, pO₂ ≈ 33 mmHg), systemic MAP preserved. Levers: `RV_PA.r_for: 8000` (patent — not atretic), `Heart.cont_factor_right: 0.6` (the pressure-loaded RV beginning to fail — keeps the peak realistic and deepens the pop-off), `Pda.diameter_relative: 0.7`, `diameter_fo: 5`. *Note:* the FO is left at the baseline `fo_lr_factor: 25` — its fetal-flap asymmetry already makes R→L easy, exactly the direction this lesion needs (contrast HLHS/TGA, which need `fo_lr_factor ≈ 1`). Left heart structurally normal → no engine change. *Modeling caveat:* the linear-resistance valve + time-varying-elastance RV trade peak pressure against antegrade flow, so the realistic peak comes via a mildly failing RV rather than a 200 mmHg hypercontractile one.
+  **✅ BUILT** as `critical_ps` (validator `probe_ps.mjs`). Calibrated: **suprasystemic, pressure-loaded RV** (peak ≈ 110 mmHg) with an 84 mmHg trans-valvular gradient and a low post-stenotic PA; antegrade flow is a trickle (≈ 180 mL/min) while the **duct supplies the majority of pulmonary flow** (≈ 310 mL/min, aorta→PA L→R — close it and pulmonary flow halves); a **right→left FO pop-off** (≈ 340 mL/min) drives cyanosis (SpO₂ ≈ 77%, pO₂ ≈ 33 mmHg), systemic MAP preserved. Levers: `RV_PA.r_for: 8000` (patent — not atretic), `Heart.cont_factor_right: 0.6` (the pressure-loaded RV beginning to fail — keeps the peak realistic and deepens the pop-off), `Pda.diameter_relative: 0.7`, `diameter_fo: 5`. *Note:* the FO is left at the baseline `fo_lr_factor: 25` — its fetal-flap asymmetry already makes R→L easy, exactly the direction this lesion needs (contrast HLHS/TGA, which need `fo_lr_factor ≈ 1`). Left heart structurally normal → no engine change. *Modeling caveat:* the linear-resistance valve + time-varying-elastance RV trade peak pressure against antegrade flow, so the realistic peak comes via a mildly failing RV rather than a 200 mmHg hypercontractile one.
 
 - **A4 — Tricuspid atresia (with pulmonary stenosis/atresia).** *Also FO-dependent.* The tricuspid valve is absent, so **all** systemic venous return is obligated right→left across the FO into the LA; the functionally single LV then supplies the body, while pulmonary flow comes via a VSD and/or the duct (Sumal 2020 [#15]). A restrictive atrial septum is poorly tolerated.
   *Engine:* `RA_RV.no_flow = true`; `Shunts.diameter_fo` (obligate R→L); `Shunts.diameter_vsd`; RV hypoplasia; `Pda` if pulmonary atresia / severe PS. **Buildable** (functionally single LV).
-  **✅ BUILT** as `tricuspid_atresia` (type Ib — normally related great arteries, restrictive VSD + pulmonary stenosis, the cyanotic reduced-pulmonary-flow form) — `scripts/archive/_make_ta.mjs` → `reseed_ta.mjs` → `probe_ta.mjs`. Calibrated: **obligate FO R→L** (≈ 500 mL/min = the whole systemic venous return), the **single LV** as the only pump (CO ≈ 0.78 L/min), pulmonary flow reaching the lungs only via the **VSD→RV→PA route** (≈ 465 mL/min — the hypoplastic RV acts as a conduit, so VSD flow ≈ antegrade Qp) **supplemented duct-dependently** (duct L→R ≈ 300 mL/min; closing the duct drops SpO₂ 80→74%), cyanosis (SpO₂ ≈ 80%, pO₂ ≈ 35 mmHg), MAP 49 / PAP 33. Levers: the split tricuspid `RAIVCI_RV` + `RASVC_RV` `no_flow` (atresia), RV hypoplasia (`el_min: 2200`, `u_vol: 0.0025`, VSD-fed), `diameter_fo: 6` (baseline `fo_lr_factor: 25` → R→L easy), `diameter_vsd: 2` (restrictive) + `RV_PA.r_for: 800` (pulmonary stenosis) + `Pda.diameter_relative: 0.8`. Left heart normal → no engine change (single LV uses the normal cycle path). Cross-listed as a Category-D (FO-dependent) teaching case.
+  **✅ BUILT** as `tricuspid_atresia` (type Ib — normally related great arteries, restrictive VSD + pulmonary stenosis, the cyanotic reduced-pulmonary-flow form) (validator `probe_ta.mjs`). Calibrated: **obligate FO R→L** (≈ 500 mL/min = the whole systemic venous return), the **single LV** as the only pump (CO ≈ 0.78 L/min), pulmonary flow reaching the lungs only via the **VSD→RV→PA route** (≈ 465 mL/min — the hypoplastic RV acts as a conduit, so VSD flow ≈ antegrade Qp) **supplemented duct-dependently** (duct L→R ≈ 300 mL/min; closing the duct drops SpO₂ 80→74%), cyanosis (SpO₂ ≈ 80%, pO₂ ≈ 35 mmHg), MAP 49 / PAP 33. Levers: the split tricuspid `RAIVCI_RV` + `RASVC_RV` `no_flow` (atresia), RV hypoplasia (`el_min: 2200`, `u_vol: 0.0025`, VSD-fed), `diameter_fo: 6` (baseline `fo_lr_factor: 25` → R→L easy), `diameter_vsd: 2` (restrictive) + `RV_PA.r_for: 800` (pulmonary stenosis) + `Pda.diameter_relative: 0.8`. Left heart normal → no engine change (single LV uses the normal cycle path). Cross-listed as a Category-D (FO-dependent) teaching case.
 
 - **A5 — Tetralogy of Fallot with pulmonary atresia / severe RVOT obstruction.** Large VSD with an overriding aorta; in the pulmonary-atresia form, pulmonary flow is duct- (±MAPCA-) dependent (Miller AATS consensus 2022 [#18]; Bailliard 2009 [#19]).
   *Engine:* large `Shunts.diameter_vsd`; `RV_PA` high `r_for` (or `no_flow` for atresia); `Pda`; the aortic override via the pre-wired `RV_AA` valve (RV→AA) enabled alongside `LV_AA`.
-  **✅ BUILT** as a four-phenotype family — `tof_pink`, `tof` (headline), `tof_severe`, `tof_pa` — term neonate **24 h old, 3.3 kg** (term_neonate_72h allometrically scaled from 3.545 kg with `weight_scale`, volumes only). `scripts/archive/_make_tof.mjs` → `reseed_tof.mjs` → `probe_tof.mjs`. Shared levers: `diameter_vsd: 5` (RV/LV peaks equalise in every variant — non-restrictive), `RV_AA` enabled so both ventricles eject into the aorta (RV share of aortic inflow ≈ 33–35%, 15% in `tof_pink`), `Heart.cont_factor_left/right` 0.7 (0.75 pink) to normalise the two-into-one-outlet output (as `pa_vsd`), `diameter_fo: 1.5` (small PFO). **No extra RV hypertrophy** — RVH develops postnatally under systemic loading (Alipour Symakani 2023), so the RV chamber keeps baseline stiffness on day 1. Calibrated operating points (ANS on, after reseed):
+  **✅ BUILT** as a four-phenotype family — `tof_pink`, `tof` (headline), `tof_severe`, `tof_pa` — term neonate **24 h old, 3.3 kg** (term_neonate_72h allometrically scaled from 3.545 kg with `weight_scale`, volumes only). Validator `probe_tof.mjs`. Shared levers: `diameter_vsd: 5` (RV/LV peaks equalise in every variant — non-restrictive), `RV_AA` enabled so both ventricles eject into the aorta (RV share of aortic inflow ≈ 33–35%, 15% in `tof_pink`), `Heart.cont_factor_left/right` 0.7 (0.75 pink) to normalise the two-into-one-outlet output (as `pa_vsd`), `diameter_fo: 1.5` (small PFO). **No extra RV hypertrophy** — RVH develops postnatally under systemic loading (Alipour Symakani 2023), so the RV chamber keeps baseline stiffness on day 1. Calibrated operating points (ANS on, after reseed):
 
   | scenario | `RV_PA.r_for` | duct (`diameter_relative`, max) | RVOT gradient | VSD net | Qp:Qs | SpO₂ | MAP | Qs mL/kg/min |
   |---|---|---|---|---|---|---|---|---|
@@ -11980,16 +11513,16 @@ Here the left-heart outflow to the body is obstructed or absent, so systemic per
 
 - **B1 — Hypoplastic left heart syndrome (HLHS).** *Also FO-dependent.* The LV cannot support the systemic circulation; the entire cardiac output is delivered by the RV → PDA → aorta, perfusing the arch and coronaries **retrograde**. Pulmonary venous return is obligated left→right across the FO. An intact or highly restrictive atrial septum is a lethal combination requiring emergent decompression (Connor 2007 [#22]; Schranz duct-stenting 2024 [#23]; Vlahos 2004 [#26]; Generali 2022 [#27]).
   *Engine:* `LV_AA.no_flow` or severe `r_for`↑ + LV hypoplasia (reuse the `cdh_lv_dysfunction` LV levers: `Heart.cont_factor_left`, LV `el_min` / `u_vol`); `LA_LV.no_flow` or high `r_for` (mitral atresia/stenosis); `Shunts.diameter_fo` L→R; `Pda` carrying R→L (PA→AAR; the `AAR_DA` resistor is bidirectional). The *restrictive/intact-septum* variant (`diameter_fo → 0`) is a high-value teaching toggle.
-  **✅ BUILT** as `hlhs` (mitral + aortic atresia → LV fully excluded) — `scripts/archive/_make_hlhs.mjs` → `reseed_hlhs.mjs` → `probe_hlhs.mjs`. Calibrated single-RV parallel circulation: RV output ≈ 1.2 L/min split **Qp:Qs ≈ 1.7** (mild pulmonary over-circulation, the typical balance), systemic Qs ≈ 0.46 L/min via the duct (PA→aorta, R→L), **retrograde aortic-arch and coronary perfusion** (AAR→AA), obligate FO L→R ≈ 0.75 L/min, moderate cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34 mmHg), PAP > MAP (RV is the systemic pump). Levers: mitral+aortic atresia, `diameter_fo: 6` / `fo_lr_factor: 1`, `Pda.diameter_relative: 1.0` with a fat 4 mm duct, hypoplastic AA (`u_vol ×0.6`, `el_base ×1.4`), **pulmonary arteriolar resistance ×2 to balance Qp:Qs** (at baseline PVR the lungs steal the output → Qp:Qs ≈ 3.5, systemic hypoperfusion — itself a teaching failure mode). A second engine generalization was needed: `Heart.calc_model` now derives the cardiac cycle from the ventricular activation window when the LV has *no* outflow (aortic atresia → both `LV_AA` and `LV_PA` disabled), so the single-RV physiology keeps a valid cycle (and `HeartFunction` inputs); identity for any heart with a working LV outflow (normal, TGA, tricuspid atresia, PA-IVS).
+  **✅ BUILT** as `hlhs` (mitral + aortic atresia → LV fully excluded) (validator `probe_hlhs.mjs`). Calibrated single-RV parallel circulation: RV output ≈ 1.2 L/min split **Qp:Qs ≈ 1.7** (mild pulmonary over-circulation, the typical balance), systemic Qs ≈ 0.46 L/min via the duct (PA→aorta, R→L), **retrograde aortic-arch and coronary perfusion** (AAR→AA), obligate FO L→R ≈ 0.75 L/min, moderate cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34 mmHg), PAP > MAP (RV is the systemic pump). Levers: mitral+aortic atresia, `diameter_fo: 6` / `fo_lr_factor: 1`, `Pda.diameter_relative: 1.0` with a fat 4 mm duct, hypoplastic AA (`u_vol ×0.6`, `el_base ×1.4`), **pulmonary arteriolar resistance ×2 to balance Qp:Qs** (at baseline PVR the lungs steal the output → Qp:Qs ≈ 3.5, systemic hypoperfusion — itself a teaching failure mode). A second engine generalization was needed: `Heart.calc_model` now derives the cardiac cycle from the ventricular activation window when the LV has *no* outflow (aortic atresia → both `LV_AA` and `LV_PA` disabled), so the single-RV physiology keeps a valid cycle (and `HeartFunction` inputs); identity for any heart with a working LV outflow (normal, TGA, tricuspid atresia, PA-IVS).
   **✅ Restrictive/intact-septum variant BUILT** as `hlhs_restrictive` (same builder, only the atrial lever differs: `diameter_fo: 1`). The atrial communication is too small to pass the whole pulmonary venous return, so the LA cannot decompress: **LA pressure rises to ≈ 21 mmHg** (vs 4.5 open — a ≈ 19 mmHg trans-septal gradient = severe pulmonary venous hypertension), the obligate shunt is choked (≈ 420 vs 750 mL/min), single-RV preload/output fall (≈ 0.8 vs 1.2 L/min), and hypoxaemia is severe (**SpO₂ ≈ 64%, pO₂ ≈ 28 mmHg, pH ≈ 7.30**) — the lethal emergency needing immediate atrial decompression (balloon/blade septostomy or stenting). It remains a stable steady state because the septum is restrictive, not fully intact (`diameter_fo → 0` would trap the LA entirely and collapse). Alveolar oedema is not separately modeled — the hypoxaemia arises from the reduced pulmonary flow + obligatory mixing.
 
 - **B2 — Critical aortic stenosis.** The LV cannot eject across the valve, so systemic perfusion becomes duct-dependent; high LV wall stress impairs coronary perfusion and drives LV dysfunction (Affolter 2014 [#24]).
   *Engine:* `LV_AA.r_for`↑; LV strain via the existing `HeartFunction` load-induced contractility model; `Pda` open. **Fully buildable.**
-  **✅ BUILT** as `critical_as` — `scripts/archive/_make_cas.mjs` → `reseed_cas.mjs` → `probe_as.mjs`. Calibrated (left-sided mirror of `critical_ps`): **pressure-loaded, failing LV** (peak ≈ 127 mmHg, 83 mmHg trans-valvular gradient — a low-flow/low-gradient state) with reduced antegrade aortic flow (≈ 190 mL/min) while the **duct supplies ~40% of systemic flow** (R→L ≈ 125 mL/min, PA→aorta — close it → systemic shock); **differential cyanosis** (pre-ductal SpO₂ ≈ 96% from the LV-fed upper body vs post-ductal ≈ 85% from the duct-fed lower body); mild LA congestion (≈ 7.5 mmHg) decompressing L→R across the FO; low MAP (≈ 39) with compensatory tachycardia — the decompensating low-output picture. Levers: `LV_AA.r_for: 8000` (patent — not atretic, contrast HLHS), `Heart.cont_factor_left: 0.4` (failing LV — keeps the peak realistic ~110–130 not ~190 and deepens duct-dependence + differential cyanosis), `Pda.diameter_relative: 1.0`, `diameter_fo: 2.5` / `fo_lr_factor: 4` (modest L→R LA decompression). Aortic valve patent → no engine change. *Same modeling caveat as critical PS:* the realistic LV peak comes via a failing LV rather than a 190 mmHg hypercontractile one.
+  **✅ BUILT** as `critical_as` (validator `probe_as.mjs`). Calibrated (left-sided mirror of `critical_ps`): **pressure-loaded, failing LV** (peak ≈ 127 mmHg, 83 mmHg trans-valvular gradient — a low-flow/low-gradient state) with reduced antegrade aortic flow (≈ 190 mL/min) while the **duct supplies ~40% of systemic flow** (R→L ≈ 125 mL/min, PA→aorta — close it → systemic shock); **differential cyanosis** (pre-ductal SpO₂ ≈ 96% from the LV-fed upper body vs post-ductal ≈ 85% from the duct-fed lower body); mild LA congestion (≈ 7.5 mmHg) decompressing L→R across the FO; low MAP (≈ 39) with compensatory tachycardia — the decompensating low-output picture. Levers: `LV_AA.r_for: 8000` (patent — not atretic, contrast HLHS), `Heart.cont_factor_left: 0.4` (failing LV — keeps the peak realistic ~110–130 not ~190 and deepens duct-dependence + differential cyanosis), `Pda.diameter_relative: 1.0`, `diameter_fo: 2.5` / `fo_lr_factor: 4` (modest L→R LA decompression). Aortic valve patent → no engine change. *Same modeling caveat as critical PS:* the realistic LV peak comes via a failing LV rather than a 190 mmHg hypercontractile one.
 
 - **B3 — Critical coarctation of the aorta.** A discrete narrowing at the isthmus; the lower body is perfused by right→left ductal flow into the descending aorta, and abrupt ductal closure causes shock (Ganigara 2019 [#25]; Egan 2009 [#28]).
   *Engine:* `AAR_AD.r_for`↑ (or `no_flow` for near-atretic); `Pda` open feeding the lower body. **Buildable with a wiring note** — see B3/B4 caveat in [§3](#3-engine-lever-summary--limitations).
-  **✅ BUILT** as `coarctation` — `scripts/archive/_make_coarc.mjs` → `reseed_coarc.mjs` → `probe_coarc.mjs`. Calibrated: a tight but patent isthmus gives the hallmark **pre/post-ductal pressure gradient** (upper body 101/55 vs lower 30/16, ≈ 55 mmHg mean — upper-body hypertension / weak femorals), a duct-dependent lower body (an antegrade isthmus trickle ≈ 130 mL/min plus the duct R→L ≈ 15 mL/min), and **differential cyanosis** (pre-ductal 97% vs post-ductal 87%). *Two engine facts resolved the wiring note (both JSON-only, no code change):* (1) re-point the duct to the descending aorta — `Pda.components.AAR_DA.comp_from: "AD"` (the `Pda` model drives whatever endpoints its resistor names, so the duct desaturates only the lower body → correct differential cyanosis); (2) the isthmus lever is **`Circulation.components.AD.r_for`** (= 30000 here), *not* `AAR_AD.r_for` — the `AD` BloodVessel adopts its same-named input resistor `AAR_AD` and overwrites `r_for` with `AD.r_for_eff` every step, so a direct edit to `AAR_AD.r_for` is wiped.
+  **✅ BUILT** as `coarctation` (validator `probe_coarc.mjs`). Calibrated: a tight but patent isthmus gives the hallmark **pre/post-ductal pressure gradient** (upper body 101/55 vs lower 30/16, ≈ 55 mmHg mean — upper-body hypertension / weak femorals), a duct-dependent lower body (an antegrade isthmus trickle ≈ 130 mL/min plus the duct R→L ≈ 15 mL/min), and **differential cyanosis** (pre-ductal 97% vs post-ductal 87%). *Two engine facts resolved the wiring note (both JSON-only, no code change):* (1) re-point the duct to the descending aorta — `Pda.components.AAR_DA.comp_from: "AD"` (the `Pda` model drives whatever endpoints its resistor names, so the duct desaturates only the lower body → correct differential cyanosis); (2) the isthmus lever is **`Circulation.components.AD.r_for`** (= 30000 here), *not* `AAR_AD.r_for` — the `AD` BloodVessel adopts its same-named input resistor `AAR_AD` and overwrites `r_for` with `AD.r_for_eff` every step, so a direct edit to `AAR_AD.r_for` is wiped.
 
 - **B4 — Interrupted aortic arch (IAA).** The aortic arch is discontinuous; the descending aorta is perfused entirely through the duct. Almost always with a VSD and a strong association with 22q11 deletion (DiGeorge). PGE1 "revolutionized" its management (Jonas 2015 [#29]; Burbano-Vera 2018 [#30]).
   *Engine:* `AAR_AD.no_flow = true`; `Shunts.diameter_vsd`; ductal lower-body path. **Buildable with rewire** (same caveat as B3).
@@ -11999,7 +11532,7 @@ Here the left-heart outflow to the body is obstructed or absent, so systemic per
 
 - **C1 — d-Transposition of the great arteries (d-TGA).** The aorta arises from the RV and the pulmonary artery from the LV, creating **two circulations in parallel** rather than in series. Survival is impossible without mixing — at the atrial level (FO/ASD), through the duct, and/or via a VSD. Cyanosis is inversely proportional to the amount of mixing. The classic neonatal rescue is PGE1 plus balloon atrial septostomy (Rashkind), pending the arterial switch (Martins 2008 [#16]; Rashkind 1966 [#17]; Cucerea 2024 [#33]; Beitzke 1983 [#35]).
   *Engine:* enable `RV_AA` + `LV_PA` and disable `RV_PA` + `LV_AA` (**all four already pre-wired in `term_neonate_72h.json`**); mixing via `Shunts.diameter_fo` + `Pda` (+ optional `diameter_vsd`). A septostomy is demonstrable by ramping `diameter_fo` via the event scheduler.
-  **✅ BUILT** as `dtga` (intact ventricular septum) — `scripts/archive/_make_dtga.mjs` → `reseed_dtga.mjs` → `probe_dtga.mjs`. Calibrated to a stable parallel circulation (Qp:Qs ≈ 1, balanced ~0.8 L/min outputs) with cyanosis (SpO₂ ≈ 59%, pO₂ ≈ 25 mmHg). Mixing levers: `diameter_fo: 6`, `fo_lr_factor: 1` (a true ASD/septostomy hole is symmetric — a high flap factor would throttle the LA→RA flow that oxygenates the systemic circuit), `Pda.diameter_relative: 1.0`, `diameter_vsd: 0`. *Note:* FO ≥ ~7 mm at `fo_lr_factor 1` makes the Hagen-Poiseuille atrial resistance so low the explicit solver oscillates — keep septostomy demos at/below 6 mm or raise `atrial_septal_width`. One small engine generalization was needed: `Heart.calc_model` now detects end-systole from whichever LV outflow valve is active (`LV_AA` if enabled, else `LV_PA`), so the cardiac-cycle analysis and `HeartFunction` wall-stress inputs stay valid with the great arteries transposed (identity for normal anatomy).
+  **✅ BUILT** as `dtga` (intact ventricular septum) (validator `probe_dtga.mjs`). Calibrated to a stable parallel circulation (Qp:Qs ≈ 1, balanced ~0.8 L/min outputs) with cyanosis (SpO₂ ≈ 59%, pO₂ ≈ 25 mmHg). Mixing levers: `diameter_fo: 6`, `fo_lr_factor: 1` (a true ASD/septostomy hole is symmetric — a high flap factor would throttle the LA→RA flow that oxygenates the systemic circuit), `Pda.diameter_relative: 1.0`, `diameter_vsd: 0`. *Note:* FO ≥ ~7 mm at `fo_lr_factor 1` makes the Hagen-Poiseuille atrial resistance so low the explicit solver oscillates — keep septostomy demos at/below 6 mm or raise `atrial_septal_width`. One small engine generalization was needed: `Heart.calc_model` now detects end-systole from whichever LV outflow valve is active (`LV_AA` if enabled, else `LV_PA`), so the cardiac-cycle analysis and `HeartFunction` wall-stress inputs stay valid with the great arteries transposed (identity for normal anatomy).
 
 ### D. Foramen-ovale / atrial-septum-dependent
 
@@ -12007,7 +11540,7 @@ These lesions depend on an **obligatory atrial-level shunt**; a restrictive or i
 
 - **D1 — Total anomalous pulmonary venous connection (TAPVC), especially obstructed.** The pulmonary veins drain to the systemic venous side instead of the LA, so an obligatory right→left atrial shunt across the FO is the only way to fill the left heart. The obstructed form presents with severe cyanosis and low output, is **unresponsive to prostaglandin**, and is one of the few true neonatal cardiac-surgical emergencies (Ross 2017 [#36]; Vanderlaan 2018 [#37]; Campbell 2022 [#38]).
   *Engine:* reroute the pulmonary venous return (`PV_LA`) so it enters the right side, adding the anomalous connection with high `r_for` for the obstructed variant; `Shunts.diameter_fo` obligate R→L. **Buildable with a pulmonary-venous rewire.**
-  **✅ BUILT** as `tapvc` (unobstructed) + `tapvc_obstructed` — `scripts/archive/_make_tapvc.mjs` → `reseed_tapvc.mjs` → `probe_tapvc.mjs`. The reroute is **JSON-only**: `PV_LA.comp_to: "SVC"` (the pulmonary veins drain to the SVC — supracardiac, the commonest type). *Diagram:* the `PV_LA` connector is re-pointed PV→SVC ("vertical vein"), so the animation shows the anomalous drainage and an LA fed only across the foramen ovale. PV keeps its ring position; since the SVC is off the ring, the path renders as a curved chord across the diagram interior, drawn `arc_flip` so it bends up over the pulmonary side rather than down over the upper-body nodes (a straight one would lie on top of the FO chord). `PV_LA` is a free-standing Resistor (the `LA` HeartChamber doesn't adopt it), so its `comp_to` *and* `r_for` set directly — the channel `r_for` is the obstruction lever. The FO is opened (`diameter_fo: 6`, baseline `fo_lr_factor: 25` → R→L easy) to carry the obligate shunt that fills the *entire* left heart; the duct stays closed (TAPVC is FO-dependent, not duct-dependent → PGE1-unresponsive). Calibrated (re-tuned 2026-10-01 for the merged RA, `diameter_fo: 8`) — **unobstructed** (`PV_LA.r_for: 335`): full mixing in the RA, normal PV pressure ≈ 10 mmHg, CO ≈ 0.58 L/min, mild cyanosis (SpO₂ ≈ 85%, pO₂ ≈ 40). Before the merge the split RA confined pulmonary venous return to `RASVC` and streamed it toward the FO, which is how the earlier SpO₂ ≈ 87 arose. With true complete mixing, ≈ 85 is the closest the levers reach without dropping PV pressure below normal. **Obstructed** (`PV_LA.r_for: 4600`): **pulmonary venous hypertension** (PV pressure ≈ 36 mmHg, vs a near-normal LA — the pathology is upstream, not in the left atrium), secondary **suprasystemic PAP** (≈ 51 ≥ MAP), low output (CO ≈ 0.43 L/min, MAP ≈ 44), severe cyanosis (SpO₂ ≈ 73%, pO₂ ≈ 31) — the surgical emergency. Alveolar oedema not separately modeled (the hypoxaemia arises from the reduced pulmonary flow + complete mixing).
+  **✅ BUILT** as `tapvc` (unobstructed) + `tapvc_obstructed` (validator `probe_tapvc.mjs`). The reroute is **JSON-only**: `PV_LA.comp_to: "SVC"` (the pulmonary veins drain to the SVC — supracardiac, the commonest type). *Diagram:* the `PV_LA` connector is re-pointed PV→SVC ("vertical vein"), so the animation shows the anomalous drainage and an LA fed only across the foramen ovale. PV keeps its ring position; since the SVC is off the ring, the path renders as a curved chord across the diagram interior, drawn `arc_flip` so it bends up over the pulmonary side rather than down over the upper-body nodes (a straight one would lie on top of the FO chord). `PV_LA` is a free-standing Resistor (the `LA` HeartChamber doesn't adopt it), so its `comp_to` *and* `r_for` set directly — the channel `r_for` is the obstruction lever. The FO is opened (`diameter_fo: 6`, baseline `fo_lr_factor: 25` → R→L easy) to carry the obligate shunt that fills the *entire* left heart; the duct stays closed (TAPVC is FO-dependent, not duct-dependent → PGE1-unresponsive). Calibrated (re-tuned 2026-10-01 for the merged RA, `diameter_fo: 8`) — **unobstructed** (`PV_LA.r_for: 335`): full mixing in the RA, normal PV pressure ≈ 10 mmHg, CO ≈ 0.58 L/min, mild cyanosis (SpO₂ ≈ 85%, pO₂ ≈ 40). Before the merge the split RA confined pulmonary venous return to `RASVC` and streamed it toward the FO, which is how the earlier SpO₂ ≈ 87 arose. With true complete mixing, ≈ 85 is the closest the levers reach without dropping PV pressure below normal. **Obstructed** (`PV_LA.r_for: 4600`): **pulmonary venous hypertension** (PV pressure ≈ 36 mmHg, vs a near-normal LA — the pathology is upstream, not in the left atrium), secondary **suprasystemic PAP** (≈ 51 ≥ MAP), low output (CO ≈ 0.43 L/min, MAP ≈ 44), severe cyanosis (SpO₂ ≈ 73%, pO₂ ≈ 31) — the surgical emergency. Alveolar oedema not separately modeled (the hypoxaemia arises from the reduced pulmonary flow + complete mixing).
 
 > Cross-listed: **A1 (PA-IVS)**, **A4 (tricuspid atresia)**, and the **B1 (HLHS) restrictive-septum variant** are equally FO-dependent and double as Category-D teaching cases.
 
@@ -12133,277 +11666,6 @@ All PMIDs were retrieved and confirmed via PubMed metadata; Rashkind 1966 [#17] 
 *Bibliographic data retrieved from PubMed; DOI links available per article.*
 
 ```
-
-### FILE: explain-engine/docs/fetal_circulation.md
-
-````markdown
-# Fetal circulation scenarios
-
-> **Scenarios removed (2026-10-25).** `fetus_25wk`, `fetus_30wk` and `fetus_term` were removed during the re-validation, to be rebuilt from scratch once term_neonate_72h is final. This page is kept as the design record (fetal invariants, operating points, what each lever did); the files and links it names are gone.
-
-**Current scenarios (2026-10-19/20)**, all rebuilt from the literature-validated `term_neonate_72h` by
-`node scripts/_make_fetus_validated.mjs --profile 25|30|40` (levers in `scripts/_fetal_profiles.mjs`):
-- `fetus_25wk`, 25 wk, 0.7 kg (as preterm_25wk), validated against
-  Fetus25wkReference (50 of 51). Size/maturity levers from preterm_25wk corrected by the
-  fetus-30 / preterm-30 ratios; the heart needed less diastolic stiffness (`HEART_EL_MIN` 2.5) to keep MAP at the
-  baroreflex set-point (systemic resistance was a weak lever: the placenta takes the flow). Operating point: HR 148,
-  MAP 34, CVP 2.2, output ~440, RV:LV 58:42, UV 92 > IVC 80 > AA 72 > UA 68 %, umbilical flow 148, core 37.5.
-- `fetus_30wk`, 30 wk, 1.5 kg, validated against
-  Fetus30wkReference (49 of 51 graded rows in range); see
-  [The rebuilt fetus_30wk](#the-rebuilt-fetus_30wk-2026-10-19) below;
-- `fetus_term`, 40 wk, 3.545 kg (as term_neonate_72h), validated against
-  TermFetusReference (50 of 51). What differs from 30 wk: placental O₂ diffusion 10× lower
-  (`dif_o2` 0.003: at term the umbilical vein stays ~30 % short of the maternal side), no RV boost
-  (`cont_factor_right` 1.0, `cont_factor_left` 1.15), PVR ×0.8 on the fetal ×9.5, umbilical flow ~142 mL/kg/min.
-  Operating point: HR 142, MAP 48, CVP 3.3, output ~430, RV:LV 59:41, UV 80 > IVC 68 > AA 61 > UA 57 %, core 37.5.
-
-The sections after that describe the **earlier pair**, now in `model_definitions/archive/` and replaced by these (built from the old
-term base):
-
-| Scenario | GA | Weight | Built by |
-|---|---|---|---|
-| `archive/term_fetus` | 40 wk | 3.545 kg | `scripts/_make_term_fetus.mjs` (single-point transform of `term_neonate_72h`) |
-| `archive/fetus_30wk` | 30 wk | 1.35 kg | `scripts/_make_fetus.mjs 30` (per-GA transform of `term_fetus`) |
-
-In that pipeline `term_fetus` was the anchor: it carried the fetal topology and its own fetal diagram, and
-every other gestational age was derived from it by `_make_fetus.mjs`.
-
-## The rebuilt fetus_30wk (2026-10-19)
-
-**Route.** Live `term_neonate_72h` → weight scaling to 1.5 kg (the placenta scaled by hand: it is outside every
-scaler group) → the fetal transform of `_make_term_fetus.mjs` re-done on the live model (placenta running,
-cord patent, duct and foramen wide open, intrapulmonary shunts closed, fetal PVR, inert lungs, HbF, split
-right atrium, amniotic environment) → the 30-week profile (the `preterm_30wk` maturity levers as starting
-points) → reseeded with the preterm renal reference (`reseed_preterm.mjs --file`) → the fetal invariants
-re-asserted on the baked file. The fetal diagram is taken from the archived `fetus_30wk`.
-
-**Operating point** (`probe_term_reference.mjs`, which reads the fetal variables when the placenta runs):
-
-| | `fetus_30wk` | reference |
-|---|---|---|
-| HR / MAP / CVP | 148 / 37.6 / 4.5 | 145 / 38 (ovine) / 3 |
-| PA − Ao | ~0.8 mmHg | ≈ 0 |
-| combined output | ~420 mL/kg/min | 420 |
-| RV : LV | 59 : 41 | 59 : 41 |
-| lungs / foramen / duct / placenta | ~17 / 24 / 41 / 33 % | 20 / 21 / 39 / 28 (Kiserud ~32) |
-| umbilical flow | ~140 mL/kg/min | 120 (MRI 129) |
-| O₂ UV / IVC / AA / DAo=UA / SVC | 89 / ~76 / ~70 / ~65 / ~54 % | 85 / 72 / 67 / 64 / 43 |
-| UV gas pO₂ / pCO₂ / pH | 41 / 36 / 7.40 | 40 / 36 / 7.40 |
-| UA pCO₂ / pH, UA − UV pCO₂ | ~45 / 7.32, ~8 | 41 / 7.37, 5 |
-| VO₂ (umbilical Fick) | ~6.0 mL/kg/min | 6.0 (human 5.4–8.1) |
-| core temperature | 37.50 °C | 37.5 |
-
-**What the rebuild changed against the archived pipeline:**
-- **Preferential streaming.** With the right atrium split, IVC and SVC blood still mixed in the left atrium,
-  because the foramen is two resistors (`LA_RAIVCI`, `LA_RASVC`). The new `Shunts.fo_svc_fraction` (0–1,
-  default 0.5) sets the share of the foramen's area that opens onto the SVC part; the fetus uses 0, so only IVC
-  blood crosses (AA − PA saturation gap 0.9 → ~5–6 points).
-- **Ventricular dominance by filling, not by contractility.** After weight scaling the RV was as stiff as the LV;
-  `cont_factor_right` 1.2 → 1.8 moved the RV share only 52.5 → 54.8 %. A more compliant RV (`RV_EL_MIN` 0.8 on
-  its diastolic elastance) gave 59 : 41 with the foramen and duct shares following.
-- **The oxygen balance is an umbilical Fick problem.** The cordocentesis saturations (UV 85 / UA 64) only fit
-  VO₂ and umbilical flow together: VO₂ 6.0 with ~130–140 mL/kg/min of umbilical blood (placental resistances
-  ×0.75). The maternal pool is set to placental-venous blood at 30 wk (`mat_to2` 5.6, `mat_tco2` 21.5:
-  pCO₂ ~35), and the umbilical vein equilibrates with it.
-- **The fetal brain uses more than half of the O₂** (`Metabolism` `BR_CAP` share 0.65; Sun 2015: 58 %), so SVC
-  blood returns at ~54 % instead of ~57 %.
-- **Thermal bookkeeping.** `Blood.get_thermal_state` now leaves out fixed-composition compartments: the
-  maternal pool (pinned at 37.0 °C) had acted as a ~4 W phantom heat sink.
-
-**Known limitations:** no ductus venosus / liver route (IVC blood is mixed before the atrium); no placental heat
-path (heat leaves through the amniotic "skin" path, `Thermoregulation.h_convective` 240); fetal urine is the
-preterm kidney's ~3 mL/kg/h (reference ~13); arterial pressure and RQ are ovine. `scripts/probe_fetus.mjs`
-currently fails to start (it imports `BloodComposition.js` before the extensionless-import hook is
-registered); `probe_term_reference.mjs` covers its panel.
-
-## What makes a scenario "fetal"
-
-Six properties. They are asserted by `_make_fetus.mjs` and re-asserted by `reseed_fetus.mjs` after
-warm-up, because each one silently destroys the fetal circulation while the model still builds and
-still prints a plausible-looking panel:
-
-| Invariant | Why |
-|---|---|
-| `Placenta.placenta_running === true` | the placenta is the gas-exchange organ |
-| `Placenta.umb_clamped === false` | the cord is patent |
-| `Shunts.ips_res >= 1e7` | intrapulmonary shunts closed — fetal lung flow is all capillary; an open IPS adds a parallel low-resistance path that inflates pulmonary flow |
-| `Pda.diameter_relative === 1.0` | the duct is fully relaxed in utero |
-| `Breathing.is_enabled === false` | no ventilatory drive |
-| `GASEX_LL/RL.dif_o2 === dif_co2 === 0` | the fluid-filled lung exchanges no gas. Zeroing the *constants* is what makes this stick — clearing a `BloodDiffusor`'s `is_enabled` does not survive the build |
-
-`selectProfile`'s `isFetal()` predicate (`scripts/_probe.mjs`) sniffs the first two, which is
-unambiguous across the shipped library: every neonatal and adult scenario has
-`placenta_running = false, umb_clamped = true`.
-
-## Why gestational age costs a calibration pass
-
-**Nothing in the engine reads `model.gestational_age`.** It is metadata, consumed only by probe
-range tables and the chat context string. (`Uterus`/`MaternalPlacenta` have a `preg_ga`, but that is
-the *maternal* pregnancy clock and is deliberately distinct.)
-
-**`ModelScaler.scale_to_weight()` scales volumes only** — every elastance and resistance
-inverse-allometry line in it is commented out. Worse, it cannot see the placenta at all: no `PL_*`
-compartment appears in any scenario's `scaler_config`.
-
-So scaling a fetus to a new gestation is not one call. It is a hand-fitted row of levers that
-compensates for what volume scaling leaves behind, which is what
-[`scripts/_ga_tables.mjs`](../scripts/_ga_tables.mjs) holds. The table is the documentation for each
-column; the values are **starting points refined by probe iteration**, the same status as
-`_make_preterm.mjs`'s `PRETERM` table.
-
-The three traps that cost the most time, in order:
-
-1. **The un-scaled placenta.** Forget it and you get a 1.35 kg fetus carrying a term placenta's
-   blood: 164 mL/kg fetoplacental volume instead of ~122, with the placenta holding 52% of fetal
-   blood instead of 35%. The model builds and runs and looks plausible.
-2. **The placenta is a large parallel low-resistance path**, so systemic resistance is a weak MAP
-   lever on its own — raising SVR mostly diverts flow into the umbilical circuit (placental share
-   climbs past 55%). The umbilical/fetoplacental resistances must rise with it.
-3. **Absolute anatomic millimetres.** `Pda.diameter_ao_max`/`diameter_pa_max`/`length` and
-   `Shunts.diameter_fo`/`atrial_septal_width` are millimetres no scaler touches.
-   `Pda.diameter_relative` is a `[0..1]` *patency fraction*, not a size — conflating the two is the
-   easy bug. The duct is anchored to the Szpinda regressions quoted in `Pda.js`.
-
-## Operating points
-
-Measured with `node scripts/probe_fetus.mjs <scenario>`, not copied from a script header.
-
-| | `fetus_term` (40 wk) | `fetus_30wk` | human reference |
-|---|---|---|---|
-| HR | 146.5 bpm | 147.8 | — |
-| ABP sys/dia/**map** | 67.2 / 44.0 / **55.7** | 44.6 / 32.0 / **38.3** | — |
-| PAP mean | 56.9 | 39.1 | — |
-| **PA − Ao** | **1.2 mmHg** | **0.8** | ≈ 0 (wide-open duct) |
-| CVP | 3.8 | 2.5 | — |
-| CVO | 1.341 L/min = **378 mL/kg/min** | 0.508 L/min = **376** | ~400–450 |
-| **RV : LV** | **55 : 45** | **55 : 45** | ~55 : 45 (MRI) |
-| RV / LV ejection fraction | 57% / 55% | ~45% / ~41% | — |
-| placental share of CVO | 41% | 41% | ~30 (MRI) / ~45 (ovine) |
-| **pulmonary share** | **15%** | **12%** | 11–25% |
-| ductus arteriosus | 41% | 44% | 30–46% |
-| foramen ovale | 30% | 33% | 27–34% |
-| O₂ gradient UV / IVC / AA / AD / UA | 88 / 71 / 66 / 61 / 61 % | 89 / 70 / 65 / 59 / 59 % | — |
-| umbilical-artery gas | pH 7.27, pCO₂ 50, BE −5 | pH 7.27, pCO₂ 50, BE −5 | pH ~7.35 |
-
-Pulmonary share is deliberately **lower at 30 wk than at term**: this table follows the human MRI
-reading in which pulmonary blood flow rises toward term. The Doppler literature instead has it
-peaking near 30 wk, which would invert that ordering — see the `pvr` note in `_ga_tables.mjs`.
-
-**PA ≈ Ao is a fetal invariant, and it is what the ventricular split hangs on.** With a wide-open
-duct the pulmonary artery and aorta are one chamber hydraulically, so their mean pressures must
-match. They previously did not (PA 62.6 vs Ao 50.1, a 12.5 mmHg gap) — see below.
-
-The **oxygenation ordering UV > IVC > AA > AD** is the primary pass/fail: it is what streaming
-through the foramen ovale and ductus venosus produces, and it collapses first when a fetal scenario
-is wrong. `AD == UA` is expected — it is the same blood.
-
-Note the shunt flows print **negative** in `probe_fetus.mjs`: `Pda.flow_pa` and `Shunts.flow_fo` are
-positive for left→right, so the fetal direction (PA→Ao, R→L) is negative. A negative percentage
-there is correct, not an error.
-
-## Ventricular dominance — what actually sets it
-
-The fetus must be RV-dominant. Both scenarios used to come out LV-dominant (48:52 and 46:54); they
-now run 55:45. The diagnosis is worth recording because two of the three obvious levers do nothing.
-
-**The split is an identity, not a free parameter:**
-
-```
-LV output = foramen flow + pulmonary venous return
-```
-
-This holds exactly at every operating point measured. So the whole question is how much crosses the
-foramen — and the right atrium divides its blood between the tricuspid valve and the foramen
-according to which ventricle ejects better, *not* according to the foramen's size.
-
-**What does not work:**
-
-- **Foramen diameter.** `res_fo` (4.24 mmHg·s/L at 6 mm) is ~13× *lower* than the tricuspid valve's
-  55, so the foramen is a hole, not a resistance — the two ventricles effectively draw from a common
-  atrial pressure. Measured: 6.0 → 4.4 → 3.0 mm gives 48:52 at every value. It only bites below
-  2 mm and then swings violently (1 mm → 73:27). A steep unstable band is a bad calibration knob.
-- **`fo_lr_factor`.** No effect on the split.
-- **RV unstressed volume, on its own.** Cutting it to the LV's value raises RV ejection fraction
-  25 → 34% but leaves the split at 46:54: it makes the RV both stronger *and* more compliant, so the
-  right atrium still decompresses across the foramen. It is an EF knob, not a split knob.
-- **The foramen's second path (`LA_RASVC`).** Carries ~1%; disabling it changes nothing. (It is still
-  anatomically wrong — superior-vena-cava blood does not cross the foramen in life.)
-
-**What does work — and why it was a bug, not a tuning gap:**
-
-1. **The ductus arteriosus was too narrow, and it is an RV-only afterload.** Duct resistance carries
-   a Bernoulli orifice term scaling as 1/area² (`Pda.js:200-210`), so a narrow duct is expensive.
-   At the previously shipped 3.0 mm it cost a **12.5 mmHg PA-over-Ao gradient that only the right
-   ventricle pays** — which is why the RV under-ejected and the atrial blood went left. Three things
-   independently said 3.0 mm was wrong: it breaks the PA ≈ Ao invariant the probe itself checks for;
-   it contradicts the Szpinda regression quoted in `Pda.js:25` (3.95 mm at 40 wk); and the
-   duct-dependent lesions `hlhs` and `pa_vsd` had already overridden it to 4.0 because 3.0 cannot
-   carry systemic output. Measured on `term_fetus`: 3.0 mm → 12.5 mmHg / 48:52; 3.95 → 5.0 / 50:50;
-   6.0 → 1.0 / 51:49; 8.0 → −0.1 / 52:48.
-2. **`Heart.cont_factor_right` supplies the remainder** (1.30 at term, 1.16 at 30 wk). Monotone and
-   well-behaved, and it also pulls the foramen share down toward the human 27–34%.
-   It is *mostly* independent of PVR but not entirely: at a fixed duct the split held 55:45 across
-   PVR ×21 → ×9.5, yet raising the 30 wk `pvr` from 1.35 to 2.30 cost a point (55:45 → 54:46) and
-   needed `cont_right` 1.11 → 1.16 to recover. Re-check the split after any PVR change.
-3. **`RV.u_vol` restores a physiological ejection fraction** (33 → 57% at term). Independent of the
-   split, so it is set once and left alone.
-
-**The residual compensation.** Points 2 and 3 are still compensation for a chamber parameterisation
-the fetal transform inherits from `term_neonate_72h` unexamined: the RV ships with an unstressed volume
-5.46× the LV's (4.00 vs 0.73 mL) and a *lower* `el_max` (22200 vs 27200) — correct for a neonate,
-wrong for a fetus. The real repair is those chamber values, which is out of scope here because it
-ripples into ~30 neonatal scenarios. The PDA family already works around the same weakness with
-`cont_factor_right` between 1.52 and 5.2.
-
-> Note the shipped `term_fetus` had drifted from its own generator header, which claimed RV:LV
-> 51:49. The split appears to have crossed from RV- to LV-dominant across the new-PDA-model /
-> bidirectional-shunts / HbF commits, and was never re-measured — commit `1689814` lists five
-> quantities as unchanged and omits this one. **Re-measure with `probe_fetus.mjs`; do not trust a
-> header.**
-
-## Known limitations
-
-These are inherited by every fetal scenario and are worth stating before the numbers are used for
-teaching:
-
-- **The umbilical arteriovenous CO₂ gradient is too wide.** UV pCO₂ 31 vs UA pCO₂ 50 is a 19 mmHg
-  gradient where the literature is 8–10, and UA pH 7.27 is a post-labour value rather than an
-  undisturbed in-utero one (cordocentesis: UA ≈ 7.35, UV ≈ 7.38). The lever is `Placenta.mat_tco2`.
-- **Placental share runs sheep-like** (~41% against human MRI estimates of ~30%; the ovine figure is
-  ~45%). Pulmonary, ductal and foramen shares are now all inside their human ranges, so the
-  placental share is the remaining outlier. Judge a new gestation by its *delta from term* as well
-  as by the absolute number.
-- **CVO per kg is still nearly flat across gestation** (376 at 30 wk vs 378 at term) where human MRI
-  data have it *falling* with GA, i.e. the 30 wk fetus should run clearly higher per kg. Both rose
-  from ~314 once the duct and PVR were corrected, so the gap to the ~400–450 mL/kg/min literature
-  figure is now small, but the gestational *trend* is still not reproduced.
-- **The umbilical arteriovenous CO₂ gradient is unchanged by this work** and remains the largest
-  outstanding discrepancy (see above).
-- The **`Brain` compartment is now present** in both fetal scenarios. It had been missing: the
-  committed `term_fetus` predated `Brain` being added to `term_neonate_72h`, and regenerating picked it
-  up. Cerebral autoregulation is enabled, but its setpoints are the neonatal ones and have not been
-  re-fitted for fetal pressures — treat brain-sparing behaviour as unvalidated.
-
-## Workflow
-
-```bash
-node scripts/_make_fetus_validated.mjs --profile 30                  # term_neonate_72h -> fetus_30wk (fetal transform, baked)
-node scripts/probe_term_reference.mjs fetus_30wk --ref scripts/reference/fetus_30wk.json   # vs Fetus30wkReference
-```
-
-Adding a gestation is a profile in `scripts/_fetal_profiles.mjs` plus a reference set
-(`docs/Fetus<ga>wkReference.md`, `scripts/reference/fetus_<ga>wk.json`). The older
-`_make_fetus.mjs`/`reseed_fetus.mjs` loop (from the archived `term_fetus`) is in `scripts/archive/`.
-
-`scripts/build_patient.mjs` also understands fetal baselines — it auto-detects one, seeds from the
-same `FETAL` table, skips the neonatal RDS/PDA levers, and drives pO₂/pCO₂ from
-`Placenta.mat_to2`/`mat_tco2` instead of the (inert) alveolar diffusors and ventilatory drive.
-
-> **Probes exit 0 on bad physiology.** Only a build failure exits 1. The fetal-invariant assertions
-> in `_make_fetus.mjs` and `reseed_fetus.mjs` are the only real gates; everything else is a table
-> you read.
-
-````
 
 
 ## 4. Engine source
@@ -15313,9 +14575,6 @@ Available scenarios are listed in `public/model_definitions/index.json`.
 
 ```json
 [
-  "term_neonate_12h",
-  "term_neonate_1h",
-  "term_neonate_24h",
   "term_neonate_72h"
 ]
 

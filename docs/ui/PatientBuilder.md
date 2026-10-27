@@ -185,6 +185,6 @@ answers `POST /v1/ask` with `{ answer, conversation_id, artifact, build }`:
 `artifact` comes from running the builder by hand:
 
 ```sh
-echo '{"baseline":"term_neonate_72h","name":"pb_test","targets":{"weight":1.08,"gestational_age":28,"hr":158,"map":34,"spo2":91,"pco2":51,"be":-4.5}}' \
+echo '{"baseline":"term_neonate_72h","name":"pb_test","targets":{"weight":3.2,"hr":150,"map":45,"spo2":95,"pco2":44,"be":-3}}' \
   | node explain-engine/scripts/build_patient.mjs > pb_test.json
 ```

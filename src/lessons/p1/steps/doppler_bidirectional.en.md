@@ -1,1 +1,0 @@
-The bidirectional state of Table 3. In systole the pulmonary artery pressure exceeds the aortic pressure and the duct shunts right-to-left (negative velocity); in diastole the aortic pressure wins and flow returns to left-to-right. The row *Fraction of cycle L→R* and the two velocity rows (positive peak, negative minimum) summarise the trace you see in the chart.
