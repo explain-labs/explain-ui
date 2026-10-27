@@ -1409,7 +1409,7 @@ viscosity  = viscosity_plasma · exp(viscosity_hct_k · Hct),   Hct = Hb[mmol/L]
 ```
 A neonatal Hb of 10 mmol/L gives Hct 0.49 and ~6 cP. [BloodVessel](./BloodVessel.md) scales its resistance with `viscosity / viscosity_ref`, so a change in Hb moves the resistances.
 
-**Every 1 s:** `calc_blood_composition` on `AA` and `AD` (stored in the two blood gas objects), and on `IVCI`, `SVC`, `RAIVCI` and `PA`. The Monitor reads SvO2 from `PA`, the true mixed-venous blood.
+**Every 1 s:** `calc_blood_composition` on `AA` and `AD` (stored in the two blood gas objects), and on `IVCI`, `SVC`, both right-atrial halves (`RAIVCI`, `RASVC`) and `PA`. The Monitor reads SvO2 from `PA`, the true mixed-venous blood.
 
 ## Methods
 
@@ -1432,7 +1432,7 @@ None. Viscosity reaches the resistances through `BloodVessel`'s viscosity term.
 
 ## Inputs and outputs
 
-- **Reads:** `AA`, `AD`, `IVCI`, `SVC`, `RAIVCI`, `PA` (composition); every blood compartment's Hb, volume and temperature.
+- **Reads:** `AA`, `AD`, `IVCI`, `SVC`, `RAIVCI`, `RASVC`, `PA` (composition); every blood compartment's Hb, volume and temperature.
 - **Writes:**
   - every blood compartment: `temp`, `viscosity`; at build also `haldane_coeff`, `P50_0`, `viscosity_ref`, the seed composition and the thermal fields;
   - the solved composition of the six sampling sites.
@@ -1443,7 +1443,7 @@ None. Viscosity reaches the resistances through `BloodVessel`'s viscosity term.
 
 - **Setters reach every blood compartment, the maternal pool included.** `set_solute`, `set_P50`, `set_to2` and `set_tco2` without a site also change `PL_MAT` and the ECLS circuit. See [Placenta](./Placenta.md#assumptions-and-limitations) for why the generators restore `PL_MAT`.
 - **Membership is by `model_type` string.** A custom subclass of a blood compartment with its own `model_type` must be added to `blood_containing_modeltypes`, or it is never seeded, warmed or given a viscosity.
-- **Fixed sampling sites.** The scenario must have `AA` and `AD`; `IVCI`, `SVC`, `RAIVCI` and `PA` are used when present. Other compartments' gases are solved only by whoever needs them.
+- **Fixed sampling sites.** The scenario must have `AA` and `AD`; `IVCI`, `SVC`, `RAIVCI`, `RASVC` and `PA` are used when present (until 2026-10-27 `RASVC` was not, so its gas read-outs kept a stale value). Other compartments' gases are solved only by whoever needs them.
 - **Blood gases are refreshed once per second.**
 - **Viscosity is low-shear** and depends on haematocrit only: no shear-thinning, no Fåhræus effect in small vessels. Hct is derived from Hb with a fixed MCHC of 33 g/dL.
 - **`haldane_coeff` 2.2** is a calibration value of the model's own CO2 formulation (see [BloodComposition](./BloodComposition.md)), not a measured quantity.
@@ -6710,12 +6710,13 @@ BaseModelClass
 | Property | Unit | Default | Description |
 |---|---|---|---|
 | `met_active` | boolean | `true` | Switch. |
-| `vo2` | mL O2/kg/min | 8.1 | Whole-body O2 use excluding the myocardium (STPD). term 6.14, preterm 5.2–5.7, fetal 5.0–5.5. |
+| `vo2` | mL O2/kg/min | 8.1 | Whole-body O2 use excluding the myocardium (STPD). term_neonate_72h 7.73 (all four term babies; the 1–24 h babies add brown fat on top). |
 | `vo2_factor` | – | 1.0 | Persistent user/scenario multiplier; no model writes it. |
 | `vo2_temp_factor` | – | 1.0 | Q10 temperature effect; written by [Thermoregulation](./Thermoregulation.md). |
 | `vo2_bat_factor` | – | 1.0 | O2 cost of brown-fat thermogenesis; written by Thermoregulation. |
 | `resp_q` | – | 0.8 | Respiratory quotient. term_neonate_72h 0.8. |
 | `metabolic_active_models` | {name: fraction} | `{}` | The beds and their share of VO2 (summing to 1). |
+| `bat_site` | name | `"RUB"` | The blood compartment that carries the brown-fat O2 cost: brown fat lies in the neck, between the shoulder blades and in the axillae, i.e. the upper body. `""` (or a name the scenario lacks) spreads it over the beds like the rest of the VO2. |
 
 ### Outputs
 
@@ -6728,17 +6729,20 @@ BaseModelClass
 Each step (nothing while `met_active` is off):
 
 ```
-vo2_step = vo2 · vo2_factor · vo2_temp_factor · vo2_bat_factor · weight / 60 · dt / 22.414      (mmol)
+vo2_step = vo2 · vo2_factor · vo2_temp_factor · weight / 60 · dt / 22.414      (mmol)
+bat_step = vo2_step · (vo2_bat_factor − 1)                                       brown fat's O2 cost
 ```
 
 For each bed with fraction f (a missing or empty bed is skipped):
 ```
-demand = vo2_step · f
+demand = vo2_step · f              (+ bat_step · f when there is no usable bat_site)
 used   = min(demand, to2 · V)                 never more O2 than the bed holds
 to2   −= used / V
 tco2  += resp_q · used / V                    CO2 only from O2 actually used
 o2_deficit += (demand − used) / dt
 ```
+
+The brown-fat cost `bat_step` is then taken, the same way, from `bat_site` alone. Spread over the beds it would also lower the brain's and the gut's venous saturation, which non-shivering thermogenesis does not; taken where the brown fat is, it raises the extraction of the upper body, whose blood flow rises with it (2026-10-26).
 
 STPD conversion as in [Units](./Units.md). Example: with the brain's inflow closed in term_neonate_72h, `BR_CAP` empties of O2 within seconds and `o2_deficit` reads 0.005 mmol/s, the brain's 6.8 mL/min share; its tCO2 stays at ~31 mmol/L. Before v1.0 CO2 kept being added from the missing O2 and reached 225 mmol/L in 2 min.
 
@@ -6746,7 +6750,7 @@ STPD conversion as in [Units](./Units.md). Example: with the brain's inflow clos
 
 ## Factor system
 
-Its own multipliers on `vo2`: `vo2_factor` (user), `vo2_temp_factor` and `vo2_bat_factor` (Thermoregulation). They multiply.
+Its own multipliers on `vo2`: `vo2_factor` (user), `vo2_temp_factor` and `vo2_bat_factor` (Thermoregulation). They multiply; the part `vo2_bat_factor` adds is used at `bat_site`.
 
 ## Inputs and outputs
 
@@ -6760,12 +6764,13 @@ Its own multipliers on `vo2`: `vo2_factor` (user), `vo2_temp_factor` and `vo2_ba
 ## Assumptions and limitations
 
 - **Fixed shares.** A bed's O2 use doesn't depend on its flow or on its own O2 (no supply dependence above the zero floor), and doesn't follow organ activity (seizures, feeding, work of breathing).
-- **The myocardium is separate** ([Mob](./Mob.md)), so lung uptake = Metabolism + Mob (term: 6.14 + ~0.8 = 7.0 mL/kg/min).
+- **The myocardium is separate** ([Mob](./Mob.md)), so lung uptake = Metabolism + Mob (term_neonate_72h: 7.73 + ~0.8 = 8.5 mL/kg/min).
 - **The beds stand for whole organs and regions:** `RLB`/`RUB` the lumped lower and upper body, `AA`/`AD` the aortic wall.
 
 ### term_neonate_72h calibration (2026-10)
 
-- **Whole-body uptake.** `vo2` 6.1396 gives a lung uptake of 7.0 mL/kg/min, slightly above quiet rest. First-week references are 6.26 ± 1.51 at thermoneutral rest and 45–50 kcal/kg/d, ~6.5–7.2 mL/kg/min. Knock-on changes:
+- **Venous extraction (2026-10-27).** `vo2` 6.30 → 7.73: lung uptake 7.07 → 8.51 mL/kg/min, mixed venous saturation 82.0 → 78.5 %, systemic extraction 0.155 → 0.19. The direct measurements in stable newborns are a right-atrial ScvO2 of 73.6 ± 5.3 % at an extraction of 0.21 (van der Hoeven 1996) and a peripheral-muscle extraction of 0.22–0.26 (Wolfsberger 2023). The brain and kidney kept their absolute O2 use (the brain's venous saturation already matched, 67 %); the extra went to the upper and lower body (+0.6 each), the gut (+0.15) and the liver (+0.08) mL/kg/min, which raised their shares. Ventilation rose to ~250 mL/kg/min (215 measured in quiet sleep), an accepted deviation. See `scripts/_fix_term_venous_vo2.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+- **Whole-body uptake (2026-10-18, superseded).** `vo2` 6.1396 gave a lung uptake of 7.0 mL/kg/min, slightly above quiet rest. First-week references are 6.26 ± 1.51 at thermoneutral rest and 45–50 kcal/kg/d, ~6.5–7.2 mL/kg/min. Knock-on changes:
   - CO2 production fell, so `Breathing.minute_volume_ref` and the chemoreceptor set-points were re-anchored;
   - by Fick, SvO2 is ~81–85 % (scenario 81.5 %);
   - Thermoregulation re-seeds its heat-loss trim at load.
@@ -6784,14 +6789,15 @@ From `term_neonate_72h.json`, `models.Metabolism` (trimmed to the config props):
   "model_type": "Metabolism",
   "is_enabled": true,
   "met_active": true,
-  "vo2": 6.1396,
+  "vo2": 7.73061,
   "vo2_factor": 1,
   "resp_q": 0.8,
   "metabolic_active_models": {
-    "BR_CAP": 0.31311, "RLB": 0.16754, "INT_CAP": 0.16754,
-    "LS_CAP": 0.11169, "KID_CAP": 0.11169, "RUB": 0.11169,
-    "AA": 0.00558, "AD": 0.01117
-  }
+    "BR_CAP": 0.25519, "RLB": 0.21416, "RUB": 0.16864,
+    "INT_CAP": 0.15595, "LS_CAP": 0.10138, "KID_CAP": 0.09103,
+    "AA": 0.00455, "AD": 0.0091
+  },
+  "bat_site": "RUB"
 }
 ```
 
@@ -6801,7 +6807,8 @@ One instance in every scenario, with the same eight beds.
 
 | Scenario | `vo2` | `resp_q` | Brain share |
 |---|---|---|---|
-| term_neonate_72h | 6.14 | 0.80 | 0.313 |
+| term_neonate_72h | 7.73 | 0.80 | 0.255 |
+| term_neonate_1h / _12h / _24h | 7.73 (+ brown fat 0.45 / 0.3 / 0.3 W/kg at `RUB`) | 0.80 | 0.255 |
 
 ## References
 
@@ -9998,13 +10005,13 @@ inflow comes through the intestinal bed (INT), which the model drains into the l
 | Base excess | — | −4 to +2 | — | C | textbook |
 | PaO₂ | — | 60–90 mmHg | arterial | C | textbook (Koch & Wendel 1968 unavailable) |
 | EtCO₂ | ≈ PaCO₂ | gap 0 ± 7 mmHg | capnography | C | Lopez 2011 (healthy preterm controls) |
-| SvO₂ | **~83 %** (derived) | 80–86 | Fick from the references: output 177–200 mL/kg/min, VO₂ 6.3–7.0, Hb 17, SaO₂ 97 | B | derived; not measured in healthy neonates. The textbook 70–80 % stems from sick/older patients. NIRS day 2: cerebral 78, renal 89, splanchnic 75 % (Bailey 2013); cerebral venous 63.9 ± 8.2 % (Liu 2014) |
+| SvO₂ | **~76 %** | 70–80 | right-atrial fibre-optic catheter, stable preterms in room air (73.6 ± 5.3 % at SaO₂ 93.4 %, extraction 0.21); peripheral-muscle extraction 0.22–0.26 in healthy term babies | B | van der Hoeven 1996 ([doi](https://doi.org/10.1136/fn.74.3.f177)); Wolfsberger 2023 ([doi](https://doi.org/10.3389/fped.2023.1276769)); sagittal sinus 72.4 % (Carmichael 2025, [doi](https://doi.org/10.1038/s41390-025-03966-6)), 63.9 % (Liu 2014); NIRS day 2: cerebral 78, renal 89, splanchnic 75 % (Bailey 2013). The Fick estimate from calorimetry VO₂ and MRI output is ~83 %. Revised 2026-10-27 (was ~83 %, derived) |
 
 ## Metabolism, blood, kidneys
 
 | Variable | Reference | Range | Method, age, n | Grade | Source |
 |---|---|---|---|---|---|
-| VO₂ | **6.26 ± 1.51** mL/kg/min | — | calorimetry, first week, n=202 | B | phototherapy study 2001 |
+| VO₂ | **~8.4** mL/kg/min (lung uptake) | 6.3–9.5 | the O₂ use that gives the measured venous extraction (0.21) at the measured output; calorimetry 6.26 ± 1.51 (first week, thermoneutral rest, n=202) and 6.6–7.2 at 6–30 h (RQ 0.94 → 0.88) | C | derived (2026-10-27); phototherapy study 2001; Zoppi 1998 ([doi](https://doi.org/10.1038/sj.ejcn.1600564)). Raises ventilation to ~250 mL/kg/min against 215 measured in quiet sleep |
 | Temperature | 37.0 °C | 36.5–37.5 | — | C | WHO/textbook |
 | Glucose | **~4.0** mmol/L | — | plasma; 3.3 ± 0.6 to 48 h, 4.6 ± 0.7 by day 4 | A | GLOW 2020; Cousineau 3.8 ± 0.8 |
 | Lactate | **1.4** mmol/L (plasma, median) | 0.8–3.3 | > 48 h, n=67 | A | GLOW 2021; Cousineau capillary 2.6 ± 0.7 (1.4–4.1) |
@@ -10060,6 +10067,7 @@ outside `model_definitions/`).
 | 2026-10-18 | Whole-body VO₂ (`scripts/_fix_term_vo2.mjs`): `Metabolism.vo2` 7.288 → 6.1396 (Mob's ~0.81 for the heart kept); `minute_volume_ref` and chemoreceptor set-points re-anchored | total VO₂ 8.1 → 7.0 mL/kg/min; MV 235 → 207; RR 40.4 → 37.5; Vt 5.8 → 5.5; SvO₂ 78.7 → 81.5; PaO₂ 73 → 76 | 6.26 ± 1.51 (first week, rest); REE 45–50 kcal/kg/d ≈ 6.5–7.2; calm mixed state |
 | 2026-10-18 | Probe only: blood volume leaves out the bladder (URINE is a BloodCapacitance), found during the preterm 6.5 step | reported blood volume ~82–86 → 80.6 mL/kg; the scenario is unchanged | Whole-body volume balance (blood + bladder vs maintenance intake) closes exactly |
 | 2026-10-25 | Blood volume (`scripts/_fix_blood_volume.mjs --factor 1.06`, re-validation re-anchoring): `vol`/`u_vol` of the 31 blood-volume compartments ×1.06, `Hormones.volume_setpoint` 0.286 → 0.3011 L (the new resting volume) | CVP 1.93 → 2.47 mmHg (was below 2 after the heart re-validation: valves, inertance, RV, coronary flow); blood volume 80.6 → 85.0 mL/kg (mid-reference); LVO 196 → 200, HR 118.1 → 116.9, MAP 60.2 → 60.9 | Reference ranges CVP 2–8, blood volume 80–90 mL/kg (textbook, grade C) |
+| 2026-10-27 | Venous oxygen extraction (`scripts/_fix_term_venous_vo2.mjs`): per-bed O₂ use +0.6 upper body, +0.6 lower body, +0.15 gut, +0.08 liver mL/kg/min (brain and kidney keep their absolute use), `Metabolism.vo2` 6.30 → 7.73; `minute_volume_ref` and chemoreceptor set-points re-anchored; heat-loss trim re-seeded | lung VO₂ 7.07 → 8.51 mL/kg/min; mixed venous (PA) 82.0 → 78.5 %, SVC 82.6 → 79.0, IVC 82.7 → 79.0, brain venous 67.6 → 67.2; extraction 0.155 → 0.19; MV 213 → 250; RR 40 → 43.7; Vt 5.31 → 5.72; PaO₂ 75 → 72; PaCO₂, pH, BE, BP, HR, output unchanged | van der Hoeven 1996 (right atrium 73.6 ± 5.3 %, extraction 0.21); Wolfsberger 2023 (peripheral extraction 0.22–0.26). Partly reverses the 2026-10-18 VO₂ step (calorimetry); the ventilation now exceeds the quiet-sleep 215 (accepted) |
 | 2026-10-25 | Re-bake of the stored state (re-validation (g)): HeartFunction set-points re-learned (`_relearn_heartfunction.mjs`: LV σ_ed 21.6 → 26.0, RV 57.0 → 63.1), then `scripts/reseed_term_neonate.mjs` (settle 600 s, save at a sinus-node firing); Heart fires on the first step after a load, Brain resumes its smoothers | Stored controller state now where it settles (Brain `autoreg_factor` 1.009 → 1.12, renal afferent 0.995 → 1.11, TGF 1.00 → 1.04, baroreflex firing 0.500 → 0.526, Thermoregulation `loss_trim` persisted); no phantom LV remodelling at rest; no MAP dip at load (was 61 → 53 mmHg for ~2 s); reference values within 0.5 % (CVP 2.47 → 2.44) | Stale state from before the heart re-validation; the load transient was a skipped beat |
 | 2026-10-25 | Reflexes (re-validation (l)): baroreflex folded neutral at rest and `BR_MAP.set_value` 57.81 → 60.56 (`scripts/_fix_baro_setpoint.mjs`, now folding `el_k` and the venous `u_vol` too); `BR_MAP.tc` 4 → 0.5 s, `EF_HR.tc` 2 → 0.5 s; `CR_PO2.effect_weight` −0.15 → −0.4; state re-baked | Baroreflex firing at rest 0.524 → 0.499; baroreflex sensitivity 1.5 → 6.0 ms/mmHg; FiO₂ 0.15: ventilation +5 % flat → +19 % at 1 min, +11 % at 5 min; rest within 1 % (MAP 60.9 → 61.2) | Andriessen 2005, Yiallourou 2010 (6.4 ms/mmHg at 2–4 wk, user's target); Rigatto 1982, De Boeck 1984 |
 | 2026-10-25 | Brain (re-validation (f)): ICP acts as a pressure (excess added to the venous outflow pressure, the waterfall, and to the cerebral vessels' external pressure) instead of an outflow resistance (`icp_outflow_gain`/`_factor_max` removed); `cbf_tc` 3 → 1 s, `autoreg_tc` 4 → 1 s; resting autoregulation folded into `BR_ART` (r ×1.1228, factor 1.12 → 1.00); `cbv0` 3.784 → 3.990 mL; state re-baked | Pressure-passive CBF follows CPP and stops as ICP reaches MAP (was 92 mL/min with ICP > MAP); intact autoregulation holds CBF to CPP ~35, lower limit ~30; CBF returns ~5 s after a pressure step without ringing; rest unchanged (CBF 106 mL/min) | Monro–Kellie, vascular waterfall (Starling resistor) |
@@ -10121,7 +10129,7 @@ drifting toward 72 h. The time course is the series of scenarios, not something 
   hours plasma leaves the circulation at a constant red cell mass, which is why Hct rises: 85 × 0.50/0.55 ≈ 77 at 1 h
   (3-min clamping at 2 h: 100 × 0.50/0.63 ≈ 79). The extra placental blood shows up as red cells, not as
   volume. Red cell mass 0.55 × 80 = 44 mL/kg then runs smoothly into the 72 h baby's 0.49 × 85 = 42.
-- **VO2:** 7.0 mL/kg/min at every age. The only human early value (~5 under 12 h, Hill & Robinson 1968)
+- **VO2 (superseded 2026-10-27, see "Venous oxygenation" below):** 7.0 mL/kg/min at every age. The only human early value (~5 under 12 h, Hill & Robinson 1968)
   comes mostly from low-birth-weight infants, and lambs reach their postnatal VO2 within an hour.
 
 ## The 1 h scenario
@@ -10331,6 +10339,58 @@ reads FRC high at every age), GFR. Loaded, it holds for 10 min (MAP 51.8–51.9,
 compliance floor 0.95: the model's compliance rises 0.94 / 0.975 / 0.998 / 1.014 mL/cmH2O/kg at
 1 / 12 / 24 / 72 h).
 
+## Venous oxygenation and first-day brown fat (2026-10-27)
+
+The venous saturations were high in every baby, most of all in the first day:
+- SVC / RA 87.8 / 85.4 % at 1 h, 82.6 / 82.0 % at 72 h;
+- the brain and the organs fitted the measurements; the excess came from the upper- and lower-body beds (skin, muscle).
+
+Those beds carried more flow at 1 h than at 72 h (85 + 43 against 54 + 28 mL/kg/min: the generator dilated
+everything but the organs), with more haemoglobin (Hct 55–57 %) and the same O2 use.
+
+**Evidence**
+
+| Site | Value | Population | Source |
+|---|---|---|---|
+| Right atrium (fibre-optic catheter) | 73.6 ± 5.3 % (P5–P95 65–82), extraction 0.21 ± 0.04 | 10 stable preterms in room air after RDS | van der Hoeven 1996 ([doi](https://doi.org/10.1136/fn.74.3.f177)) |
+| Peripheral muscle (NIRS) | extraction 0.264 / 0.228 / 0.237 / 0.220 per 6 h, no change over the first 24 h | 55 healthy term babies | Wolfsberger 2023 ([doi](https://doi.org/10.3389/fped.2023.1276769)) |
+| Cerebral (NIRS) | 78.2 % on day 1, 78.3 % on day 2; splanchnic lower, renal higher on day 1 | 38 healthy term babies | Bailey 2013 ([doi](https://doi.org/10.1055/s-0033-1349894)) |
+| Sagittal sinus (MRI, QSM) | 72.4 ± 3.4 % | preterms at term-equivalent age | Carmichael 2025 ([doi](https://doi.org/10.1038/s41390-025-03966-6)) |
+| RQ, energy expenditure | RQ 0.94 at 6 h, 0.88 at 30 h; VO2 ~6.6–7.2 | 46 term babies before milk feeding | Zoppi 1998 ([doi](https://doi.org/10.1038/sj.ejcn.1600564)) |
+
+The direct venous data give an extraction of ~0.21, i.e. a mixed venous saturation of ~76–78 % at SaO2 97 %. The
+indirect route (calorimetry VO2 6.3–7.2 with MRI output ~200 mL/kg/min) gives ~80–84 % by Fick; the measured
+ventilation fits VO2 ~7. User decision: the venous data, 70–80 %.
+
+**What changed**
+1. **72 h** (`scripts/_fix_term_venous_vo2.mjs`):
+   - lung VO2 7.07 → 8.51 mL/kg/min, the extra in the upper and lower body, gut and liver; the brain and kidney keep their absolute use;
+   - mixed venous 82.0 → 78.5 %;
+   - ventilation 213 → 250 mL/kg/min (215 measured in quiet sleep: an accepted deviation).
+2. **Brown-fat O2 at the brown fat:** `Metabolism.bat_site` (`RUB`, the upper body). Before, the brown-fat O2 cost was spread over every bed, the brain included.
+3. **First-day brown fat** (`NST_W_PER_KG` in the generator):
+   - the heat is added to the loss after the trim seeds, and the set-point rises by heat / `bat_gain`, so the core stays at ~37 °C;
+   - brown fat is most active right after birth (birth cooling, catecholamines, the TSH peak);
+   - at 12 and 24 h the upper and lower body also keep part of their tone (bed factor 0.8). At 1 h they stay dilated: toned, they sent the output through the large duct (left-to-right 117 mL/kg/min).
+4. **pCO2:** about 39–40 at every age (within each age's range). At 35–36 the higher CO2 output needed ~295 mL/kg/min.
+
+| | 1 h | 12 h | 24 h | 72 h |
+|---|---|---|---|---|
+| Brown fat (W/kg) / body bed factor | 0.45 / dilated | 0.3 / 0.8 | 0.3 / 0.8 | – |
+| RA (RAIVCI / RASVC) | 80.2 / 79.4 (was 85.4) | 80.1 / 79.5 (85.3) | 80.3 / 79.6 (85.4) | 78.5 / 78.2 (82.0) |
+| SVC / IVC | 79.8 / 81.2 | 78.7 / 81.9 | 78.6 / 82.1 | 79.0 / 79.0 |
+| PA (the probe's SvO2; ductal admixture) | 85.1 | 82.4 | 81.8 | 78.5 |
+| Brain venous | 65.7 | 70.1 | 70.5 | 67.2 |
+| Lung VO2 (mL/kg/min) | 10.1 | 9.5 | 9.6 | 8.5 |
+| Ventilation (mL/kg/min) / pCO2 | 287 / 39.8 | 279 / 39.0 | 281 / 38.8 | 250 / 39.5 |
+
+The 1–2 points the RA stays above 72 h come from the IVC, i.e. the kidney (87–88 %), which the renal NIRS also shows
+higher on day 1. References: SvO2 (pulmonary artery) 82 / 78 / 78 / 76 % at 1 / 12 / 24 / 72 h (70–87 / 70–84 / 70–84 /
+70–80); VO2 10 / 9.5 / 9.5 / 8.4. The higher first-day ventilation through a lung with residual liquid takes the pleural
+swing to 8.2–8.6 cmH2O, so the transitional respiratory classes allow 2–9 (quiet breathing 2–8, Bhutani). Every baby
+still has all its numeric targets in range and holds for 10 min. Not modelled: the rise of brown-fat blood flow with
+thermogenesis, which matters only in a cold room.
+
 ## Hemodynamics
 
 | Variable | 1 h | 12 h | 24 h | 72 h | Grade | Source |
@@ -10521,7 +10581,7 @@ d core / dt = (Q_prod − Q_loss − Q_perf) / (weight · heat_capacity − C_bl
 
 **Effects** (written every update):
 - `Metabolism.vo2_temp_factor = q10^((core − 37)/10)` (clamped);
-- `Metabolism.vo2_bat_factor`: brown fat's O2 cost added to Metabolism's O2 use (its heat is counted once, above);
+- `Metabolism.vo2_bat_factor`: brown fat's O2 cost added to Metabolism's O2 use (its heat is counted once, above), taken from `Metabolism.bat_site` (the upper body);
 - `Heart.hr_temp_factor = 1 + hr_temp_gain · (core − set-point)` (clamped);
 - `Blood.set_perfusion_target(core)` and `Gas.set_body_temperature(core)`.
 
