@@ -7,7 +7,7 @@
 // this script copies them across. It is:
 //   - additive: it copies/overwrites canonical files but never deletes extras,
 //     so developer/user snapshots written into public/ persist. The exception:
-//     copies of scenarios the engine archived, renamed or deleted are removed.
+//     copies of scenarios the engine renamed or deleted are removed.
 //   - idempotent: safe to run on every `predev` / `prebuild`.
 //
 // index.json is rebuilt as the sorted union of every scenario basename present
@@ -37,26 +37,14 @@ for (const f of fs.readdirSync(srcDir)) {
   copied++;
 }
 
-// scenarios the engine has moved to model_definitions/archive/ are no longer served: drop their
-// earlier copies (the copy step is additive, so they would otherwise linger in public/). Only names
-// present in the archive are removed; developer/user snapshots are untouched.
-const archiveDir = path.join(srcDir, "archive");
-let archived = 0;
-if (fs.existsSync(archiveDir)) {
-  for (const f of fs.readdirSync(archiveDir)) {
-    if (!f.endsWith(".json") || fs.existsSync(path.join(srcDir, f))) continue;
-    const served = path.join(dstDir, f);
-    if (fs.existsSync(served)) { fs.rmSync(served); archived++; }
-  }
-}
-
 // scenarios the engine renamed (explain-engine/helpers/ScenarioAliases.js; the engine's load() maps the
-// old name to the current file) or deleted without archiving: drop their served copies too, so an
-// old name is not listed beside its successor and a deleted scenario is not served stale
+// old name to the current file) or deleted: drop their served copies (the copy step is additive), so an
+// old name is not listed beside its successor and a deleted scenario is not served stale. Developer/user
+// snapshots are untouched.
 const DELETED = [
-  // removed 2026-10-25 during the re-validation, to be rebuilt from scratch on the term baby
   "preterm_25wk", "preterm_28wk", "preterm_30wk", "fetus_25wk", "fetus_term",
   "bischoff_no_pda", "bischoff_ltr_pda", "bischoff_bidir_pda",
+  "term_neonate_1h", "term_neonate_12h", "term_neonate_24h",
 ];
 const aliasesFile = path.join(root, "explain-engine", "helpers", "ScenarioAliases.js");
 const { SCENARIO_ALIASES = {} } = fs.existsSync(aliasesFile) ? await import(pathToFileURL(aliasesFile).href) : {};
@@ -74,4 +62,4 @@ const names = fs
   .sort();
 fs.writeFileSync(path.join(dstDir, "index.json"), JSON.stringify(names, null, 2) + "\n");
 
-console.log(`[sync-scenarios] copied ${copied} canonical scenario(s); removed ${archived} archived, ${retired} renamed/deleted; index lists ${names.length}.`);
+console.log(`[sync-scenarios] copied ${copied} canonical scenario(s); removed ${retired} renamed/deleted; index lists ${names.length}.`);

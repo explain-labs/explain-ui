@@ -112,16 +112,16 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 
 A paper companion is a lesson that explains a published paper and lets the reader **run its
 validation experiments**. It is served at **`/paper/<id>`** and is **public** (no login): the engine
-runs in the browser from static scenario files and the page uses no account-scoped API. The working
-example is `src/lessons/p1/` for the cardiovascular paper.
+runs in the browser from static scenario files and the page uses no account-scoped API. There is no
+companion at the moment (the cardiovascular paper's, `p1`, was removed on 2026-10-27).
 
 What a companion adds to a lesson:
 
 | Field | Meaning |
 |---|---|
 | `kind: "paper"` | Registers the lesson as a companion. `/lesson/<id>` redirects to `/paper/<id>`; MainPage lists it under "Paper companions" |
-| `experiments` | The paper's experiments file, imported from the engine: `import experiments from "@explain/papers/p1/experiments.json"`. The same file `node scripts/probe_p1.mjs` runs headlessly, so the page shows the probe's numbers |
-| `references` | `{ id, text, url? }[]`, shown collapsible under the step text and cited as `[n]` in the markdown (the P1 lesson builds it from `experiments.references`) |
+| `experiments` | The paper's experiments file, imported from the engine: `import experiments from "@explain/papers/<id>/experiments.json"` |
+| `references` | `{ id, text, url? }[]`, shown collapsible under the step text and cited as `[n]` in the markdown (a companion can build it from `experiments.references`) |
 | `layout.reading` | A wider text column |
 | step `experiment` | An experiment id: the step shows a `ComparisonTable` (literature · paper · this run) with a **Run** button |
 | step `chart` | `{ paths, title?, yMin?, yMax?, fill?, windowS? }`: a fixed-series `LessonChart` under the monitor (e.g. the ductal velocity with a Doppler-like fill) |
