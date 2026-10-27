@@ -69,7 +69,17 @@ const { controlTab, vizTab, monitorTab } = storeToRefs(useLayoutStore());
 // under `npm run dev` so they can be worked on. Remove a name here to release
 // its panel.
 const UNFINISHED_PANELS = new Set(["resuscitation", "pregnancy", "scaler"]);
-const showPanel = (name: string) => import.meta.env.DEV || !UNFINISHED_PANELS.has(name);
+// the Pregnancy / Labor panel drives Uterus and MaternalPlacenta: only a scenario that has them shows it
+const hasPregnancy = computed(() => {
+  const m = (modelState.value as any)?.models;
+  return !!(m && (m.Uterus || m.MaternalPlacenta));
+});
+const showPanel = (name: string) =>
+  (name !== "pregnancy" || hasPregnancy.value) && (import.meta.env.DEV || !UNFINISHED_PANELS.has(name));
+// a scenario without them hides the tab: don't leave it selected with nothing shown
+watch(hasPregnancy, (has) => {
+  if (!has && controlTab.value === "pregnancy") controlTab.value = "editor";
+});
 const tour = useTour();
 // first visit (no manual progress stored yet): offer the getting-started tour
 const offerTour = ref(!auth.lesson && tour.isFirstVisit());

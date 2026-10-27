@@ -95,6 +95,8 @@ Bespoke CPR console. Targets `Resuscitation` (and mirror-writes to `Ventilator`)
 
 ## PregnancyPanel.vue
 
+Shown only when the loaded scenario has a `Uterus` or `MaternalPlacenta` model (none of the shipped neonatal scenarios does), and in production not at all (unfinished).
+
 Bespoke pregnancy/labor console for `Uterus` + `MaternalPlacenta`. **All plain config props → `setProp()`** (no setter side-effects). Self-disables when no `Uterus` model is present.
 
 | Control | Write |
