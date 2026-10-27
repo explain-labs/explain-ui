@@ -74,8 +74,13 @@ const hasPregnancy = computed(() => {
   const m = (modelState.value as any)?.models;
   return !!(m && (m.Uterus || m.MaternalPlacenta));
 });
+// hidden everywhere, dev included: the Scaler is hardly used from the app (scaling stays
+// available through the engine API and the bot)
+const HIDDEN_PANELS = new Set(["scaler"]);
 const showPanel = (name: string) =>
-  (name !== "pregnancy" || hasPregnancy.value) && (import.meta.env.DEV || !UNFINISHED_PANELS.has(name));
+  !HIDDEN_PANELS.has(name) &&
+  (name !== "pregnancy" || hasPregnancy.value) &&
+  (import.meta.env.DEV || !UNFINISHED_PANELS.has(name));
 // a scenario without them hides the tab: don't leave it selected with nothing shown
 watch(hasPregnancy, (has) => {
   if (!has && controlTab.value === "pregnancy") controlTab.value = "editor";

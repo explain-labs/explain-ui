@@ -115,7 +115,7 @@ flex layout, each column a PrimeVue `Tabs` group, with sticky top and bottom bar
 | Center (`vizTab`) | `diagram` `chart` `loop` `chat` `builder` `sle6000` `docs` | `Diagram`, `RealtimeChart`, `LoopChart`, `ChatPanel`, `PatientBuilderPanel`, `Sle6000Screen` (the ventilator; no HFOV yet), `DocViewer` | [HostComponents](./HostComponents.md), [ChatAndBot](./ChatAndBot.md), [PatientBuilder](./PatientBuilder.md) |
 | Right (`monitorTab`) | `monitoring` `monitor` | `NumericReadoutPanel` (×group), `Monitor` | [Numerics](./Numerics.md), [HostComponents](./HostComponents.md) |
 
-¹ Unfinished: hidden in production builds, shown under `npm run dev` (`UNFINISHED_PANELS` in `MainPage.vue`). `pregnancy` also needs a scenario with a `Uterus` or `MaternalPlacenta` model; without one the tab is hidden in dev too.
+¹ Unfinished: hidden in production builds, shown under `npm run dev` (`UNFINISHED_PANELS` in `MainPage.vue`). `pregnancy` also needs a scenario with a `Uterus` or `MaternalPlacenta` model; without one the tab is hidden in dev too. `scaler` is hidden in dev too (`HIDDEN_PANELS`): it is hardly used from the app.
 
 The bottom bar holds the run controls: a single ▶/■ toggle (also bound to **Spacebar**, suppressed
 while typing in inputs), a fast-forward `calculate(calcSecs)` button with a `CALC_OPTIONS`

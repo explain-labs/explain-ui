@@ -111,6 +111,8 @@ Slow read-outs span both models: `Uterus.ut_blood_flow`/`iup`/`montevideo_units`
 
 ## ScalerPanel.vue
 
+Not shown in the app (`HIDDEN_PANELS` in `MainPage.vue`, dev included): it is hardly used by end users. The component is kept; scaling stays available through `scaleModel` and the bot.
+
 Allometric/group scaling. A `Select` of groups (`weight_scale`, `blood_volume`, `heart_volume`, `lung_volume`, systemic/pulmonary resistances & elastances, `heart_el_min`/`heart_el_max`) + a factor `InputNumber`.
 
 - Apply → `scale(group, factor)` then `refreshState()`.
