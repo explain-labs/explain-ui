@@ -396,6 +396,10 @@ function removeSecondProp(param: MonitorParam) {
         <ToggleSwitch v-model="group.collapsed" @update:model-value="touch" />
         <span class="opacity-70">collapsed by default</span>
       </label>
+      <label class="flex items-center gap-1.5" v-tooltip.top="'Show this group above the dashboard tabs, on every tab'">
+        <ToggleSwitch v-model="group.pinned" @update:model-value="touch" />
+        <span class="opacity-70">on every tab</span>
+      </label>
     </div>
 
     <!-- parameter rows -->

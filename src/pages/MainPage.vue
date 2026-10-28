@@ -151,11 +151,17 @@ function downloadSnapshot() {
 // Monitor groups come from the monitors store, which mirrors the loaded
 // scenario's `configuration.monitor_dashboards` (one tab each) and persists edits back. Synced on every
 // (re)build (modelReady). In edit mode every group is shown (so disabled ones
-// can be re-enabled); read-only mode hides disabled groups.
+// can be re-enabled); read-only mode hides disabled groups. A pinned group (e.g. Vitals) is shown
+// above the tabs on every tab instead of in its own tab; manage mode edits it in its own dashboard.
 const monitorGroups = computed(() =>
   editingMonitors.value
     ? monitorsStore.groups
-    : monitorsStore.groups.filter((g) => g.enabled !== false),
+    : monitorsStore.groups.filter((g) => g.enabled !== false && !g.pinned),
+);
+const pinnedGroups = computed(() =>
+  editingMonitors.value
+    ? []
+    : monitorsStore.allGroups.map(({ group }) => group).filter((g) => g.enabled !== false && g.pinned),
 );
 watch(
   modelReady,
@@ -624,6 +630,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   />
                 </div>
 
+                <!-- pinned groups: above the tabs, on every tab (read-only mode) -->
+                <NumericReadoutPanel
+                  v-for="g in pinnedGroups"
+                  :key="`pin-${g.key}`"
+                  :group="g"
+                  :editable="false"
+                  :compact="monitorPrefs.compact"
+                  :highlight="tour.numericHighlight.value"
+                />
                 <!-- dashboard tabs (several dashboards, read-only mode) -->
                 <SelectButton
                   v-if="monitorsStore.dashboards.length > 1 && !editingMonitors"

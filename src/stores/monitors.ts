@@ -25,6 +25,7 @@ export interface MonitorGroup {
   title: string;
   enabled: boolean;
   collapsed: boolean;
+  pinned?: boolean; // shown above the dashboard tabs, on every tab (e.g. Vitals)
   parameters: MonitorParam[];
 }
 
@@ -53,6 +54,7 @@ function parseMonitors(stored: any): MonitorGroup[] {
     title: g?.title ?? key,
     enabled: g?.enabled ?? true,
     collapsed: g?.collapsed ?? false,
+    pinned: g?.pinned === true,
     // drop the vestigial cached `value` field engine never reads
     parameters: (Array.isArray(g?.parameters) ? g.parameters : []).map(
       (p: any): MonitorParam => ({
@@ -75,6 +77,7 @@ function groupsToObject(groups: MonitorGroup[]): Record<string, any> {
       title: g.title,
       enabled: g.enabled,
       collapsed: g.collapsed,
+      ...(g.pinned ? { pinned: true } : {}),
       parameters: clone(g.parameters),
     };
   }
