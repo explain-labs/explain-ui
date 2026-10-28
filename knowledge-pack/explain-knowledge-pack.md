@@ -2493,7 +2493,19 @@ Under sustained hypoxaemia the newborn's ventilation rises within a minute (the 
 
 term_neonate_72h (re-validation): FiO₂ 0.15 → ventilation +16 % at 30 s, +18 % at 1 min, back to +4 % by 5 min (12 % below the peak; data ~14–16 %); the chemoreflex re-drives against the depression (factor 0.51 at 5 min), so the net fall is smaller than the factor. FiO₂ 0.07 (`probe_lactate`): pH 7.44 at 1 min (early hyperventilation), then 7.33 at 7 min as the depression lets the lactic acidosis show. Without it, the stronger peripheral chemoreflex of re-validation (l) kept that baby alkalotic (pH 7.41 at 7 min).
 
-**term_neonate_72h calibration (2026-10):** `ie_ratio` 0.40 (Ti 0.65 s of 1.63 s); `vt_rr_ratio` set for RR 40 / Vt 5.3 mL/kg at 213 mL/kg/min; `minute_volume_ref` 0.207, with the chemoreceptor set-points re-anchored so the chemoreflex is neutral at PaCO2 39.7. With the linear muscle ramp, peak flows are 0.70 / 0.66 L/min/kg (reference 0.83 / 0.64). See `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+**term_neonate_72h calibration (2026-10):** `ie_ratio` 0.40; `vt_rr_ratio` set on 2026-10-18 for RR 40 / Vt 5.3 mL/kg at 213 mL/kg/min. The O2-use steps of 2026-10-27 raised `minute_volume_ref` to 0.2546 L/kg/min, with the chemoreceptor set-points re-anchored each time so the chemoreflex is neutral at rest: RR 44.3, Vt 5.77 mL/kg, MV 256 mL/kg/min (reference 215 ± 52 in quiet sleep), PaCO2 39.3, peak flows 0.86 / 0.75 L/min/kg (reference 0.83 / 0.64). See `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+
+### Response to CO2
+
+`scripts/probe_co2_response.mjs` raises the inspired CO2 at the mouth (0, 2, 4 %, 8 min each) with the chemoreflex on. term_neonate_72h (2026-10-28):
+
+| Inspired CO2 | PaCO2 | MV mL/kg/min | RR | Vt mL/kg |
+|---|---|---|---|---|
+| 0 % | 39.3 | 255 | 44.2 | 5.76 |
+| 2 % | 42.4 | 345 | 52.7 | 6.56 |
+| 4 % | 47.2 | 523 | 67.2 | 7.79 |
+
+Slope 34 mL/kg/min per mmHg (13 % of resting MV per mmHg), against 38.7 ± 3.0 in quiet sleep and 12.2 ± 3.0 in REM sleep in term babies at 4–6 days (Cohen 1991). It steepens with the dose (29 from 0 to 2 %, 37 from 2 to 4 %). Because MV = ratio · RR², rate and tidal volume each rise with √MV, so RR carries about half the response (+52 % at 4 %); see the limitations. The `co2.gain` of `validate_respiratory` (cut the drive, measure the recovery) is an indirect index and reads about twice this slope.
 
 ### Breath phases
 
@@ -2558,7 +2570,8 @@ None of the engine's factor layers. Its own multipliers (`*_factor`, `*_scaling_
 
 - **The rate follows only the drive.** No vagal rate response to stiff lungs, no Hering–Breuer shortening of inspiration (parked).
 - **Central vs obstructive apnoea.** A central apnoea switches breathing off; an obstructive one keeps the drive and closes `MOUTH_DS` (see [Apnea](./Apnea.md)).
-- **One muscle-pressure shape** (linear ramp); infants reach peak flow earlier in inspiration, so peak inspiratory flow is ~15 % low at term.
+- **One muscle-pressure shape** (linear ramp); infants reach peak flow earlier in inspiration. At term the peak flows match the reference (0.86 / 0.75 against 0.83 / 0.64 L/min/kg) because the tidal volume and rate are slightly above it.
+- **Fixed rate / volume split.** Every change of minute volume, whatever drives it, raises rate and tidal volume by the same fraction (MV = ratio · RR²). In newborns the CO2 response leans to tidal volume: Vt rises in every report, rate contributes in quiet sleep but little in preterms and newborn mammals (Rigatto 1981; Cohen 1991; Mortola 1996: Vt +78 %, rate unchanged at 5 % CO2). So at strong drives the rate is probably too high (67/min at 4 % inspired CO2). Not changed: no quantitative term split was found.
 - **`resp_rate_measured` has a start-up transient** over the first breaths; the settled value is correct.
 - **Verification:** `npm run validate:resp` (see [TESTING](./TESTING.md)) checks the spontaneous steady state, the chemoreflex, resistive and elastic loads, CPAP and pressure support against clinical ranges. The one known failure is the missing vagal rate response to stiff lungs (adult class).
 
@@ -2598,7 +2611,11 @@ One instance in every scenario.
 
 ## References
 
-The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, peak flows) is referenced in [TermNeonateReference](./TermNeonateReference.md) (Schmalisch 2005; Hannover 2018).
+The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, peak flows) and the CO2 response are referenced in [TermNeonateReference](./TermNeonateReference.md) (Schmalisch 2005; Hannover 2018; Cohen 1991).
+
+- Cohen G, Xu C, Henderson-Smart D. Ventilatory response of the sleeping newborn to CO2 during normoxic rebreathing. *J Appl Physiol* 1991;71:168–74. doi:10.1152/jappl.1991.71.1.168 (term, 4–6 days: 38.7 ± 3.0 quiet sleep, 12.2 ± 3.0 REM mL/kg/min per mmHg)
+- Mortola JP, Lanthier C. The ventilatory and metabolic response to hypercapnia in newborn mammalian species. *Respir Physiol* 1996;103:263–70. doi:10.1016/0034-5687(95)00093-3 (5 % CO2: Vt +78 %, rate 98 %)
+- Rigatto H, Desai U, Leahy F, Kalapesi Z, Cates D. The effect of 2% CO2, 100% O2, theophylline and 15% O2 on "inspiratory drive" and "effective" timing in preterm infants. *Early Hum Dev* 1981;5:63–70. doi:10.1016/0378-3782(81)90071-2 (2 % CO2: Vt up, rate little changed)
 
 - De Boeck C, Van Reempts P, Rigatto H, Chernick V. Naloxone reduces decrease in ventilation induced by hypoxia in newborn infants. *J Appl Physiol* 1984;56:1507–11. doi:10.1152/jappl.1984.56.6.1507 (term newborns on 15 % O2: ventilation ~14 % below its early peak)
 - Rehan V, Haider AZ, Alvaro RE, et al. The biphasic ventilatory response to hypoxia in preterm infants is not due to a decrease in metabolism. *Pediatr Pulmonol* 1996;22:287–94. doi:10.1002/(SICI)1099-0496(199611)22:5<287::AID-PPUL1>3.0.CO;2-I (−16 ± 2 % from the peak at 5 min; likely central)
@@ -9744,7 +9761,7 @@ The `probe_*.mjs` scripts, grouped by what they verify:
 | Group | Scripts | Verifies |
 |---|---|---|
 | **Core vitals / calibration** | `probe_vitals.mjs`, `probe_tune.mjs`, `probe_ea.mjs` | Regulated vitals + ABG vs normal ranges; the live closed-loop tuner; mitral E/A ratio. |
-| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
+| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_co2_response.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); steady-state ventilatory response to inhaled CO2 (slope of MV against PaCO2, with the RR/Vt split); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
 | **Devices** | `probe_ventilator.mjs`, `probe_sle6000.mjs`, `probe_ecls.mjs`, `probe_resuscitation.mjs` | Pressure-control ventilation with spontaneous drive off, sweeping FiO2 / rate / PEEP; veno-arterial ECMO rescue under near-abolished alveolar diffusion, sweeping pump speed / sweep-gas flow (both report the **emergent** blood gas from the gas-exchange physics, not the device); the SLE6000 device model — pass/fail checks of its modes, settings validation, VTV, CPAP backup, O2 Boost and monitored values (exit 1 on failure); CPR — under a simulated arrest, verifies the compression waveform, that compressions drive forward aortic flow via `pres_ext`, the `vent_no`-breaths-per-pause timing, and a clean `switch_cpr` re-toggle. |
 | **PDA / CDH** | `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
 | **CHD family** | `probe_as.mjs`, `probe_coarc.mjs`, `probe_dtga.mjs`, `probe_hlhs.mjs`, `probe_paivs.mjs`, `probe_pavsd.mjs`, `probe_ps.mjs`, `probe_ta.mjs`, `probe_tapvc.mjs`, `probe_tof.mjs` | Duct/FO-dependent congenital heart disease scenarios (aortic stenosis, coarctation, d-TGA, HLHS, PA-IVS, PA-VSD, pulmonary stenosis, tricuspid atresia, TAPVC, tetralogy of Fallot). |
@@ -9956,6 +9973,7 @@ inflow comes through the intestinal bed (INT), which the model drains into the l
 | Resistance (Rrs) | **52 ± 6** cmH₂O/L/s | (Katier ~75–80) | passive occlusion, n=9 | B | Nowotny 1998 |
 | FRC | **27.1** mL/kg | 23.8–32.0 | helium, median day 2, n=24 | A | Yüksel 1995; nitrogen 24.0, plethysmography 29.8–31.1 |
 | Anatomic dead space | **2.2** mL/kg | Vd/Vt ~0.3–0.4 | term, day 5 | A/B | Stokes 1986 |
+| CO₂ response | **38.7 ± 3.0** mL/kg/min per mmHg (quiet sleep) | 12–67 | normoxic CO₂ rebreathing, term, 4–6 days, n=5; REM sleep 12.2 ± 3.0; Moriette 67 / 44 (quiet / active sleep, 40 % O₂). Vt rises in every report; rate contributes in quiet sleep, no quantitative split found. Model 34 (`scripts/probe_co2_response.mjs`, 0/2/4 % CO₂) | B | Cohen 1991 ([doi](https://doi.org/10.1152/jappl.1991.71.1.168)); Moriette 1985 ([doi](https://doi.org/10.1016/0034-5687(85)90093-3)); Rigatto 1991 ([doi](https://doi.org/10.1164/ajrccm/143.1.101)); Mortola 1996 ([doi](https://doi.org/10.1016/0034-5687(95)00093-3)). Added 2026-10-28 |
 
 ## Gases and saturations
 
