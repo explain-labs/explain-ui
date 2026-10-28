@@ -2493,7 +2493,23 @@ Under sustained hypoxaemia the newborn's ventilation rises within a minute (the 
 
 term_neonate_72h (re-validation): FiO₂ 0.15 → ventilation +16 % at 30 s, +18 % at 1 min, back to +4 % by 5 min (12 % below the peak; data ~14–16 %); the chemoreflex re-drives against the depression (factor 0.51 at 5 min), so the net fall is smaller than the factor. FiO₂ 0.07 (`probe_lactate`): pH 7.44 at 1 min (early hyperventilation), then 7.33 at 7 min as the depression lets the lactic acidosis show. Without it, the stronger peripheral chemoreflex of re-validation (l) kept that baby alkalotic (pH 7.41 at 7 min).
 
-**term_neonate_72h calibration (2026-10):** `ie_ratio` 0.40 (Ti 0.65 s of 1.63 s); `vt_rr_ratio` set for RR 40 / Vt 5.3 mL/kg at 213 mL/kg/min; `minute_volume_ref` 0.207, with the chemoreceptor set-points re-anchored so the chemoreflex is neutral at PaCO2 39.7. With the linear muscle ramp, peak flows are 0.70 / 0.66 L/min/kg (reference 0.83 / 0.64). See `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+**term_neonate_72h calibration (2026-10):** `ie_ratio` 0.40; `vt_rr_ratio` set on 2026-10-18 for RR 40 / Vt 5.3 mL/kg at 213 mL/kg/min. The O2-use steps of 2026-10-27 raised `minute_volume_ref` to 0.2546 L/kg/min, with the chemoreceptor set-points re-anchored each time so the chemoreflex is neutral at rest: RR 44.3, Vt 5.77 mL/kg, MV 256 mL/kg/min (reference 215 ± 52 in quiet sleep), PaCO2 39.3, peak flows 0.86 / 0.75 L/min/kg (reference 0.83 / 0.64). See `scripts/_fix_term_breathing_pattern.mjs` and [TermNeonateReference](./TermNeonateReference.md).
+
+### Response to CO2
+
+`scripts/probe_co2_response.mjs` raises the inspired CO2 at the mouth (0, 2, 4 %, 8 min each) with the chemoreflex on. term_neonate_72h (2026-10-28):
+
+| Inspired CO2 | PaCO2 | MV mL/kg/min | RR | Vt mL/kg |
+|---|---|---|---|---|
+| 0 % | 39.3 | 255 | 44.2 | 5.76 |
+| 2 % | 42.4 | 345 | 52.7 | 6.56 |
+| 4 % | 47.2 | 523 | 67.2 | 7.79 |
+
+Slope 34 mL/kg/min per mmHg (13 % of resting MV per mmHg), against 38.7 ± 3.0 in quiet sleep and 12.2 ± 3.0 in REM sleep in term babies at 4–6 days (Cohen 1991). It steepens with the dose (29 from 0 to 2 %, 37 from 2 to 4 %). Because MV = ratio · RR², rate and tidal volume each rise with √MV, so RR carries about half the response (+52 % at 4 %); see the limitations. The `co2.gain` of `validate_respiratory` (cut the drive, measure the recovery) is an indirect index and reads about twice this slope.
+
+### Pleural pressure swing
+
+The muscle pressure acts on THORAX, so its swing per breath is the model's oesophageal pressure swing. term_neonate_72h: 7.6 cmH2O (`validate_respiratory` base case) against 7.3 ± 1.4 measured in healthy infants from birth to 5 years (Gerhardt 1987). It is consistent with the lung mechanics: with the chest wall ~2.9× as compliant as the lung in infancy (Papastamelos 1995), Crs 0.96 mL/cmH2O/kg implies a lung compliance of ~1.30 /kg (1.34 ± 0.37 in healthy term infants, Yau 1994), so the elastic part is Vt / CL ≈ 4.4 cmH2O and the airway resistance adds the rest. The suite's term range is mean ± 2 SD (4.5–10.1).
 
 ### Breath phases
 
@@ -2558,7 +2574,8 @@ None of the engine's factor layers. Its own multipliers (`*_factor`, `*_scaling_
 
 - **The rate follows only the drive.** No vagal rate response to stiff lungs, no Hering–Breuer shortening of inspiration (parked).
 - **Central vs obstructive apnoea.** A central apnoea switches breathing off; an obstructive one keeps the drive and closes `MOUTH_DS` (see [Apnea](./Apnea.md)).
-- **One muscle-pressure shape** (linear ramp); infants reach peak flow earlier in inspiration, so peak inspiratory flow is ~15 % low at term.
+- **One muscle-pressure shape** (linear ramp); infants reach peak flow earlier in inspiration. At term the peak flows match the reference (0.86 / 0.75 against 0.83 / 0.64 L/min/kg) because the tidal volume and rate are slightly above it.
+- **Fixed rate / volume split.** Every change of minute volume, whatever drives it, raises rate and tidal volume by the same fraction (MV = ratio · RR²). In newborns the CO2 response leans to tidal volume: Vt rises in every report, rate contributes in quiet sleep but little in preterms and newborn mammals (Rigatto 1981; Cohen 1991; Mortola 1996: Vt +78 %, rate unchanged at 5 % CO2). So at strong drives the rate is probably too high (67/min at 4 % inspired CO2). Not changed: no quantitative term split was found.
 - **`resp_rate_measured` has a start-up transient** over the first breaths; the settled value is correct.
 - **Verification:** `npm run validate:resp` (see [TESTING](./TESTING.md)) checks the spontaneous steady state, the chemoreflex, resistive and elastic loads, CPAP and pressure support against clinical ranges. The one known failure is the missing vagal rate response to stiff lungs (adult class).
 
@@ -2598,7 +2615,14 @@ One instance in every scenario.
 
 ## References
 
-The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, peak flows) is referenced in [TermNeonateReference](./TermNeonateReference.md) (Schmalisch 2005; Hannover 2018).
+The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, peak flows) and the CO2 response are referenced in [TermNeonateReference](./TermNeonateReference.md) (Schmalisch 2005; Hannover 2018; Cohen 1991).
+
+- Gerhardt T, Reifenberg L, Hehre D, Feller R, Bancalari E. Pulmonary mechanics in normal infants and young children during first 5 years of life. *Pediatr Pulmonol* 1987;3:309–16. doi:10.1002/ppul.1950030506 (oesophageal swing 7.3 ± 1.4 cmH2O)
+- Papastamelos C, Panitch HB, England SE, Allen JL. Developmental changes in chest wall compliance in infancy and early childhood. *J Appl Physiol* 1995;78:179–84. doi:10.1152/jappl.1995.78.1.179
+- Yau KI, Fang LJ. Pulmonary mechanics and the energetics of breathing in healthy infants. *J Formos Med Assoc* 1994;93:110–6. PMID 7912580 (lung compliance 1.34 ± 0.37 mL/cmH2O/kg)
+- Cohen G, Xu C, Henderson-Smart D. Ventilatory response of the sleeping newborn to CO2 during normoxic rebreathing. *J Appl Physiol* 1991;71:168–74. doi:10.1152/jappl.1991.71.1.168 (term, 4–6 days: 38.7 ± 3.0 quiet sleep, 12.2 ± 3.0 REM mL/kg/min per mmHg)
+- Mortola JP, Lanthier C. The ventilatory and metabolic response to hypercapnia in newborn mammalian species. *Respir Physiol* 1996;103:263–70. doi:10.1016/0034-5687(95)00093-3 (5 % CO2: Vt +78 %, rate 98 %)
+- Rigatto H, Desai U, Leahy F, Kalapesi Z, Cates D. The effect of 2% CO2, 100% O2, theophylline and 15% O2 on "inspiratory drive" and "effective" timing in preterm infants. *Early Hum Dev* 1981;5:63–70. doi:10.1016/0378-3782(81)90071-2 (2 % CO2: Vt up, rate little changed)
 
 - De Boeck C, Van Reempts P, Rigatto H, Chernick V. Naloxone reduces decrease in ventilation induced by hypoxia in newborn infants. *J Appl Physiol* 1984;56:1507–11. doi:10.1152/jappl.1984.56.6.1507 (term newborns on 15 % O2: ventilation ~14 % below its early peak)
 - Rehan V, Haider AZ, Alvaro RE, et al. The biphasic ventilatory response to hypoxia in preterm infants is not due to a decrease in metabolism. *Pediatr Pulmonol* 1996;22:287–94. doi:10.1002/(SICI)1099-0496(199611)22:5<287::AID-PPUL1>3.0.CO;2-I (−16 ± 2 % from the peak at 5 min; likely central)
@@ -9744,7 +9768,7 @@ The `probe_*.mjs` scripts, grouped by what they verify:
 | Group | Scripts | Verifies |
 |---|---|---|
 | **Core vitals / calibration** | `probe_vitals.mjs`, `probe_tune.mjs`, `probe_ea.mjs` | Regulated vitals + ABG vs normal ranges; the live closed-loop tuner; mitral E/A ratio. |
-| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
+| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_co2_response.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); steady-state ventilatory response to inhaled CO2 (slope of MV against PaCO2, with the RR/Vt split); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
 | **Devices** | `probe_ventilator.mjs`, `probe_sle6000.mjs`, `probe_ecls.mjs`, `probe_resuscitation.mjs` | Pressure-control ventilation with spontaneous drive off, sweeping FiO2 / rate / PEEP; veno-arterial ECMO rescue under near-abolished alveolar diffusion, sweeping pump speed / sweep-gas flow (both report the **emergent** blood gas from the gas-exchange physics, not the device); the SLE6000 device model — pass/fail checks of its modes, settings validation, VTV, CPAP backup, O2 Boost and monitored values (exit 1 on failure); CPR — under a simulated arrest, verifies the compression waveform, that compressions drive forward aortic flow via `pres_ext`, the `vent_no`-breaths-per-pause timing, and a clean `switch_cpr` re-toggle. |
 | **PDA / CDH** | `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
 | **CHD family** | `probe_as.mjs`, `probe_coarc.mjs`, `probe_dtga.mjs`, `probe_hlhs.mjs`, `probe_paivs.mjs`, `probe_pavsd.mjs`, `probe_ps.mjs`, `probe_ta.mjs`, `probe_tapvc.mjs`, `probe_tof.mjs` | Duct/FO-dependent congenital heart disease scenarios (aortic stenosis, coarctation, d-TGA, HLHS, PA-IVS, PA-VSD, pulmonary stenosis, tricuspid atresia, TAPVC, tetralogy of Fallot). |
@@ -9956,6 +9980,8 @@ inflow comes through the intestinal bed (INT), which the model drains into the l
 | Resistance (Rrs) | **52 ± 6** cmH₂O/L/s | (Katier ~75–80) | passive occlusion, n=9 | B | Nowotny 1998 |
 | FRC | **27.1** mL/kg | 23.8–32.0 | helium, median day 2, n=24 | A | Yüksel 1995; nitrogen 24.0, plethysmography 29.8–31.1 |
 | Anatomic dead space | **2.2** mL/kg | Vd/Vt ~0.3–0.4 | term, day 5 | A/B | Stokes 1986 |
+| CO₂ response | **38.7 ± 3.0** mL/kg/min per mmHg (quiet sleep) | 12–67 | normoxic CO₂ rebreathing, term, 4–6 days, n=5; REM sleep 12.2 ± 3.0; Moriette 67 / 44 (quiet / active sleep, 40 % O₂). Vt rises in every report; rate contributes in quiet sleep, no quantitative split found. Model 34 (`scripts/probe_co2_response.mjs`, 0/2/4 % CO₂) | B | Cohen 1991 ([doi](https://doi.org/10.1152/jappl.1991.71.1.168)); Moriette 1985 ([doi](https://doi.org/10.1016/0034-5687(85)90093-3)); Rigatto 1991 ([doi](https://doi.org/10.1164/ajrccm/143.1.101)); Mortola 1996 ([doi](https://doi.org/10.1016/0034-5687(95)00093-3)). Added 2026-10-28 |
+| Pleural (oesophageal) pressure swing | **7.3 ± 1.4** cmH₂O | — | oesophageal catheter, quiet breathing, newborn to 5 years (no change with growth), n=40. Cross-check: lung compliance 1.34 ± 0.37 mL/cmH₂O/kg in healthy term infants (Yau 1994); the model's Crs with a chest wall ~2.9× as compliant as the lung (Papastamelos 1995) gives ~1.30. Model 7.6 (`validate_respiratory`) | B | Gerhardt 1987 ([doi](https://doi.org/10.1002/ppul.1950030506)); Papastamelos 1995 ([doi](https://doi.org/10.1152/jappl.1995.78.1.179)); Yau 1994 (PMID [7912580](https://pubmed.ncbi.nlm.nih.gov/7912580/)). Added 2026-10-28 |
 
 ## Gases and saturations
 
@@ -10693,6 +10719,10 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `insp_flow` | L/min | Maximal flow of the demand valve in `PC`/`PRVC`/`PS`/`CPAP`; the delivered (constant) flow in `VC` (default 12) |
 | `leak_size` | mm | Equivalent diameter of the gap around an uncuffed tube; 0 = no leak (default). Useful range ≈ 0.5–1.25 mm neonatal, 1–3 mm adult — see *Tube leak* |
 | `exp_valve_resistance` | mmHg·s/L | Expiratory limb + valve; 0 = auto by circuit size (default) — see *Expiratory valve* |
+| `bias_flow` | L/min | Continuous fresh-gas flow through the circuit while the expiratory valve is open; 0 = auto by circuit size (default) — see *Bias flow* |
+| `sensor_dead_space` | mL | Flow sensor + tube connector at the Y-piece, in series with the tube; 0 = auto by circuit size (default) — see *ET-tube dead space* |
+| `upper_airway_ds_fraction` | – | Share of the airway dead space above the tube tip, bypassed while intubated; 0 = auto by age (default) — see *ET-tube dead space* |
+| `ds_bypass_applied` | – | State, not a setting: the dead-space share whose volume is currently removed (saved with the scenario) |
 | `volume_guarantee` | bool | Volume guarantee on top of `PC` (incl. synchronized A/C), `PS` or `SIMV`: the working pressure is servoed breath-to-breath to `tidal_volume`, limited by `pip_cmh2o_max` (default false) |
 | `rise_time` | s | Pressure rise time in `PC`/`PRVC`/`PS`: the target ramps PEEP → PIP over this time (default 0.1; 0 = as fast as `insp_flow` allows) |
 | `exp_flow` | L/min | Expiratory flow setting (default 3; reserved — not used in the current math) |
@@ -10847,11 +10877,11 @@ captured into `_pip_meas` for the mechanics read-outs.
   The result is a square pressure waveform with decelerating flow, as on a real pressure-controlled
   ventilator. Integrate inspiratory tidal volume from positive ET-tube flow, and record
   `_insp_flow_at_pause` for the resistance measurement.
-- **Expiration** — open `VENT_EXP_VALVE` (`r_for` from `calc_exp_valve_resistance`, see *Expiratory valve*) and pin the expiratory reservoir volume to
-  hold PEEP (`vol = _peep/el_base + u_vol`). The inspiratory valve runs the pressure servo with PEEP
-  as its target (a demand valve). While the patient exhales the circuit sits above PEEP and the
-  servo stays shut; once the patient inhales it supplies the flow. Integrate expiratory tidal volume
-  from negative ET-tube flow.
+- **Expiration** — `_hold_expiratory(PEEP)`: open `VENT_EXP_VALVE` (`r_for` from `calc_exp_valve_resistance`, see *Expiratory valve*), pin the expiratory reservoir volume to
+  hold PEEP and run the pressure servo with PEEP as its target (a demand valve) with the bias flow
+  as its floor (see *Bias flow*). While the patient exhales the circuit sits above PEEP and only the
+  bias flow runs; once the patient inhales the servo supplies the flow. Integrate expiratory tidal
+  volume from negative ET-tube flow.
 
   > Before 2026-10, the inspiratory valve was simply shut in expiration. The circuit was then sealed
   > between ventilator breaths, apart from the one-way exit to the PEEP reservoir. A spontaneously
@@ -10874,12 +10904,35 @@ at the Y-piece. Without the filter the circuit tracks the target within a step, 
 comes out as a sharp-cornered box. VC and HFO do not use it; they reset the filter state. See
 [Sle6000](./Sle6000.md) for the 12 ms value and its calibration.
 
+### Bias flow (`_hold_expiratory`, `calc_bias_flow`)
+
+Whenever the expiratory valve is open (the expiration of PC/PRVC/VC/PS and CPAP), a continuous
+fresh-gas flow runs through the circuit and out of the expiratory valve, as on a real neonatal or
+paediatric ventilator. It washes the expired gas out of the circuit. `_hold_expiratory(p)` passes it
+to the pressure servo as a floor (`q ≥ q_bias`) and pins the PEEP reservoir lower by the valve's
+pressure drop at that flow (`p − q_bias · r_exp`), so the circuit stays at `p`. With
+`bias_flow = 0` (auto) it follows the circuit size, capped at `insp_flow`:
+
+| ET tube | circuit | bias flow (L/min) |
+|---|---|---|
+| < 4.5 mm | neonatal | 8 |
+| 4.5–6 mm | paediatric | 5 |
+| ≥ 6 mm | adult | 3 |
+
+> Before 2026-10 there was no bias flow: the demand valve delivered only what the patient drew in,
+> the expired gas stayed in the single well-mixed circuit compartment and the next breath drew it
+> back in. On CPAP 5 the term baby's circuit held ~15 mmHg CO₂ (~2 %), and the chemoreflex raised
+> ventilation by 58 % (MV 256 → 405 mL/kg/min, RR 56, Vt 7.2 mL/kg). With 8 L/min the circuit holds
+> ~2.6 mmHg.
+
+HFOV keeps its own `hfo_bias_flow` (see *High-frequency oscillation*).
+
 ### `_pressure_servo(target)` (demand valve)
 
 Meters fresh gas into the circuit so `VENT_GASCIRCUIT` follows `target` (mmHg above atmospheric):
 
 ```
-q = clamp( q_out + gain · (target − P_circuit) / (E_circuit · dt) ,  0 , insp_flow/60 )
+q = clamp( q_out + gain · (target − P_circuit) / (E_circuit · dt) ,  q_floor , insp_flow/60 )
 r_for(VENT_INSP_VALVE) = (VENT_GASIN.pres − P_circuit) / q        (no_flow when q ≈ 0)
 ```
 
@@ -10888,7 +10941,8 @@ the valve feeds the patient's demand forward and only corrects the residual pres
 `gain` (`_servo_gain`) is 0.8. A lower gain lags the target, which made the adult circuit
 oscillate; at 1.0 PS starts to dither. The source sits about 400 mmHg above the circuit, so the
 valve is close to an ideal flow source, and the one-step-old circuit pressure the Ventilator sees
-(it steps before its components) is good enough. The valve never sucks gas back (`q ≥ 0`), and it
+(it steps before its components) is good enough. The valve never delivers less than `q_floor` (the
+bias flow when the expiratory valve is open, else 0), so it never sucks gas back, and it
 is capped at `insp_flow`. A flow-limited breath (small `insp_flow`, large lung) therefore ramps
 instead of squaring, and may not reach PIP within `insp_time`.
 
@@ -10982,8 +11036,8 @@ per minute.
 CPAP holds the circuit at the CPAP level (= `peep_cmh2o`) and lets the patient breathe spontaneously
 through the ET tube — **both valves stay open**. The inspiratory valve is the pressure servo, with
 the CPAP level as its target, so it delivers the patient's inspiratory demand (up to `insp_flow`)
-instead of letting the pressure dip. The expiratory reservoir is pinned, so the circuit floats at
-CPAP. Tidal volumes are accumulated from ET-tube flow and closed out at each spontaneous inspiration
+instead of letting the pressure dip, and never less than the bias flow, which washes the circuit
+(see *Bias flow*). The expiratory reservoir is pinned, so the circuit floats at CPAP. Tidal volumes are accumulated from ET-tube flow and closed out at each spontaneous inspiration
 start (`Breathing.ncc_insp === 1`), where `tv_kg` and `p_peak` (peak circuit pressure over that
 spontaneous breath) are latched too; `minute_volume = exp_tidal_volume · Breathing.resp_rate`.
 
@@ -11108,10 +11162,30 @@ Limitations:
 ## ET-tube dead space (`_set_tube_dead_space`)
 
 While the ventilator is on, it sets the dead-space compartment's `tube_volume` to the lumen volume
-`π·(d/2)²·L` and its `tube_port_model` to `VENT_GASCIRCUIT`. With series dead space on (the default,
-see [GasCapacitance → Series dead space](./GasCapacitance.md#series-dead-space)), gas to and from
-the circuit then passes through that rigid lumen, so a longer or wider tube adds dead space. The leak
-and the natural airway bypass the lumen. Switching the ventilator off sets `tube_volume` back to 0.
+`π·(d/2)²·L` plus the flow sensor and connector (`calc_sensor_dead_space`), and its
+`tube_port_model` to `VENT_GASCIRCUIT`. With series dead space on (the default, see
+[GasCapacitance → Series dead space](./GasCapacitance.md#series-dead-space)), gas to and from the
+circuit then passes through that rigid volume, so a longer or wider tube adds dead space. The leak
+and the natural airway bypass it. Switching the ventilator off sets `tube_volume` back to 0.
+
+**Sensor and connector.** `sensor_dead_space = 0` (auto): 1 mL for a neonatal circuit (a neonatal
+flow sensor with its connector, without an in-line suction hub), 2 mL paediatric, 6 mL adult.
+Nassabeh-Montazami 2009 measured 2.7 mL for a 2.5 mm tube cut to 10 cm with an in-line suction hub
+and flow sensor.
+
+**Upper airway bypassed.** The tube tip sits in the trachea, so the dead space above it (nose,
+mouth, pharynx, larynx) leaves the gas path. That share of the dead-space compartment is removed
+while intubated: its volume once when the tube goes in (`ds_bypass_applied` records it, so a saved
+and reloaded state does not remove it twice; it is given back when the ventilator is switched off or
+the patient extubated), and its unstressed volume each step through the non-persistent `u_vol_factor`.
+With `upper_airway_ds_fraction = 0` (auto) the share follows age (Numa & Newth 1996, intubated
+infants and children): extrathoracic 2.25 − 0.56·ln(1 + age) mL/kg (2.3 in early infancy, 0.8
+beyond 6 years), intrathoracic 1.03 mL/kg at every age, so the share is ~0.69 in a newborn and ~0.24
+in an adult.
+
+term_neonate_72h, intubated (3.5 mm × 110 mm) on CPAP 5: airway dead space 7.9 → 3.1 mL, tube +
+sensor 2.06 mL, series dead space 5.1 mL instead of 7.9 (before: 7.9 + the 1.06 mL lumen). With the
+bias flow, MV is 251 mL/kg/min against 256 breathing spontaneously, PaCO2 37.4 against 39.4.
 
 ## Expiratory valve
 
@@ -11435,6 +11509,8 @@ the full definition also nests the six `VENT_*` sub-models under `components`:
 ## References
 
 - ISO 80601-2-12 (critical care ventilators): the expiratory-limb pressure drop limits used for the automatic expiratory valve.
+- Numa AH, Newth CJ. Anatomic dead space in infants and children. *J Appl Physiol* 1996;80:1485–9. doi:10.1152/jappl.1996.80.5.1485 (extrathoracic and intrathoracic dead space by age)
+- Nassabeh-Montazami S, Abubakar KM, Keszler M. The impact of instrumental dead-space in volume-targeted ventilation of the extremely low birth weight (ELBW) infant. *Pediatr Pulmonol* 2009;44:128–33. doi:10.1002/ppul.20954 (tube, suction hub and flow sensor 2.7 mL)
 - SLE6000 instructions for use: monitoring definitions (see [Sle6000](./Sle6000.md)).
 
 ````
