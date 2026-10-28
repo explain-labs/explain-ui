@@ -9975,6 +9975,7 @@ inflow comes through the intestinal bed (INT), which the model drains into the l
 | Variable | Reference | Range | Method, age, n | Grade | Source |
 |---|---|---|---|---|---|
 | VO₂ | **~8.4** mL/kg/min (lung uptake) | 6.3–9.5 | the O₂ use that gives the measured venous extraction (0.21) at the measured output; calorimetry 6.26 ± 1.51 (first week, thermoneutral rest, n=202) and 6.6–7.2 at 6–30 h (RQ 0.94 → 0.88) | C | derived (2026-10-27); phototherapy study 2001; Zoppi 1998 ([doi](https://doi.org/10.1038/sj.ejcn.1600564)). Raises ventilation to ~250 mL/kg/min against 215 measured in quiet sleep |
+| RQ | **~0.85** | 0.80–0.90 | indirect calorimetry; no measurement at 72 h: 0.94 at 6 h and 0.88 at 30 h on 10 % glucose feeds before milk (n=46), 0.879 ± 0.009 breast-fed at ~17 days asleep. A breast-fed baby on small volumes of fat-rich milk is expected below the glucose-fed 0.88 (estimate). The model keeps 0.80 (`Metabolism.resp_q`), the low edge: a higher RQ adds CO₂ and ventilation, which already exceeds the quiet-sleep 215 | C | Zoppi 1998 ([doi](https://doi.org/10.1038/sj.ejcn.1600564)); Stettler 1992 (PMID [1600931](https://pubmed.ncbi.nlm.nih.gov/1600931/)). Added 2026-10-28 |
 | Temperature | 37.0 °C | 36.5–37.5 | — | C | WHO/textbook |
 | Glucose | **~4.0** mmol/L | — | plasma; 3.3 ± 0.6 to 48 h, 4.6 ± 0.7 by day 4 | A | GLOW 2020; Cousineau 3.8 ± 0.8 |
 | Lactate | **1.4** mmol/L (plasma, median) | 0.8–3.3 | > 48 h, n=67 | A | GLOW 2021; Cousineau capillary 2.6 ± 0.7 (1.4–4.1) |
