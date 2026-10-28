@@ -5519,6 +5519,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": true,
       "edit_mode": "extra",
       "readonly": false
+    },
+    {
+      "caption": "VO2/VCO2 averaging time (s)",
+      "target": "gas_avg_time",
+      "type": "number",
+      "delta": 5,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 5,
+      "ul": 600,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
     }
   ],
   "Pda": [

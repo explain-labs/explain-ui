@@ -7105,7 +7105,7 @@ and venous) — and exposes everything else through three uniform, **JSON-config
 
 ## Physiology
 
-A bedside monitor shows the vital signs a neonatal team watches: heart rate (from the ECG), pre- and post-ductal oxygen saturation (right hand and a foot; a difference signals right-to-left ductal shunting), blood pressures, respiratory rate, end-tidal CO2 and temperature. Its numbers are averaged over beats and breaths, so they lag fast changes by several seconds.
+A bedside monitor shows the vital signs a neonatal team watches: heart rate (from the ECG), pre- and post-ductal oxygen saturation (right hand and a foot; a difference signals right-to-left ductal shunting), blood pressures, respiratory rate, end-tidal CO2 and temperature. Indirect calorimetry adds the O2 uptake and CO2 output measured at the airway, usually averaged over a minute or more. Its numbers are averaged over beats and breaths, so they lag fast changes by several seconds.
 
 ## Built-in read-outs
 
@@ -7116,7 +7116,8 @@ A bedside monitor shows the vital signs a neonatal team watches: heart rate (fro
 | `etco2` | end-tidal CO₂; mirrored from `Ventilator.etco2` while the ventilator is enabled, otherwise derived from the spontaneous breath (see below) |
 | `temp` | blood temperature (°C), mirrored each step from `AA.temp` (last value kept if AA is absent) |
 | `sao2_pre`, `sao2_post` | pre-/post-ductal arterial O₂ saturation, from `AA.so2` / `AD.so2` |
-| `svo2` | mixed-venous O₂ saturation, from the pulmonary artery (`PA.so2`). Falls back to `RAIVCI.so2` when there is no PA; `RAIVCI` holds IVC-side blood, which misses the brain's extraction where the right-atrial halves don't mix (a fetal circulation). In `term_neonate_72h` the two agree (81.9 %). |
+| `svo2` | mixed-venous O₂ saturation, from the pulmonary artery (`PA.so2`). Falls back to `RAIVCI.so2` when there is no PA; `RAIVCI` holds IVC-side blood, which misses the brain's extraction where the right-atrial halves don't mix (a fetal circulation). In `term_neonate_72h` it reads 78.1 %. |
+| `vo2`, `vco2`, `rq` | O₂ taken up and CO₂ given off by the lungs (mL/kg/min STPD) and their ratio, from the gas exchangers of `Respiration` (see below) |
 
 **Heart rate** — on each ventricular beat (`Heart.ncc_ventricular === 1`), the beat-to-beat rate is
 `60 / interval` (interval = time since the previous beat). A running window of the last `hr_avg_beats`
@@ -7151,6 +7152,18 @@ kept. When no breath starts for `rr_avg_time` (apnoea) and the ventilator is off
 `etco2` reads 0 (no expired breath to measure, as on a capnograph). Switching the ventilator on or off
 resets the per-breath peak, so the first spontaneous breath after weaning does not report the
 maximum over the whole ventilated period.
+
+**Lung VO₂ / VCO₂** — `calc_lung_gas_exchange()` sums the per-step fluxes of the gas exchangers named
+in `Respiration.gas_exchangers` (`GASEX_LL`, `GASEX_RL`; uptake is `−flux_o2`, output `flux_co2`, in
+mmol per step), converts them to mL/kg/min with `60 / (Δt · O2_MMOL_PER_ML · weight)` and averages them
+with a first-order filter of time constant **`gas_avg_time`** (60 s), which removes the ripple of the
+breaths and beats. `rq = vco2 / vo2` (0 while `vo2` ≤ 0.01). A disabled exchanger is skipped (it would
+keep its last flux). This is the lung uptake that indirect calorimetry measures, not the tissue use
+`Metabolism.vo2`: it also includes the O₂ the heart (`Mob`) and the brain use on their own, so in
+`term_neonate_72h` it reads 8.72 mL/kg/min against `Metabolism.vo2` 7.73, with VCO₂ 6.97 and RQ 0.80
+(`Metabolism.resp_q`). An ECLS oxygenator is not counted, so on ECLS `vo2` is the lungs' share only.
+The values are saved with the scenario, so a loaded scenario reads them from the first step; a new
+build starts at 0 and settles in ~4 `gas_avg_time`.
 
 ## Configurable read-outs
 
@@ -7236,6 +7249,7 @@ it does not follow redistribution between the kidneys and the rest of the lower 
 | `hr_avg_beats` | beats | 12 | Heart-rate averaging window. |
 | `flow_avg_beats` | beats | 1 | Flow averaging window. |
 | `rr_avg_time` | s | 20 | Respiratory-rate averaging window. |
+| `gas_avg_time` | s | 60 | Time constant of the lung VO2/VCO2 average. |
 | `asystole_time` | s | 6 | No beat for this long reads as asystole. |
 | `etco2_source` | – | `"DS"` | Airway gas compartment for the spontaneous end-tidal CO2. |
 | `flow_targets`, `minmax_targets`, `signal_targets` | lists | `[]` | The configurable read-outs (above). |
@@ -7245,14 +7259,15 @@ it does not follow redistribution between the kidneys and the rest of the lower 
 |---|---|---|
 | `flows`, `minmax`, `signals` | dicts | The configurable read-outs (above). |
 | `fo_flow`, `do2_br`, `do2_lb` | L/min, mL O2/min | Derived metrics (above). |
+| `vo2`, `vco2`, `rq` | mL/kg/min, – | Lung O2 uptake, CO2 output and their ratio (above). |
 
-The saturations are mirrored every step without averaging. Model references are resolved by name at build: `Heart` (beats), `Breathing` and `Ventilator` (breaths), `AA`, `AD`, `PA`, `RAIVCI`. The target entries name their own models; one that doesn't resolve is dropped.
+The saturations are mirrored every step without averaging. Model references are resolved by name at build: `Heart` (beats), `Breathing` and `Ventilator` (breaths), `AA`, `AD`, `PA`, `RAIVCI`, and the gas exchangers listed in `Respiration.gas_exchangers`. The target entries name their own models; one that doesn't resolve is dropped.
 
 **term_neonate_72h** configures `flow_targets` lvo, rvo, cor_flow, svc_flow, ivc_flow, da_flow, brain_flow, kid_flow, ua_flow, uv_flow, fo_ivci_flow and fo_svc_flow; `minmax_targets` lv, rv, abp_pre, abp, pap, cvp and la; `signal_targets` ecg, sat_pre, sat_post, abp, resp and co2.
 
 ## Inputs and outputs
 
-- **Reads:** Heart (`ncc_ventricular`), Breathing and Ventilator (breath onsets, `etco2`), `AA`, `AD`, `PA`, `RAIVCI`, `DS`, and every configured target.
+- **Reads:** Heart (`ncc_ventricular`), Breathing and Ventilator (breath onsets, `etco2`), `AA`, `AD`, `PA`, `RAIVCI`, `DS`, the lung gas exchangers (`flux_o2`, `flux_co2`), and every configured target.
 - **Writes:** nothing outside itself.
 - **Read by:** the app's monitor panel, `DataCollector` watchers, the [Calibrator](./Calibrator.md) (calibration targets).
 
