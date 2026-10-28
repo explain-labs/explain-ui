@@ -1158,7 +1158,7 @@ Each step:
 - **Not active** (`apnea_enabled` false, or a non-breathing patient): ventilation is restored if Apnea had suppressed it; nothing else.
 - **Breathing:** count toward `next_interval`, then start an episode. Its duration is drawn, and
   - **central:** `Breathing.switch_breathing(false)`;
-  - **obstructive / mixed:** `MOUTH_DS.no_flow = true`, unless the patient is intubated (Ventilator on, tube not out).
+  - **obstructive / mixed:** `MOUTH_DS.no_flow = true`, unless the patient is intubated (Ventilator on, tube not out). On a nasal CPAP interface (`Ventilator.interface` prongs or mask) only `airway_obstructed` is set: the Ventilator then closes both the nose path and the mouth leak itself.
 - **In an episode:**
   - a mixed episode also switches breathing off after `mixed_obstructive_fraction` of its duration;
   - at the end, ventilation is restored, the counters are updated and the next interval is drawn.
@@ -9011,8 +9011,9 @@ to it.
 **Phase 1** covers the invasive conventional modes CPAP, CMV, PTV, PSV and SIMV, with volume
 targeting (VTV). **Phase 2** adds the invasive oscillatory modes: HFOV, with VTV, sighs and
 oscillation pause, and HFOV+CMV (see [HFO](#hfo-phase-2)). The closed-loop O2 controller
-[OxyGenie](#oxygenie), with the SpO2 sensor, is in as well. These come in later phases:
-- the non-invasive modes, including nHFOV
+[OxyGenie](#oxygenie), with the SpO2 sensor, is in as well, and the first non-invasive mode,
+**nCPAP** through nasal prongs or a mask (see [nCPAP](#ncpap-non-invasive)). These come in later phases:
+- the other non-invasive modes (nIPPV, nHFOV), which need the pressure trigger
 - alarms
 
 ## Using it in a scenario
@@ -9070,7 +9071,8 @@ the other modes.
 
 | Property | Unit | Default | Description |
 |---|---|---|---|
-| `sle_mode` | – | `"Standby"` | Standby, CPAP, CMV, PTV, PSV, SIMV, HFOV or HFOV+CMV. |
+| `sle_mode` | – | `"Standby"` | Standby, CPAP, nCPAP, CMV, PTV, PSV, SIMV, HFOV or HFOV+CMV. |
+| `sle_interface` | – | `"prongs"` | The nCPAP patient interface, `"prongs"` or `"mask"`; the invasive modes use the tube. |
 | `sle_o2_boost_inc` | % | 10 | O2 Boost increment (factory default, p128). |
 | `sle_spo2_on` | boolean | `true` | SpO2 monitoring (p104). |
 | `sle_spo2_target` | – | `"91-95"` | OxyGenie target range, one of `SLE_SPO2_TARGETS`. |
@@ -9098,7 +9100,7 @@ The device's settings table and helpers, shared with the UI replica:
 | Export | Description |
 |---|---|
 | `SLE_PARAMS` | Per setting: range, resolution steps, default, unit (pp 163–169). |
-| `SLE_MODES`, `SLE_MODE_NAMES`, `SLE_HFO_MODES` | Per mode the settings on the main and extra screens (and label overrides); the mode names; the oscillatory modes. |
+| `SLE_MODES`, `SLE_MODE_NAMES`, `SLE_HFO_MODES`, `SLE_NONINVASIVE_MODES` | Per mode the settings on the main and extra screens (and label overrides); the mode names; the oscillatory modes; the non-invasive modes. |
 | `SLE_SPO2_TARGETS`, `SLE_SPO2_AVG` | OxyGenie target ranges; SpO2 averaging times. |
 | `sle_defaults()` | Default settings. |
 | `sle_resolution(name, value)`, `sle_step(name, value, dir)` | Resolution at a value; the next value up or down. |
@@ -9116,7 +9118,7 @@ The device's settings table and helpers, shared with the UI replica:
 
 | Method | Effect |
 |---|---|
-| `sle_apply(settings)` | The device's preview → Confirm. Clamps and snaps each given setting, keeps the others, applies the interlocks, then starts or switches the mode. `settings` may hold any of the keys above without the `sle_` prefix, plus `mode` (`Standby`/`CPAP`/`CMV`/`PTV`/`PSV`/`SIMV`/`HFOV`/`HFOV+CMV`) and `circuit` (10/15). |
+| `sle_apply(settings)` | The device's preview → Confirm. Clamps and snaps each given setting, keeps the others, applies the interlocks, then starts or switches the mode. `settings` may hold any of the keys above without the `sle_` prefix, plus `mode` (`Standby`/`CPAP`/`nCPAP`/`CMV`/`PTV`/`PSV`/`SIMV`/`HFOV`/`HFOV+CMV`), `circuit` (10/15) and `interface` (`prongs`/`mask`, for nCPAP). |
 | `sle_set(name, value)` | `sle_apply({[name]: value})` |
 | `sle_start(mode)` / `sle_standby()` | Start/Resume ventilation, by default in the last mode; Standby switches the ventilator off |
 | `sle_manual_breath()` | One breath at the set PIP and Ti (p155); every mode but HFOV |
@@ -9138,6 +9140,7 @@ Switching the ventilator off by any route (`switch_ventilator(false)`) is the de
   example during CPR.
 - `PC` maps to CMV, or to PTV when synchronised. `PS` maps to PSV.
 - `set_hfov` maps to HFOV and `set_hfov_cmv` to HFOV+CMV.
+- A generic `CPAP` on a nasal interface (`set_interface("prongs" | "mask")`) maps to nCPAP.
 - `set_vc` and `set_prvc` (the SLE6000 has neither) show as CMV, or PTV when synchronised, with
   VTV set to the tidal volume: the device's form of volume-targeted mandatory ventilation. This is
   display only; the generic ventilator keeps running VC/PRVC until the next `sle_apply`.
@@ -9160,6 +9163,7 @@ cycles on flow, not Ti Max. See *Leak and the flow trigger* and *Leak and flow c
 | SLE mode | Generic mode | Notes |
 |---|---|---|
 | CPAP | `CPAP`, `backup_rate` = RR Backup | Backup and manual breaths at PIP / Ti (p16) |
+| nCPAP | `CPAP` on `interface` = `sle_interface`, no backup | Non-invasive (see below); every other mode returns the patient to the tube |
 | CMV | `PC`, not synchronised | Time-triggered, time-cycled (p16) |
 | PTV | `PC`, synchronised (flow trigger) | Assist/control: every effort triggers a breath at PIP and Ti; RR covers apnoea (p17) |
 | PSV | `PS`, `ps_cmh2o` = PIP − PEEP | Flow-cycled at Term Sens, Ti Max = Ti, RR covers apnoea (p17) |
@@ -9172,6 +9176,19 @@ cycles on flow, not Ti Max. See *Leak and the flow trigger* and *Leak and flow c
   an assumption.
 - **Off:** reverts to the set PIP, which the targeting never changes.
 - **CPAP:** VTV is not applied to backup breaths in this phase.
+
+## nCPAP (non-invasive)
+
+nCPAP holds the CPAP level through nasal prongs or a nasal mask (`sle_interface`), with O2 as its
+only other setting. It runs the generic `CPAP` on the Ventilator's nasal interface (see
+[Ventilator → Nasal interface](./Ventilator.md#nasal-interface-set_interface-_apply_interface)): the
+interface and the patient's own upper airway instead of a tube, the whole anatomic dead space in the
+path, the mouth closed unless `mouth_leak` is set. No backup breaths, VTV or flow trigger, and the
+tube leak compensation does not apply. Choosing any invasive mode intubates the patient again
+(`set_interface("ett")`).
+
+term_neonate_72h, nCPAP 5 mbar on prongs: MV 294 mL/kg/min, PaCO2 40.4, monitored CPAP 5.1
+cmH₂O and Vte 21 mL; on a mask MV 310.
 
 ## Patient circuits (p176)
 
@@ -9768,7 +9785,7 @@ The `probe_*.mjs` scripts, grouped by what they verify:
 | Group | Scripts | Verifies |
 |---|---|---|
 | **Core vitals / calibration** | `probe_vitals.mjs`, `probe_tune.mjs`, `probe_ea.mjs` | Regulated vitals + ABG vs normal ranges; the live closed-loop tuner; mitral E/A ratio. |
-| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_co2_response.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); steady-state ventilatory response to inhaled CO2 (slope of MV against PaCO2, with the RR/Vt split); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
+| **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_co2_response.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_nasal_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); steady-state ventilatory response to inhaled CO2 (slope of MV against PaCO2, with the RR/Vt split); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; CPAP by interface (tube, nasal prongs, mask; mouth closed and open); conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
 | **Devices** | `probe_ventilator.mjs`, `probe_sle6000.mjs`, `probe_ecls.mjs`, `probe_resuscitation.mjs` | Pressure-control ventilation with spontaneous drive off, sweeping FiO2 / rate / PEEP; veno-arterial ECMO rescue under near-abolished alveolar diffusion, sweeping pump speed / sweep-gas flow (both report the **emergent** blood gas from the gas-exchange physics, not the device); the SLE6000 device model — pass/fail checks of its modes, settings validation, VTV, CPAP backup, O2 Boost and monitored values (exit 1 on failure); CPR — under a simulated arrest, verifies the compression waveform, that compressions drive forward aortic flow via `pres_ext`, the `vent_no`-breaths-per-pause timing, and a clean `switch_cpr` re-toggle. |
 | **PDA / CDH** | `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
 | **CHD family** | `probe_as.mjs`, `probe_coarc.mjs`, `probe_dtga.mjs`, `probe_hlhs.mjs`, `probe_paivs.mjs`, `probe_pavsd.mjs`, `probe_ps.mjs`, `probe_ta.mjs`, `probe_tapvc.mjs`, `probe_tof.mjs` | Duct/FO-dependent congenital heart disease scenarios (aortic stenosis, coarctation, d-TGA, HLHS, PA-IVS, PA-VSD, pulmonary stenosis, tricuspid atresia, TAPVC, tetralogy of Fallot). |
@@ -10720,6 +10737,10 @@ References to the first six are cached in `init_model` and held in `_ventilator_
 | `leak_size` | mm | Equivalent diameter of the gap around an uncuffed tube; 0 = no leak (default). Useful range ≈ 0.5–1.25 mm neonatal, 1–3 mm adult — see *Tube leak* |
 | `exp_valve_resistance` | mmHg·s/L | Expiratory limb + valve; 0 = auto by circuit size (default) — see *Expiratory valve* |
 | `bias_flow` | L/min | Continuous fresh-gas flow through the circuit while the expiratory valve is open; 0 = auto by circuit size (default) — see *Bias flow* |
+| `interface` | – | Patient interface: `"ett"` (intubated, default), `"prongs"` or `"mask"` (nasal, CPAP only) — see *Nasal interface* |
+| `interface_resistance` | mmHg·s/L | Nasal prongs / mask resistance; 0 = auto (prongs 8, mask 4) |
+| `interface_dead_space` | mL | Nasal prongs / mask dead space; 0 = auto (prongs 0.3, mask 1.5) |
+| `mouth_leak` | – | Nasal interface: mouth opening, 0 = closed (default) to 1 = open |
 | `sensor_dead_space` | mL | Flow sensor + tube connector at the Y-piece, in series with the tube; 0 = auto by circuit size (default) — see *ET-tube dead space* |
 | `upper_airway_ds_fraction` | – | Share of the airway dead space above the tube tip, bypassed while intubated; 0 = auto by age (default) — see *ET-tube dead space* |
 | `ds_bypass_applied` | – | State, not a setting: the dead-space share whose volume is currently removed (saved with the scenario) |
@@ -11323,6 +11344,52 @@ Results with the SLE6000 (5 l/min, 10–50 %), `probe_sle6000.mjs` section 15:
 `Breathing` subtracts the leak flow from the airway-opening flow (see below), because gas that
 escapes around the tube never reaches the lungs.
 
+## Nasal interface (`set_interface`, `_apply_interface`)
+
+`set_interface("prongs" | "mask")` puts a CPAP patient on nasal CPAP; `set_interface("ett")` intubates. A
+nasal interface carries **CPAP only**: it is refused in another mode, and switching to another mode
+while on it returns the interface to `"ett"` (the patient is intubated for it).
+
+The circuit reaches the airway the same way, through `VENT_ETTUBE` into `DS`, but that resistor is
+now the interface plus the patient's own upper airway:
+
+```
+R = interface_resistance + R_upper            R_upper = MOUTH_DS r_for at its persistent factors
+```
+
+- **No tube.** No tube resistance or lumen, no flow sensor, and no upper-airway bypass: the whole
+  anatomic dead space stays in the path, plus the interface's own volume (`tube_volume` = prongs
+  0.3 mL / mask 1.5 mL, auto). The tube leak (`VENT_LEAK`) and the tube events (right main bronchus,
+  extubation) do not apply.
+- **Mouth leak.** `MOUTH_DS` becomes the mouth path to the room: closed at `mouth_leak = 0` (the
+  default; newborns breathe mainly through the nose), and at the upper-airway resistance divided by
+  the opening otherwise (through its non-persistent `r_factor`).
+- **Obstructive apnoea.** With `Apnea.airway_obstructed` the Ventilator closes both the nose path and
+  the mouth, since the upper airway is the patient's own (Apnea does not touch `MOUTH_DS` then).
+- **Defaults.** Green 2018 measured neonatal CPAP interfaces at 6–10 L/min: masks under 1 cmH₂O,
+  Infant Flow prongs under 1.5, other binasal prongs more at the small sizes; so prongs 8 and a mask
+  4 mmHg·s/L. The interface dead spaces are estimates: prongs sit in the bias flow, a nasal mask has
+  a small chamber over the nose.
+
+term_neonate_72h, CPAP 5 (`probe_nasal_cpap.mjs`):
+
+| | P trachea cmH₂O | EELV mL/kg | MV mL/kg/min | RR | PaCO2 |
+|---|---|---|---|---|---|
+| spontaneous | 0.0 | 27.8 | 256 | 44.3 | 39.4 |
+| ETT | 5.1 | 32.4 | 251 | 42.6 | 37.4 |
+| prongs, mouth closed | 5.1 | 33.2 | 292 | 49.8 | 40.4 |
+| mask, mouth closed | 5.1 | 33.1 | 311 | 50.9 | 40.7 |
+| prongs, mouth half open | 2.9 | 30.5 | 251 | 43.6 | 38.5 |
+| prongs, mouth open | 2.0 | 29.5 | 249 | 42.6 | 37.4 |
+
+With the mouth closed the CPAP level reaches the trachea in full; ventilation is a little higher than
+intubated because the whole anatomic dead space and the interface stay in the path. An open mouth
+loses most of the CPAP level (4.7 L/min leak, 2.0 cmH₂O left), as bench studies of nasal support
+with an open mouth show.
+
+**Not modelled yet:** the SLE6000's non-invasive modes (its screen and settings), the pressure trigger
+that synchronised NIPPV and nHFOV need, and separate nose and mouth paths (a pharynx node).
+
 ## Airway events
 
 Three events of the DOPE list, active only while ventilating. `switch_ventilator(false)` ends them:
@@ -11509,6 +11576,7 @@ the full definition also nests the six `VENT_*` sub-models under `components`:
 ## References
 
 - ISO 80601-2-12 (critical care ventilators): the expiratory-limb pressure drop limits used for the automatic expiratory valve.
+- Green EA, Dawson JA, Davis PG, De Paoli AG, Roberts CT. Assessment of resistance of nasal continuous positive airway pressure interfaces. *Arch Dis Child Fetal Neonatal Ed* 2019;104:F535–9. doi:10.1136/archdischild-2018-315838 (interface pressure drops at 6–10 L/min)
 - Numa AH, Newth CJ. Anatomic dead space in infants and children. *J Appl Physiol* 1996;80:1485–9. doi:10.1152/jappl.1996.80.5.1485 (extrathoracic and intrathoracic dead space by age)
 - Nassabeh-Montazami S, Abubakar KM, Keszler M. The impact of instrumental dead-space in volume-targeted ventilation of the extremely low birth weight (ELBW) infant. *Pediatr Pulmonol* 2009;44:128–33. doi:10.1002/ppul.20954 (tube, suction hub and flow sensor 2.7 mL)
 - SLE6000 instructions for use: monitoring definitions (see [Sle6000](./Sle6000.md)).

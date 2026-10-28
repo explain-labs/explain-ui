@@ -169,8 +169,11 @@ and is the app's only ventilator UI.
         O2 > N % level in orange; "Reference O2: …%" in the header.
     The extras come from `TrendView.decor` (per line: fixed range, band, horizontal marks, colour,
     right header text).
-- **`ModePanel.vue`.** The Invasive / Standby tabs, the mode buttons (CPAP to SIMV, HFOV, HFOV+CMV)
-  and the 10/15 mm circuit picker. Non-invasive is shown disabled.
+- **`ModePanel.vue`.** The Invasive / Non-invasive / Standby tabs, the mode buttons (CPAP to SIMV,
+  HFOV, HFOV+CMV; nCPAP) and the 10/15 mm circuit picker, or on Non-invasive the patient-interface
+  picker (prongs / mask, `sle_interface`). It opens on the tab of the mode in use. nIPPV and nHFOV
+  come later. The mouth opening on nasal CPAP (`mouth_leak`) is a model-editor field, not a device
+  setting.
 - **`src/render/Sle6000Renderer.ts`.** Pressure / flow / volume as on the device: coloured traces
   on black, filled or lines (`setFilled`), dark header strips, a y-axis that snaps to round ranges
   (grows at once, shrinks a sweep later), channels that can be hidden (`setHidden`), and a pause

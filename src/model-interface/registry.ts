@@ -6957,6 +6957,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "ul": 4
     },
     {
+      "caption": "mouth open on nasal CPAP (%)",
+      "target": "mouth_leak",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 10,
+      "factor": 100,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 100
+    },
+    {
       "caption": "HFOV mean airway pressure (cmH2O)",
       "target": "hfo_map_cmh2o",
       "type": "number",
@@ -7814,6 +7827,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 2,
       "ll": 0,
       "ul": 4
+    },
+    {
+      "caption": "mouth open on nasal CPAP (%)",
+      "target": "mouth_leak",
+      "type": "number",
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 10,
+      "factor": 100,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 100
     },
     {
       "target": "mon_pip",

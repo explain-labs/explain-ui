@@ -85,6 +85,7 @@ const live = computed(() => {
   return s;
 });
 const liveCircuit = computed(() => Number(read("sle_circuit") ?? 10));
+const liveInterface = computed(() => String(read("sle_interface") ?? "prongs"));
 const boostLeft = computed(() => Number(read("o2_boost_remaining") ?? 0));
 const oscPauseLeft = computed(() => Number(read("hfo_pause_remaining") ?? 0));
 const sighing = computed(() => Number(read("hfo_sigh_remaining") ?? 0) > 0);
@@ -107,6 +108,7 @@ const sent = ref<Record<string, number> | null>(null); // shown until the slow s
 let sentAge = 0;
 const previewMode = ref<string | null>(null);
 const pendingCircuit = ref<number | null>(null);
+const pendingInterface = ref<string | null>(null);
 const selected = ref<string | null>(null);
 const panel = ref<"mode" | "layout" | "utilities" | null>(null);
 // holding O2 (pp 119, 128; the device: two buttons stacked above the O2 control,
@@ -135,6 +137,7 @@ const dirty = computed(
     Object.keys(pending).length > 0 ||
     previewMode.value !== null ||
     pendingCircuit.value !== null ||
+    pendingInterface.value !== null ||
     o2Menu.value === "boost" ||
     o2Menu.value === "oxygenie",
 );
@@ -163,6 +166,7 @@ function discard() {
   for (const k of Object.keys(pending)) delete pending[k];
   previewMode.value = null;
   pendingCircuit.value = null;
+  pendingInterface.value = null;
   selected.value = null;
   panel.value = null;
   o2Menu.value = null;
@@ -229,6 +233,7 @@ function confirm() {
   if (previewMode.value) settings.mode = previewMode.value;
   else if (!ventilating.value) return; // nothing to apply in Standby without a mode
   if (pendingCircuit.value !== null) settings.circuit = pendingCircuit.value;
+  if (pendingInterface.value !== null) settings.interface = pendingInterface.value;
   call("Ventilator.sle_apply", [settings]);
   sent.value = { ...(sent.value ?? {}), ...pending };
   sentAge = 0;
@@ -285,6 +290,11 @@ function pickMode(m: string) {
 }
 function pickCircuit(d: number) {
   pendingCircuit.value = d === liveCircuit.value ? null : d;
+  if (!previewMode.value) previewMode.value = ventilating.value ? liveMode.value : null;
+  touch();
+}
+function pickInterface(name: string) {
+  pendingInterface.value = name === liveInterface.value ? null : name;
   if (!previewMode.value) previewMode.value = ventilating.value ? liveMode.value : null;
   touch();
 }
@@ -796,8 +806,10 @@ onBeforeUnmount(() => {
           :current="liveMode"
           :preview="previewMode"
           :circuit="pendingCircuit ?? liveCircuit"
+          :iface="pendingInterface ?? liveInterface"
           @select="pickMode"
           @circuit="pickCircuit"
+          @interface="pickInterface"
           @close="discard"
         />
         <!-- additional parameters row, above the main row -->

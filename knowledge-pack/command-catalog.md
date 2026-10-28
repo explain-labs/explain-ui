@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **43 model_types**, **450 settable params**, **52 functions**
+Snapshot: **43 model_types**, **452 settable params**, **52 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -681,6 +681,7 @@ _setProp_:
 
 _setProp_:
 - `leak_size` — tube leak gap (mm) (number, mm, range 0–4) _(extra)_
+- `mouth_leak` — mouth open on nasal CPAP (%) (number, %, range 0–100) _(extra)_
 
 _call_:
 - `sle_start(mode (list, one of CPAP/CMV/PTV/PSV/SIMV/HFOV/HFOV+CMV))` — start / resume ventilation
@@ -786,6 +787,7 @@ _setProp_:
 - `rise_time` — pressure rise time (s) (number, s, range 0–0.5) _(extra)_
 - `insp_pause` — inspiratory pause (s) (number, s, range 0–1) _(extra)_
 - `leak_size` — tube leak gap (mm) (number, mm, range 0–4) _(extra)_
+- `mouth_leak` — mouth open on nasal CPAP (%) (number, %, range 0–100) _(extra)_
 - `hfo_insp_fraction` — HFOV inspiratory time (%) (number, %, range 20–60) _(extra)_
 - `hfo_bias_flow` — HFOV bias flow (L/min) (number, L/min, range 2–40) _(extra)_
 - `trigger_volume_perc` — trigger volume percentage (%) (number, %, range 5–20) _(extra)_

@@ -4,24 +4,33 @@ import { ref } from "vue";
 // The Mode panel (IFU p139, p151; dark like the rest of the device screen, an assumption as no
 // photo shows it open): an overlay with dark tabs (Invasive | Non-invasive |
 // Standby), the mode buttons and the patient-circuit selector. Picking a mode previews its
-// parameters along the bottom; nothing changes until Confirm. The non-invasive modes come in a
-// later phase and are shown disabled.
-defineProps<{ current: string; preview: string | null; circuit: number }>();
+// parameters along the bottom; nothing changes until Confirm. Non-invasive has nCPAP, with the
+// patient interface (nasal prongs or a mask) in place of the circuit; nIPPV and nHFOV come later.
+const props = defineProps<{ current: string; preview: string | null; circuit: number; iface: string }>();
 const emit = defineEmits<{
   (e: "select", mode: string): void;
   (e: "circuit", d: number): void;
+  (e: "interface", name: string): void;
   (e: "close"): void;
 }>();
 
-const tab = ref<"invasive" | "standby">("invasive");
 const INVASIVE = ["CPAP", "CMV", "PTV", "PSV", "SIMV", "HFOV", "HFOV+CMV"];
+const NONINVASIVE = ["nCPAP"];
+const INTERFACES = [
+  { name: "prongs", label: "Prongs" },
+  { name: "mask", label: "Mask" },
+];
+// open on the tab of the mode in use
+const tab = ref<"invasive" | "noninvasive" | "standby">(
+  NONINVASIVE.includes(props.preview ?? props.current) ? "noninvasive" : "invasive",
+);
 </script>
 
 <template>
   <div class="sle-panel">
     <div class="sle-panel-tabs">
       <button :class="{ on: tab === 'invasive' }" @click="tab = 'invasive'">Invasive</button>
-      <button disabled title="Non-invasive modes: a later phase">Non-invasive</button>
+      <button :class="{ on: tab === 'noninvasive' }" @click="tab = 'noninvasive'">Non-invasive</button>
       <button :class="{ on: tab === 'standby' }" @click="tab = 'standby'">Standby</button>
       <button class="close" aria-label="Close" @click="emit('close')">✕</button>
     </div>
@@ -52,6 +61,32 @@ const INVASIVE = ["CPAP", "CMV", "PTV", "PSV", "SIMV", "HFOV", "HFOV+CMV"];
           {{ d }}mm
         </button>
         <div class="hint">10 mm for Vt &lt; 50 ml, 15 mm above</div>
+      </div>
+    </div>
+    <div v-else-if="tab === 'noninvasive'" class="sle-panel-body">
+      <div class="modes">
+        <button
+          v-for="m in NONINVASIVE"
+          :key="m"
+          class="mode"
+          :class="{ sel: (preview ?? current) === m, cur: current === m }"
+          @click="emit('select', m)"
+        >
+          {{ m }}
+        </button>
+      </div>
+      <div class="circuits">
+        <div class="cap">Patient Interface</div>
+        <button
+          v-for="i in INTERFACES"
+          :key="i.name"
+          class="circuit"
+          :class="{ sel: iface === i.name }"
+          @click="emit('interface', i.name)"
+        >
+          {{ i.label }}
+        </button>
+        <div class="hint">nIPPV and nHFOV: a later phase</div>
       </div>
     </div>
     <div v-else class="sle-panel-body standby">
