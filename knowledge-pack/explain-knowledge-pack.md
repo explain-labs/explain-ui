@@ -2507,6 +2507,10 @@ term_neonate_72h (re-validation): FiO₂ 0.15 → ventilation +16 % at 30 s, +18
 
 Slope 34 mL/kg/min per mmHg (13 % of resting MV per mmHg), against 38.7 ± 3.0 in quiet sleep and 12.2 ± 3.0 in REM sleep in term babies at 4–6 days (Cohen 1991). It steepens with the dose (29 from 0 to 2 %, 37 from 2 to 4 %). Because MV = ratio · RR², rate and tidal volume each rise with √MV, so RR carries about half the response (+52 % at 4 %); see the limitations. The `co2.gain` of `validate_respiratory` (cut the drive, measure the recovery) is an indirect index and reads about twice this slope.
 
+### Pleural pressure swing
+
+The muscle pressure acts on THORAX, so its swing per breath is the model's oesophageal pressure swing. term_neonate_72h: 7.6 cmH2O (`validate_respiratory` base case) against 7.3 ± 1.4 measured in healthy infants from birth to 5 years (Gerhardt 1987). It is consistent with the lung mechanics: with the chest wall ~2.9× as compliant as the lung in infancy (Papastamelos 1995), Crs 0.96 mL/cmH2O/kg implies a lung compliance of ~1.30 /kg (1.34 ± 0.37 in healthy term infants, Yau 1994), so the elastic part is Vt / CL ≈ 4.4 cmH2O and the airway resistance adds the rest. The suite's term range is mean ± 2 SD (4.5–10.1).
+
 ### Breath phases
 
 While breathing is on, a breath starts when `_breath_timer` reaches `_breath_interval`. Its timing and target are **latched** for the whole breath, so a chemoreflex change during a breath acts on the next:
@@ -2613,6 +2617,9 @@ One instance in every scenario.
 
 The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, peak flows) and the CO2 response are referenced in [TermNeonateReference](./TermNeonateReference.md) (Schmalisch 2005; Hannover 2018; Cohen 1991).
 
+- Gerhardt T, Reifenberg L, Hehre D, Feller R, Bancalari E. Pulmonary mechanics in normal infants and young children during first 5 years of life. *Pediatr Pulmonol* 1987;3:309–16. doi:10.1002/ppul.1950030506 (oesophageal swing 7.3 ± 1.4 cmH2O)
+- Papastamelos C, Panitch HB, England SE, Allen JL. Developmental changes in chest wall compliance in infancy and early childhood. *J Appl Physiol* 1995;78:179–84. doi:10.1152/jappl.1995.78.1.179
+- Yau KI, Fang LJ. Pulmonary mechanics and the energetics of breathing in healthy infants. *J Formos Med Assoc* 1994;93:110–6. PMID 7912580 (lung compliance 1.34 ± 0.37 mL/cmH2O/kg)
 - Cohen G, Xu C, Henderson-Smart D. Ventilatory response of the sleeping newborn to CO2 during normoxic rebreathing. *J Appl Physiol* 1991;71:168–74. doi:10.1152/jappl.1991.71.1.168 (term, 4–6 days: 38.7 ± 3.0 quiet sleep, 12.2 ± 3.0 REM mL/kg/min per mmHg)
 - Mortola JP, Lanthier C. The ventilatory and metabolic response to hypercapnia in newborn mammalian species. *Respir Physiol* 1996;103:263–70. doi:10.1016/0034-5687(95)00093-3 (5 % CO2: Vt +78 %, rate 98 %)
 - Rigatto H, Desai U, Leahy F, Kalapesi Z, Cates D. The effect of 2% CO2, 100% O2, theophylline and 15% O2 on "inspiratory drive" and "effective" timing in preterm infants. *Early Hum Dev* 1981;5:63–70. doi:10.1016/0378-3782(81)90071-2 (2 % CO2: Vt up, rate little changed)
@@ -9974,6 +9981,7 @@ inflow comes through the intestinal bed (INT), which the model drains into the l
 | FRC | **27.1** mL/kg | 23.8–32.0 | helium, median day 2, n=24 | A | Yüksel 1995; nitrogen 24.0, plethysmography 29.8–31.1 |
 | Anatomic dead space | **2.2** mL/kg | Vd/Vt ~0.3–0.4 | term, day 5 | A/B | Stokes 1986 |
 | CO₂ response | **38.7 ± 3.0** mL/kg/min per mmHg (quiet sleep) | 12–67 | normoxic CO₂ rebreathing, term, 4–6 days, n=5; REM sleep 12.2 ± 3.0; Moriette 67 / 44 (quiet / active sleep, 40 % O₂). Vt rises in every report; rate contributes in quiet sleep, no quantitative split found. Model 34 (`scripts/probe_co2_response.mjs`, 0/2/4 % CO₂) | B | Cohen 1991 ([doi](https://doi.org/10.1152/jappl.1991.71.1.168)); Moriette 1985 ([doi](https://doi.org/10.1016/0034-5687(85)90093-3)); Rigatto 1991 ([doi](https://doi.org/10.1164/ajrccm/143.1.101)); Mortola 1996 ([doi](https://doi.org/10.1016/0034-5687(95)00093-3)). Added 2026-10-28 |
+| Pleural (oesophageal) pressure swing | **7.3 ± 1.4** cmH₂O | — | oesophageal catheter, quiet breathing, newborn to 5 years (no change with growth), n=40. Cross-check: lung compliance 1.34 ± 0.37 mL/cmH₂O/kg in healthy term infants (Yau 1994); the model's Crs with a chest wall ~2.9× as compliant as the lung (Papastamelos 1995) gives ~1.30. Model 7.6 (`validate_respiratory`) | B | Gerhardt 1987 ([doi](https://doi.org/10.1002/ppul.1950030506)); Papastamelos 1995 ([doi](https://doi.org/10.1152/jappl.1995.78.1.179)); Yau 1994 (PMID [7912580](https://pubmed.ncbi.nlm.nih.gov/7912580/)). Added 2026-10-28 |
 
 ## Gases and saturations
 
