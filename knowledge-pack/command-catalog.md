@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **43 model_types**, **449 settable params**, **52 functions**
+Snapshot: **43 model_types**, **450 settable params**, **52 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -569,6 +569,7 @@ _setProp_:
 _setProp_:
 - `is_enabled` — enabled (boolean)
 - `asystole_time` — asystole timeout (s) (number, s, range 1–30) _(extra)_
+- `gas_avg_time` — VO2/VCO2 averaging time (s) (number, s, range 5–600) _(extra)_
 
 ### Pda
 
