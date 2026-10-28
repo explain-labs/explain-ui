@@ -2462,7 +2462,7 @@ BaseModelClass
 | `resp_rate` | /min | Computed rate (latched into each breath). |
 | `resp_rate_measured` | /min | Rate from the observed breath timing. |
 | `target_tidal_volume` | L | Demanded tidal volume. |
-| `insp_tidal_volume`, `exp_tidal_volume` | L | Lung-volume rise over the last inspiration and fall from its peak; 0 while breathing is off. |
+| `insp_tidal_volume`, `exp_tidal_volume` | L | Lung-volume rise of the last breath (trough → peak) and fall from its peak, both latched when the breath ends; 0 while breathing is off. |
 | `minute_volume` | L/min | `exp_tidal_volume · resp_rate`. |
 | `resp_muscle_pressure` | mmHg | Current muscle pressure (positive = inspiratory effort). |
 | `pmus_max` | mmHg | Peak muscle pressure of the current breath. |
@@ -2523,7 +2523,7 @@ Inspiration runs until `_breath_timer > _ti`, then expiration until the next sta
 
 **While breathing is off** there is no breath clock: no phases, tidal and minute volumes 0, rate 0, no muscle pressure. Switching it back on starts a breath at once.
 
-**Tidal volumes are measured at the lungs** (`Respiration.lungs`), so they don't depend on the airway route (natural airway, ET tube, leak).
+**Tidal volumes are measured at the lungs** (`Respiration.lungs`), so they don't depend on the airway route (natural airway, ET tube, leak). The inspired volume runs from the breath's trough (the previous expiration ends a little into the effort) to its peak, which comes about 60 ms after the end of the neural inspiration: the lungs keep filling until the alveolar pressure catches up with the mouth. Before 2026-10 it was latched at the end of the neural inspiration and missed that last ~1.3 mL (term baby: 19.1 against 20.4 mL exhaled); now the two agree within ~0.2 mL, the gas-exchange difference being ~0.14 mL per breath.
 
 ### Muscle pressure
 
