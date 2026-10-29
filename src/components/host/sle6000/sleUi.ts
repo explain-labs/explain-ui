@@ -161,6 +161,7 @@ export const SLOW_PATHS = [
   "Ventilator.is_enabled",
   "Ventilator.o2_boost_remaining",
   "Ventilator.sle_circuit",
+  "Ventilator.sle_interface",
   "Ventilator.hfo_pause_remaining",
   "Ventilator.hfo_sigh_remaining",
   "Ventilator.sle_o2_boost_inc",
