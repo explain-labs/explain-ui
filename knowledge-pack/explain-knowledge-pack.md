@@ -10602,6 +10602,14 @@ saturation definition.
   gap (~21 points, set by oxygen use, systemic flow and Hb) is the same in all four grades and in Fig 14.3;
   the band was copied from Fig 14.3 at SpO₂ 80 %, and at the atresia baby's 74 % the same gap gives ~53 %.
   A 2.8 mm duct would lift it to 56 % at the cost of Qp:Qs 1.2 and PA mean 29; the 2.5 mm duct was kept.
+- 2026-10-30: breathing adapted to the chronic hypoxaemia. The hypoxic ventilatory depression
+  (`Breathing.hvd_*`, threshold 70 mmHg, tuned to the term baby resting at ~72) held every ToF baby at its
+  floor (factor 0.2), the chemoreflex wound up against it (EF_MV 3–5.6), ventilation stayed at the term
+  level and PaCO₂ rose to ~44 (pH 7.32), where cyanotic babies are hyperpnoeic with a PaCO₂ normal or
+  ~35. `_make_tof.mjs` re-anchors `hvd_po2_threshold` to 0.95 × the resting PaO₂ (the depression is an
+  acute response; an acute fall such as duct closure still triggers it); the chemoreflex keeps the term
+  setpoints. Result: PaCO₂ 31–34, pH 7.42–7.45, MV 318–398 mL/kg/min, EF_MV 1.3–1.9, SpO₂ unchanged.
+  `tof_severe` with the duct closed for 3–10 min now recovers when it is reopened.
 
 ## References
 
