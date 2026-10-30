@@ -60,6 +60,7 @@ interface ConnNode {
   cg: number;
   cb: number;
   pos: number; // normalized phase along the path [0,1)
+  dir: number; // sign of the last flow (+1 towards dbcTo), turns the flow arrows
   geom: any; // {type:'straight',x1,y1,x2,y2} | {type:'arc',cx,cy,r,from,to}
   lastTo2: number; // last raw upstream to2 (for a live tint-window change)
 }
@@ -89,6 +90,11 @@ const DOT_FLOW_REF = 0.004; // |flow| (L/s) at which dots reach full size/opacit
 // flow — so high-flow connectors simply saturate at full size sooner.
 const DOT_SCALE_MIN = 0.8; // dot size multiplier at low flow …
 const DOT_SCALE_MAX = 1.35; // … and at/above DOT_FLOW_REF
+// settings.flowMarker "arrow": an arrowhead pointing along the flow instead of a dot
+// (same count, speed, size and opacity rules). Drawn once as a white texture, tinted per frame.
+const ARROW_LEN_PX = 24; // texture size: length along the path …
+const ARROW_HALF_W_PX = 10; // … and half its width
+const ARROW_SCALE = 0.5; // → ~12 px long at scaling 1, about a dot's size
 const FLOW_LERP = 0.12; // smoothing for the per-connector flow magnitude
 
 // ---- Compartment depth: a soft additive glow behind each disc (tinted by
@@ -139,6 +145,8 @@ export class DiagramRenderer implements RendererAdapter {
   private yOffset = 0;
   private scaling = 1;
   private speed = 1;
+  private flowArrows = false; // settings.flowMarker === "arrow"
+  private arrowTex: Texture | null = null;
   // to2 (O2 content) gradient window for tinting; per-diagram, live-editable
   private to2Lo = TO2_LO;
   private to2Hi = TO2_HI;
@@ -235,6 +243,7 @@ export class DiagramRenderer implements RendererAdapter {
     this.gridSize = settings.gridSize > 0 ? settings.gridSize : GRID_SIZE_DEFAULT;
     this.deviceBand = settings.deviceBand >= 0 ? settings.deviceBand : DEVICE_BAND_DEFAULT;
     this.ringMargin = settings.ringMargin > 0 ? settings.ringMargin : RING_MARGIN;
+    this.flowArrows = settings.flowMarker === "arrow";
     this.recomputeGeometry();
 
     await this.preloadTextures();
@@ -714,6 +723,7 @@ export class DiagramRenderer implements RendererAdapter {
       cg: DEOX_RGB[1],
       cb: DEOX_RGB[2],
       pos: 0,
+      dir: 1,
       geom,
       lastTo2: this.to2Lo,
     };
@@ -728,15 +738,33 @@ export class DiagramRenderer implements RendererAdapter {
   }
 
   /** Place a connector's caption on its path (label.at, the fraction from dbcFrom; default the
-   *  midpoint) plus the configured pixel offset. */
+   *  midpoint) plus the configured pixel offset. With label.along the caption is turned along the
+   *  path (kept upright) and the offset is measured along (pos_x) and across (pos_y) the path. */
   private positionConnLabel(conn: ConnNode) {
     const t = conn.label;
     if (!t || !conn.geom) return;
     const l = conn.layout.label || {};
-    const p = pointOnPath(conn.geom, Math.min(Math.max(numberOr(l.at, 0.5), 0), 1));
-    t.x = p.x + numberOr(l.pos_x, 0) * this.scaling;
-    t.y = p.y + numberOr(l.pos_y, 0) * this.scaling;
-    t.rotation = numberOr(l.rotation, 0);
+    const at = Math.min(Math.max(numberOr(l.at, 0.5), 0), 1);
+    const p = pointOnPath(conn.geom, at);
+    const dx = numberOr(l.pos_x, 0) * this.scaling;
+    const dy = numberOr(l.pos_y, 0) * this.scaling;
+    if (l.along === true) {
+      // path direction at `at`, from two nearby points
+      const a = pointOnPath(conn.geom, Math.max(0, at - 0.01));
+      const b = pointOnPath(conn.geom, Math.min(1, at + 0.01));
+      let angle = Math.atan2(b.y - a.y, b.x - a.x);
+      if (angle > Math.PI / 2) angle -= Math.PI; // keep the text upright
+      else if (angle < -Math.PI / 2) angle += Math.PI;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      t.x = p.x + dx * cos - dy * sin;
+      t.y = p.y + dx * sin + dy * cos;
+      t.rotation = angle + numberOr(l.rotation, 0);
+    } else {
+      t.x = p.x + dx;
+      t.y = p.y + dy;
+      t.rotation = numberOr(l.rotation, 0);
+    }
     t.visible = conn.graphics.visible;
   }
 
@@ -747,9 +775,9 @@ export class DiagramRenderer implements RendererAdapter {
     const count = dotCount(pathLength(conn.geom), this.scaling);
     while (conn.dots.length > count) this.app!.stage.removeChild(conn.dots.pop()!);
     while (conn.dots.length < count) {
-      const d = Sprite.from(DOT_PICTO);
+      const d = this.flowArrows ? new Sprite(this.arrowTexture()) : Sprite.from(DOT_PICTO);
       d.anchor.set(0.5, 0.5);
-      d.scale.set(DOT_SCALE * this.scaling);
+      d.scale.set(this.markerScale());
       d.zIndex = conn.layout.general.z_index + 0.5;
       d.alpha = 0; // raised once flow arrives
       d.eventMode = "none";
@@ -759,15 +787,34 @@ export class DiagramRenderer implements RendererAdapter {
     }
   }
 
+  /** Base size of a flow marker (dot or arrow) before the flow-dependent multiplier. */
+  private markerScale(): number {
+    return (this.flowArrows ? ARROW_SCALE : DOT_SCALE) * this.scaling;
+  }
+
+  /** The white arrowhead texture (pointing +x), built once and tinted per sprite. */
+  private arrowTexture(): Texture {
+    if (!this.arrowTex) {
+      const g = new Graphics()
+        .poly([0, 0, ARROW_LEN_PX, ARROW_HALF_W_PX, 0, 2 * ARROW_HALF_W_PX, ARROW_LEN_PX * 0.3, ARROW_HALF_W_PX])
+        .fill(0xffffff);
+      this.arrowTex = this.app!.renderer.generateTexture(g);
+      g.destroy();
+    }
+    return this.arrowTex;
+  }
+
   /** Put a connector's dots back on its (possibly moved) path at the current
    *  phase, without touching size/opacity — for relayouts while paused. */
   private placeDots(conn: ConnNode) {
     const n = conn.dots.length;
     if (!conn.geom || !n) return;
     for (let k = 0; k < n; k++) {
-      const p = pointOnPath(conn.geom, wrap01(conn.pos + k / n));
+      const frac = wrap01(conn.pos + k / n);
+      const p = pointOnPath(conn.geom, frac);
       conn.dots[k].x = p.x;
       conn.dots[k].y = p.y;
+      if (this.flowArrows) conn.dots[k].rotation = pathAngle(conn.geom, frac) + (conn.dir < 0 ? Math.PI : 0);
     }
   }
 
@@ -1036,12 +1083,15 @@ export class DiagramRenderer implements RendererAdapter {
       col = packRgb(lerpRgb([conn.cr, conn.cg, conn.cb], WHITE_RGB, DOT_LIGHTEN));
     }
 
-    const sc = DOT_SCALE * this.scaling * sizeMul;
+    const sc = this.markerScale() * sizeMul;
+    if (flow !== 0) conn.dir = flow > 0 ? 1 : -1;
     for (let k = 0; k < n; k++) {
       const d = conn.dots[k];
-      const p = pointOnPath(g, wrap01(conn.pos + k / n));
+      const frac = wrap01(conn.pos + k / n);
+      const p = pointOnPath(g, frac);
       d.x = p.x;
       d.y = p.y;
+      if (this.flowArrows) d.rotation = pathAngle(g, frac) + (conn.dir < 0 ? Math.PI : 0);
       d.scale.set(sc);
       d.alpha = alpha;
       d.tint = col;
@@ -1479,6 +1529,8 @@ export class DiagramRenderer implements RendererAdapter {
     for (const name of names) {
       const caption = labels[name];
       if (!caption) continue;
+      // a connector that already shows its own caption (layout.label.visible) is not labelled twice
+      if (this.conns.some((c) => c.name === name && c.label)) continue;
       const t = new Text({
         text: caption,
         style: {
@@ -1616,6 +1668,8 @@ export class DiagramRenderer implements RendererAdapter {
       this.ro = null;
     }
     if (this.app) {
+      this.arrowTex?.destroy(true);
+      this.arrowTex = null;
       this.app.destroy(true, { children: true });
       this.app = null;
     }
@@ -1753,6 +1807,13 @@ function hexToCss(n: number): string {
 }
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+// direction (radians) of a path at `frac`, pointing from dbcFrom towards dbcTo
+function pathAngle(g: any, frac: number): number {
+  const a = pointOnPath(g, Math.max(0, frac - 0.005));
+  const b = pointOnPath(g, Math.min(1, frac + 0.005));
+  return Math.atan2(b.y - a.y, b.x - a.x);
 }
 
 // number of streaming dots for a path of `len` px (one per ~DOT_SPACING_PX),
