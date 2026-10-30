@@ -1,5 +1,5 @@
-The **foramen ovale** connects the two atria. The shunt direction depends on the pressure difference between the atria.
+The **foramen ovale** connects the two atria. The duct is open again for this step.
 
-Close the foramen ovale, then open it again. Positive flow is left-to-right, negative flow is right-to-left.
+Close the foramen ovale and watch the saturation. Then make it large (6 mm), as after a balloon atrial septostomy. Positive flow is left-to-right, negative flow is right-to-left.
 
-> Which way does blood flow through the foramen ovale? How much does it add to the cyanosis compared with the VSD?
+> Does closing the foramen ovale change much? What happens when it is large, and why? Compare this with transposition of the great arteries or tricuspid atresia, where the atrial communication is vital.

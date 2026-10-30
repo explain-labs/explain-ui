@@ -27,8 +27,9 @@ const imageModules = import.meta.glob<string>("./*/img/*.{png,jpg,jpeg,svg,webp,
 });
 
 // Lessons whose scenario is archived in the engine: their files stay, but they
-// are not served until the scenario is rebuilt (tof: tof_severe, 2026-10-20).
-const OFFLINE = new Set(["tof"]);
+// are not served until the scenario is rebuilt. (tof was offline from 2026-10-20
+// until tof_severe was rebuilt on 2026-10-30.)
+const OFFLINE = new Set<string>();
 
 const LESSONS: Record<string, Lesson> = {};
 for (const [key, lesson] of Object.entries(lessonModules)) {

@@ -1,5 +1,6 @@
-- Bij ernstige tetralogie van Fallot kan de longdoorbloeding **ductusafhankelijk** zijn.
-- Sluiting van de ductus geeft dan een **ernstige cyanose**. Prostaglandine E1 houdt de ductus open tot definitieve behandeling.
-- De mate van RVOT-obstructie bepaalt hoeveel bloed via het VSD van rechts naar links shunt.
+- Bij een ernstige tetralogie van Fallot kan de longdoorbloeding **ductusafhankelijk** zijn: sluiting van de ductus geeft een **diepe cyanose** en, als die aanhoudt, circulatoir falen.
+- **Prostaglandine E1** houdt de ductus open tot de definitieve behandeling.
+- Het **foramen ovale** speelt weinig rol: sluiten of groot maken verandert de saturatie nauwelijks.
+- Hoeveel bloed rechts-links over het VSD shunt, bepaalt de **RVOT-obstructie**. Die opheffen, hier met een ballondilatatie, verhoogt de longdoorbloeding en maakt een einde aan de ductusafhankelijkheid.
 
-Wil je het nog eens proberen? Begin opnieuw met een open ductus.
+Nog een keer proberen? Begin opnieuw met een open ductus en de RVOT zoals bij de start.
