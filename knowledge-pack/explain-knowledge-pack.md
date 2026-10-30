@@ -5290,7 +5290,7 @@ BaseModelClass
    - `vaf` → LV and COR;
    - `rvaf` → RV.
 
-   It also passes `ans_sens` and `ans_activity · ans_activity_factor` to the chambers, and sets the coronary inflow resistor's non-persistent factor `AA_COR.r_factor = 1 + cor_r_systolic_factor · vaf`.
+   It also passes `ans_sens` and `1 + (ans_activity − 1) · ans_activity_factor` to the chambers (hypoxia removes the adrenergic reserve, never more), and sets the coronary inflow resistor's non-persistent factor `AA_COR.r_factor = 1 + cor_r_systolic_factor · vaf`.
 9. **Per-beat analysis** (`analyze`), at the systole/diastole transitions:
    - at end-systole, it latches the end-systolic volume and pressure;
    - at end-diastole, the end-diastolic values, then `SV = EDV − ESV` and `EF = SV / EDV` (0 if EDV = 0).
@@ -5437,7 +5437,7 @@ Elastance, volume, activation and factor props are inherited: see [TimeVaryingEl
 | Property | Unit | Default | Written by | Effect |
 |---|---|---|---|---|
 | `ans_sens` | – | 1.0 | `Heart` (its own `ans_sens`), every step | Sensitivity to `ans_activity`. |
-| `ans_activity` | – | 1.0 | `Heart`: `ans_activity · ans_activity_factor` (`EF_HEART` drive scaled by `Mob`), every step | > 1 raises `el_max` and lowers `el_min`. |
+| `ans_activity` | – | 1.0 | `Heart`: `1 + (ans_activity − 1) · ans_activity_factor` (`EF_HEART` drive; `Mob` scales its deviation from rest), every step | > 1 raises `el_max` and lowers `el_min`. |
 | `el_max_mob_factor` | – | 1.0 | `Mob` (all chambers) | Hypoxic contractility depression. |
 | `el_max_drug_factor` | – | 1.0 | `Drugs` (all chambers) | Inotropy. |
 | `el_min_drug_factor` | – | 1.0 | `Drugs` (all chambers) | Lusitropy; < 1 = better relaxation. |
@@ -6901,7 +6901,7 @@ None of its own; it writes the hypoxia channels above. `el_max_mob_factor` is on
 
   The term flow (25.9 mL/min since the MVO2 raise of 2026-10-27, `scripts/_fix_term_mvo2.mjs`) sits at the upper end of the ~18–26 mL/min whole-heart flow that Aburawi's healthy-neonate LAD flow of 8.2 mL/min suggests. The flow is a fixed resistance (plus the systolic compression): it does not follow MVO2 when demand rises (no metabolic coronary regulation).
 - **The hypoxia effects start only at a very low `COR.to2`** (0.2 mmol/L, ~2 % saturation). At rest they are inactive, and they engage only in profound coronary hypoxia.
-- **Contractility is depressed twice** under hypoxia: `cont_factor` lowers `el_max`, and `ans_activity_factor` lowers the sympathetic inotropy. Their combined strength is set by `cont_factor_min` and `ans_factor_min`.
+- **Hypoxia depresses contractility through `cont_factor` only.** `ans_activity_factor` scales just the sympathetic deviation from rest (`Heart` passes `1 + (ans_activity − 1) · ans_activity_factor`), so it removes the adrenergic reserve but cannot push `el_max` below rest. Before 2026-10-30 `Heart` passed `ans_activity · ans_activity_factor`: in the chambers' additive `el_max` sum that counted the hypoxia twice and drove contractility to zero after ~2 min of severe hypoxia, with no recovery (e.g. `tof_severe` with the duct closed for 3 min).
 - **Heart weight follows body weight only** (no hypertrophy).
 
 ### History (v1.0)
