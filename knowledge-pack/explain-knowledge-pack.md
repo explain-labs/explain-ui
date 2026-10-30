@@ -10610,6 +10610,12 @@ saturation definition.
   acute response; an acute fall such as duct closure still triggers it); the chemoreflex keeps the term
   setpoints. Result: PaCO₂ 31–34, pH 7.42–7.45, MV 318–398 mL/kg/min, EF_MV 1.3–1.9, SpO₂ unchanged.
   `tof_severe` with the duct closed for 3–10 min now recovers when it is reopened.
+- 2026-10-30: teaching diagram (all four scenarios, built by `_make_tof.mjs` via `simplifyDiagram` in
+  `scripts/_diagram.mjs`; drawing only, the model is unchanged): the lower body with its organs (LS, KID,
+  INT) and veins (VLB) and the upper body with the brain (BR) and veins (VUB) each one disc (LOWER BODY,
+  UPPER BODY), the coronaries and the intrapulmonary shunt hidden, the shunts (DA, FO, VSD) in a muted warm
+  grey with captions along the line, the overriding aorta and the RVOT captioned, IVCI labelled IVC, and
+  flow arrows instead of dots (`settings.flowMarker`). Designed step by step with the user in the ToF lesson.
 
 ## References
 
