@@ -5236,7 +5236,7 @@ BaseModelClass
 | `cardiac_cycle_state` | – | 0 | 1 = systole (mitral closed → aortic closed), 0 = diastole. |
 | `cardiac_cycle_running` | – | 0 | 1 from SA firing to the end of the QT. |
 | `cardiac_cycle_time` | s | 0.353 | Duration of the last SA-to-end-of-QT activation. **Not the RR interval** (use `60 / heart_rate_measured`). |
-| `lv_edv`, `lv_esv`, `lv_sv` | L | 0 | LV end-diastolic, end-systolic and stroke volume. |
+| `lv_edv`, `lv_esv`, `lv_sv` | L | 0 | LV end-diastolic, end-systolic and stroke volume: the largest and smallest volume of the beat (echo definition), tracked from one systole start to the next and updated at each. Sampling the volume at the elastance switches instead read the ToF RV EF as ~0.27 against a true ~0.5, because a VSD keeps filling the ventricle after the switch to systole and emptying it after the switch to diastole. The pressures (`*_edp`, `*_esp`) stay sampled at the switches. |
 | `lv_edp`, `lv_esp` | mmHg | 0 | LV end-diastolic and end-systolic pressure, **transmural** (`pres_in`: wall recoil, without the pericardial pressure). |
 | `lv_ef` | fraction | 0 | `lv_sv / lv_edv`. |
 | `rv_edv`, `rv_esv`, `rv_sv`, `rv_edp`, `rv_esp`, `rv_ef` | L, mmHg, fraction | 0 | The same for the RV. |
