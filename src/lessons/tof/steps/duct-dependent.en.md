@@ -4,4 +4,4 @@ Close the duct with the button below, or with the slider under *Interventions*. 
 
 > What happens to ductal flow, saturation and blood pressure? Why doesn't flow through the RVOT increase to make up for the loss?
 
-**Don't wait too long before the next step.** After about a minute with the duct closed, the oxygen shortage starts to weaken the heart muscle. After about two minutes the model may no longer recover, even when the duct is reopened. If that happens, start again with the button on the last step.
+**Don't wait too long before the next step.** After about a minute with the duct closed, the oxygen shortage starts to weaken the heart muscle and the blood pressure falls. The longer the heart goes short of oxygen, the deeper it fails: after a few minutes it recovers only slowly, and after about five to seven minutes it may not recover at all, even when the duct is reopened. If that happens, start again with the button on the last step.
