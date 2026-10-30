@@ -20,7 +20,7 @@ export default defineLesson({
     en: "Severe form: duct-dependent pulmonary blood flow",
   },
   scenario: "tof_severe",
-  controls: ["ductus", "foramen_ovale"],
+  controls: ["ductus", "foramen_ovale", "rvot"],
   monitorLanes: ["ecg", "spo2_pre", "spo2_post", "abp"],
   numerics: [
     // HR, SpO₂ and ABP are on the bedside monitor above, so only flows here
@@ -88,6 +88,8 @@ export default defineLesson({
       highlight: ["Monitor.fo_flow"],
       diagramHighlight: ["FO"],
       controls: ["foramen_ovale"],
+      // the duct back open first (the learner may have left it closed)
+      onEnter: [{ kind: "control", id: "ductus", state: "on" }],
       actions: [
         {
           id: "close-fo",
@@ -102,6 +104,44 @@ export default defineLesson({
           icon: "pi pi-check-circle",
           severity: "secondary",
           ops: [{ kind: "control", id: "foramen_ovale", state: "on" }],
+        },
+        {
+          // 6 mm of the 10 mm maximum: a large atrial communication, as after a septostomy
+          id: "widen-fo",
+          label: { nl: "Maak het foramen ovale groot (6 mm)", en: "Make the foramen ovale large (6 mm)" },
+          icon: "pi pi-arrows-h",
+          severity: "secondary",
+          ops: [{ kind: "control", id: "foramen_ovale", state: 6 }],
+        },
+      ],
+    },
+    {
+      id: "rvot-dilatation",
+      title: { nl: "Ballondilatatie van de RVOT", en: "Balloon dilatation of the RVOT" },
+      highlight: ["Monitor.flows.rvo", "Monitor.flows.da_flow"],
+      diagramHighlight: ["RV_PA", "DA"],
+      diagramLabels: { RV_PA: { nl: "RVOT", en: "RVOT" } },
+      monitorHighlight: ["spo2_pre"],
+      controls: ["rvot", "ductus"],
+      // start from the PGE1 state: the duct open, the foramen ovale and the RVOT as in the scenario
+      onEnter: [
+        { kind: "control", id: "ductus", state: "on" },
+        { kind: "control", id: "foramen_ovale", state: "on" },
+      ],
+      actions: [
+        {
+          id: "dilate-rvot",
+          label: { nl: "Dilateer de RVOT", en: "Dilate the RVOT" },
+          icon: "pi pi-expand",
+          severity: "success",
+          ops: [{ kind: "control", id: "rvot", state: "on" }],
+        },
+        {
+          id: "close-duct-after",
+          label: { nl: "Sluit nu de ductus", en: "Now close the duct" },
+          icon: "pi pi-times-circle",
+          severity: "danger",
+          ops: [{ kind: "control", id: "ductus", state: "off" }],
         },
       ],
     },

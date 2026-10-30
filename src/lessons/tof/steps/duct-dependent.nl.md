@@ -1,5 +1,7 @@
-Bij deze patiënt is de longdoorbloeding **ductusafhankelijk**. Na de geboorte sluit de ductus normaal gesproken binnen enkele dagen.
+Bij deze patiënt is de longdoorbloeding **ductusafhankelijk**. Zonder prostaglandine E1 sluit de ductus in de eerste dagen na de geboorte.
 
-Sluit de ductus met de knop hieronder, of met de schakelaar bij *Interventies*. In het model gebeurt dat in 30 seconden. In werkelijkheid duurt het uren tot dagen.
+Sluit de ductus met de knop hieronder, of met de schuif onder *Interventies*. Het model sluit hem in 50 seconden; in werkelijkheid duurt dat uren tot dagen.
 
-> Wat gebeurt er met de ductusstroming, de saturatie en de bloeddruk? Waarom neemt de RVOT-stroming niet toe om het verlies op te vangen?
+> Wat gebeurt er met de ductusstroom, de saturatie en de bloeddruk? Waarom neemt de stroming door de RVOT niet toe om het verlies op te vangen?
+
+**Wacht niet te lang met de volgende stap.** Na ongeveer een minuut met een gesloten ductus begint het zuurstoftekort de hartspier te verzwakken. Na ongeveer twee minuten herstelt het model mogelijk niet meer, ook niet als de ductus weer opengaat. Gebeurt dat, begin dan opnieuw met de knop bij de laatste stap.

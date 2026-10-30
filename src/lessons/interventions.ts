@@ -1,5 +1,6 @@
 import type { L10n } from "@/lessons/i18n";
 import type { Op } from "@/lessons/types";
+import { orifice_b } from "@explain/helpers/Orifice";
 
 // Registry of lesson interventions. A lesson lists the ids it offers in
 // `controls`; LessonControls renders them and useLesson applies them. Adding a
@@ -96,6 +97,23 @@ export const INTERVENTIONS: Record<string, Intervention> = {
     step: 5,
     unit: "%",
     it: 30,
+  },
+  // RVOT balloon dilatation in the ToF scenarios: their RVOT is an orifice on RV_PA whose r_k is the
+  // Bernoulli coefficient of an effective diameter (discharge coefficient 0.7, as in
+  // explain-engine/scripts/_make_tof.mjs). "Dilated" = an effective 4.5 mm (the moderate grade's
+  // RVOT); "Narrow" = the scenario's own (2 mm in tof_severe).
+  rvot: {
+    id: "rvot",
+    kind: "toggle",
+    label: { nl: "RVOT (pulmonaal uitstroomtraject)", en: "RVOT (right ventricular outflow tract)" },
+    help: {
+      nl: "Ballondilatatie van 2 naar 4,5 mm effectieve diameter, in 10 s modeltijd.",
+      en: "Balloon dilatation from 2 to 4.5 mm effective diameter, over 10 s of model time.",
+    },
+    requires: ["RV_PA"],
+    read: "RV_PA.r_k",
+    on: { label: { nl: "Gedilateerd", en: "Dilated" }, value: orifice_b(4.5, 0.7), it: 10 },
+    off: { label: { nl: "Nauw", en: "Narrow" }, value: "baseline", it: 10 },
   },
 };
 

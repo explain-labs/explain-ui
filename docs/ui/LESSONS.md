@@ -2,7 +2,7 @@
 
 A lesson is a guided, step-by-step page at **`/lesson/<id>`**, built for the [nicupicu.nl](https://nicupicu.nl) modules on congenital heart lesions. Each step shows text (and optionally an image) beside the live model. The model is shown as a diagram without an edit toolbar, a trimmed bedside monitor and a chosen set of numerics. There are also intervention controls, such as opening and closing the ductus arteriosus or foramen ovale. Lesson text is bilingual (NL/EN) with a toggle in the header.
 
-Lessons are **files in this repo**, bundled with the app. The working example is `src/lessons/tof/` (severe tetralogy of Fallot on the `tof_severe` scenario). Since 2026-10-20 it is offline (listed in `OFFLINE` in `src/lessons/index.ts`), because `tof_severe` was built with an older engine and is archived; it comes back when a ToF scenario is rebuilt.
+Lessons are **files in this repo**, bundled with the app. The working example is `src/lessons/tof/` (severe tetralogy of Fallot on the `tof_severe` scenario: 72 h, 3.5 kg, duct open on PGE1). It was offline from 2026-10-20 until `tof_severe` was rebuilt on 2026-10-30; `OFFLINE` in `src/lessons/index.ts` lists lessons whose scenario is archived.
 
 ## What lives here
 
@@ -34,7 +34,7 @@ export default defineLesson({
   id: "tof",
   title: { nl: "Tetralogie van Fallot", en: "Tetralogy of Fallot" },
   scenario: "tof_severe",                 // file stem in model_definitions/
-  controls: ["ductus", "foramen_ovale"],  // ids from interventions.ts
+  controls: ["ductus", "foramen_ovale", "rvot"],  // ids from interventions.ts
   monitorLanes: ["ecg", "spo2_pre", "spo2_post", "abp"],
   numerics: [{ key: "vitals", title: "Vitals", parameters: [
     { label: "SpO₂ pre", props: ["Monitor.sao2_pre"], unit: "%" },
@@ -163,9 +163,10 @@ Slider details:
 - **Display units:** display = raw × `factor`. With `percentOf: "Model.maxProp"`, display = raw / max × 100 instead.
 - **Tween duration:** `it` is the duration of a **full-range** move. A smaller move tweens proportionally faster, with a minimum of 1 s.
 - **Control ops:** a `control` op with `"off"` moves the slider to its minimum, and `"on"` moves it to the scenario's baseline value.
-- **The two current sliders:**
-  - `ductus` shows `Pda.diameter_relative` as a percentage of the maximum duct diameter. Fully closing from 100% takes 50 s, so from the ToF baseline (60%) it takes 30 s.
-  - `foramen_ovale` shows `Shunts.diameter_fo` as a percentage of `Shunts.diameter_fo_max`, which is 10 mm.
+- **The current interventions:**
+  - `ductus` (slider) shows `Pda.diameter_relative` as a percentage of the maximum duct diameter. Fully closing from 100% (the `tof_severe` baseline) takes 50 s.
+  - `foramen_ovale` (slider) shows `Shunts.diameter_fo` as a percentage of `Shunts.diameter_fo_max`, which is 10 mm. A `control` op with a number sets the raw diameter in mm (the ToF lesson's "make it large" uses 6).
+  - `rvot` (toggle) is the RVOT balloon dilatation of the ToF scenarios: their RVOT is an orifice on `RV_PA` whose `r_k` is the Bernoulli coefficient of an effective diameter (`orifice_b` from the engine's `helpers/Orifice.js`, Cd 0.7). "Dilated" tweens `RV_PA.r_k` to the 4.5 mm value over 10 s, "Narrow" back to the scenario's own.
 
 A toggle shows whichever of its two values the current value is nearer to. While a control is moving, it shows a "closing…/opening…" label until the tween arrives; a slider also shows "current → target". A step action button that drives the control fills up as a progress bar and shows the percentage. Only the button whose direction matches fills: an `"off"` op fills while closing, any other while opening. Progress is how far the value has moved from its start toward the target; tweens are linear in model time. It updates at the slow-stream rate (~1 Hz), and a paused model holds it where it is.
 
@@ -175,14 +176,14 @@ Check engine paths against the scenario first (Model editor, or `modelState` fro
 - **PGE1:** `call Drugs.set_infusion ["pge1", rate]`.
 - **FiO₂:** `Gas.fio2`.
 - **Knee-chest (SVR up):** `Circulation.svr_factor_art`.
-- **Tet spell:** tween `RV_PA.r_factor_ps` ×3–5 over about 20 s. See the tet-spell recipe in [`chd_duct_fo_dependent.md`](../../explain-engine/docs/chd_duct_fo_dependent.md).
+- **Tet spell:** in the ToF scenarios the RVOT is an orifice, so tween `RV_PA.r_k_factor_ps` up (×3–5) over about 20 s. See [`chd_duct_fo_dependent.md`](../../explain-engine/docs/chd_duct_fo_dependent.md).
 
 ## Gotchas
 
 - **Changes need a running model.** `setProp`/`call` only queue work on the engine's TaskScheduler, which runs inside the step loop. The lesson therefore auto-runs, and applying an op while paused starts the loop (`runOnAction`).
 - **Going back doesn't undo.** Step navigation doesn't restore the model. If a step needs a known state, put explicit ops in its `onEnter` (e.g. `{ kind: "control", id: "ductus", state: "on" }`), or use a `restart` action.
 - **A duct closed to exactly 0 can't be reopened by PGE1.** At `diameter_relative === 0` the Pda takes its closed-duct shortcut, and the drug factor multiplies the diameter. Reopening with a `set`/toggle works. A future PGE1 lesson should close to a small value (e.g. 0.05) instead. See [`Pda.md`](../../explain-engine/docs/Pda.md).
-- **`Shunts.diameter_vsd` must stay ≤ 5 mm**, or the step loop becomes unstable.
+- **A long duct closure in `tof_severe` is not reversible.** After ~1 min closed, myocardial hypoxia (Mob) weakens the heart; after ~2 min the Mob and HeartFunction depressions, which `HeartChamber` adds, take LV contractility to zero and reopening no longer rescues the model (an engine item). The lesson text asks the learner to reopen promptly; `restart` recovers.
 - **Model time vs. real time.** Tweens run in model time. In realtime that is about wall-clock time, so keep durations short (a 30 s duct closure stands in for hours).
 - **Readonly.** The lesson page has no save UI, and the server refuses writes for readonly lesson accounts anyway.
 

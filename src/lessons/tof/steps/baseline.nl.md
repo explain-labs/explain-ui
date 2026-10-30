@@ -1,12 +1,12 @@
-Een pasgeborene van 3,3 kg, 24 uur oud, met een **ernstige tetralogie van Fallot**. De vier kenmerken:
+Een à terme neonaat van **3,5 kg, 72 uur oud**, met een **ernstige tetralogie van Fallot**. De vier kenmerken:
 
-1. een **ventrikelseptumdefect** (VSD),
-2. een **overrijdende aorta** boven het VSD,
-3. een **obstructie van de rechterventrikeluitstroombaan** (RVOT), hier kritisch,
-4. **rechterventrikelhypertrofie**.
+1. een groot **ventrikelseptumdefect** (VSD), waardoor beide ventrikels dezelfde systolische druk bereiken,
+2. een **overrijdende aorta** boven het VSD: beide ventrikels pompen in de aorta,
+3. een **obstructie van het rechterventrikeluitstroomtraject (RVOT)**, hier ernstig,
+4. een **dikwandige rechterventrikel**: die pompt al sinds het foetale leven tegen systemische druk.
 
-Door de kritische RVOT-obstructie gaat er weinig bloed antegraad naar de longen. Het VSD shunt van rechts naar links, de aorta in. De longen krijgen hun bloed vooral via de **open ductus arteriosus**, van aorta naar a. pulmonalis.
+Door de nauwe RVOT bereikt weinig bloed de longen. Blauw bloed uit de rechterventrikel gaat in plaats daarvan naar de aorta (een rechts-linksshunt), en de longen krijgen hun bloed vooral via de **ductus arteriosus**, van de aorta naar de a. pulmonalis. De baby krijgt **prostaglandine E1**, dat de ductus openhoudt.
 
-In het diagram zijn het VSD, de overrijdende aorta, de RVOT-obstructie en de ductus nu gemarkeerd.
+Het VSD, de overrijdende aorta, de RVOT-obstructie en de ductus zijn nu gemarkeerd in het diagram.
 
-> Bekijk de monitor. Vergelijk de pre- en postductale saturatie, en de stroming door de RVOT met die door de ductus.
+> Kijk naar de monitor: de saturatie is ongeveer 78 %. Vergelijk de stroming door de RVOT met die door de ductus. Welke levert het grootste deel van de longdoorbloeding?
