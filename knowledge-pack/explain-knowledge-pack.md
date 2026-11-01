@@ -4364,7 +4364,7 @@ The cannula, pump and oxygenator libraries are calibrated to the manufacturers' 
 ````markdown
 # Fluids
 
-`Fluids` gives fluids into the blood: timed **boluses and infusions** of named fluids (saline, Ringer's lactate, packed red cells, albumin, dextrose), and a continuous **maintenance** intake that replaces what the kidneys excrete. Each fluid is a composition (solutes in mmol/L, albumin in g/L, no O2 or CO2) mixed into a blood compartment through its normal `volume_in`, so everything it carries spreads with the circulation.
+`Fluids` gives fluids into the blood: timed **boluses and infusions** of named fluids (saline, Ringer's lactate, packed red cells, albumin, dextrose), and a continuous **maintenance** intake that replaces what the kidneys excrete. It also takes whole blood out: a timed **loss** (haemorrhage, blood sampling). Each fluid is a composition (solutes in mmol/L, albumin in g/L, no O2 or CO2) mixed into a blood compartment through its normal `volume_in`, so everything it carries spreads with the circulation.
 
 ## Physiology
 
@@ -4404,6 +4404,7 @@ BaseModelClass
 | Property | Description |
 |---|---|
 | `running_fluids` | Boluses and infusions in progress: `{vol, time_left, delta, site, to2, tco2, temp, solutes, drugs}` each. A state saved mid-bolus finishes it after reload. |
+| `running_losses` | Blood losses in progress: `{vol, time_left, delta, site}` each. Saved the same way. |
 
 ### The fluid library (every scenario)
 
@@ -4420,8 +4421,10 @@ BaseModelClass
 
 **`add_volume(volume, in_time = 10, fluid_in = "normal_saline", site = "VLB")`** (mL, s) queues a fluid: `delta = volume / (in_time / 0.015)` per update, with the fluid's composition copied from the library (an unknown name gives pure water).
 
+**`remove_volume(volume, out_time = 10, site = "AD")`** (mL, s) queues a whole-blood loss, the counterpart of `add_volume`: `delta = volume / (out_time / 0.015)` per update, taken with `site.volume_out`, so the blood leaves with its own composition.
+
 **Every 15 ms:**
-1. Finished entries are dropped. For each running entry, `site.volume_in(delta, fluid)` mixes the increment in, then `time_left` counts down. A missing site is skipped.
+1. Finished entries are dropped. Each running loss takes its `delta` out of its site. For each running entry, `site.volume_in(delta, fluid)` mixes the increment in, then `time_left` counts down. A missing site is skipped.
 2. **Maintenance:** `maintenance_rate · weight / 1000 · Δt / 3600` L of the maintenance fluid into `maintenance_site`.
 
 **Effects** (term_neonate_72h, 20 mL/kg over 10 min, read 1 min later):
@@ -4441,13 +4444,14 @@ None.
 ## Inputs and outputs
 
 - **Reads:** the fluid library; `model.weight`.
-- **Writes:** the target compartment, through `volume_in` (volume and composition).
-- **Written by:** the user and bot (`add_volume`, rates); the scenario generators (maintenance rate and composition).
+- **Writes:** the target compartment, through `volume_in` (volume and composition) or `volume_out` (a loss).
+- **Written by:** the user and bot (`add_volume`, `remove_volume`, rates); the scenario generators (maintenance rate and composition).
 - **Read by:** `DataCollector` watchers.
 
 ## Assumptions and limitations
 
-- **Everything stays in the blood.** There is no interstitial compartment, so all of a crystalloid bolus stays intravascular, where in vivo most leaves within minutes. Dilution and its acid–base effect are therefore stronger than in vivo, and albumin draws no fluid in.
+- **Where a fluid goes depends on the scenario.** With an [Interstitium](./Interstitium.md) (term_neonate_72h) a crystalloid bolus leaves the blood within minutes (21 % of 20 mL/kg saline left at 30 min) and albumin draws fluid in. Without one (the ToF scenarios) everything stays intravascular, so dilution and its acid–base effect are stronger than in vivo.
+- **A loss needs the Interstitium to refill.** Without it the shed volume is not restored at all; with it, ~45 % of a 14 % bleed is back at 30 min.
 - **Gas-free fluids:** a bolus dilutes O2 and CO2 content and haemoglobin (and so viscosity), as intended.
 - **Packed cells are a fresh unit:** no storage lesion (high K, low pH, lactate), no citrate effect on calcium.
 - **Ringer's lactate's lactate is cleared by [Lactate](./Lactate.md)** toward its baseline (half-life ~6 min), standing in for hepatic metabolism; no bicarbonate is generated beyond what the lower lactate implies.
@@ -5222,6 +5226,7 @@ BaseModelClass
 | `hr_temp_factor` | – | 1.0 | `Thermoregulation`: temperature effect on rate. |
 | `hr_drug_factor` | – | 1.0 | `Drugs`: chronotropy. |
 | `hr_chemo_factor` | – | 1.0 | `EF_HR_CHEMO` efferent: hypoxic bradycardia (in no shipped scenario). |
+| `hr_cat_factor` | – | 1.0 | [Hormones](./Hormones.md): circulating catecholamines (sustained rise after a blood loss). |
 
 ### Outputs
 
@@ -5264,7 +5269,8 @@ BaseModelClass
 3. **Heart rate**:
    ```
    HR = HR_ref · (1 + (ans_activity_hr − 1)·ans_sens + (hr_factor − 1) + (hr_mob_factor − 1)
-                    + (hr_temp_factor − 1) + (hr_drug_factor − 1) + (hr_chemo_factor − 1))
+                    + (hr_temp_factor − 1) + (hr_drug_factor − 1) + (hr_chemo_factor − 1)
+                    + (hr_cat_factor − 1))
    ```
    With `hr_override` it is `HR_ref`. It is floored at 0; at 0 the sinus node is silent.
 4. **Conduction timers**:
@@ -5880,7 +5886,7 @@ No literature-derived values. The valve resistance is a scenario parameter.
 ````markdown
 # Hormones
 
-`Hormones` is the slow neuro-hormonal controller of volume, pressure and osmolality: the renin–angiotensin–aldosterone system (RAAS) and antidiuretic hormone (ADH, vasopressin). It is the long-loop counterpart of the fast [Ans](./Ans.md) baroreflex. Each hormone is an activity level (1.0 = resting) that moves first-order toward a target set by its stimuli and acts through its own effector channels. It holds no blood and is neutral at rest: it only diverges when the patient is perturbed (haemorrhage, hyperosmolality) or a pathway is switched off.
+`Hormones` is the slow neuro-hormonal controller of volume, pressure and osmolality: the renin–angiotensin–aldosterone system (RAAS), antidiuretic hormone (ADH, vasopressin) and the circulating catecholamines of the adrenal medulla. It is the long-loop counterpart of the fast [Ans](./Ans.md) baroreflex. Each hormone is an activity level (1.0 = resting) that moves first-order toward a target set by its stimuli and acts through its own effector channels. It holds no blood and is neutral at rest: it only diverges when the patient is perturbed (haemorrhage, hyperosmolality) or a pathway is switched off.
 
 ## Physiology
 
@@ -5890,6 +5896,8 @@ No literature-derived values. The valve resistance is a scenario parameter.
   - stimulates aldosterone.
 - **Aldosterone** acts on the distal nephron over hours: it retains sodium and excretes potassium. Hyperkalaemia stimulates it directly.
 - **ADH** rises with plasma osmolality (a 1–2 % rise is enough) and, less sensitively, with a large volume loss. It makes the collecting duct permeable to water (antidiuresis), and at high levels it constricts vessels.
+- **The newborn RAAS cannot be switched off.** A volume load lowers renin to about a third of rest, not to zero (Smith 1989; Spitzer 1982).
+- **Circulating catecholamines.** A sustained blood-volume loss releases adrenaline from the adrenal medulla. In the newborn it keeps the heart rate up for as long as the volume stays low: conscious newborn lambs keep HR +25 % for 60 min after a 20 % bleed, show only a transient rise at 15 % and none at 10 % (Smith & Abu-Amarah 1997). The fast baroreflex ([Ans](./Ans.md)) acts within seconds and fades as the pressure partly recovers; this arm is slow and sustained.
 
 ## Inheritance
 
@@ -5905,11 +5913,12 @@ BaseModelClass
 | Property | Unit | Default | Description |
 |---|---|---|---|
 | `hormones_running` | boolean | `true` | Master switch. Off releases every owned channel to 1 once, then idles. |
-| `raas_enabled`, `adh_enabled` | boolean | `true` | Per-pathway switches (off holds that pathway's hormones at 1). |
+| `raas_enabled`, `adh_enabled`, `catecholamines_enabled` | boolean | `true` | Per-pathway switches (off holds that pathway's hormones at 1). |
 | `perfusion_model`, `perfusion_prop` | – | `"KID_ART"`, `"pres"` | Renal perfusion pressure (averaged over each update). |
 | `volume_model`, `volume_prop` | – | `"Circulation"`, `"total_blood_volume"` | Circulating volume. |
 | `plasma_model` | – | `"AA"` | Plasma Na and K source (`solutes`). |
-| `circulation_name`, `kidneys_name`, `efferent_name` | – | `"Circulation"`, `"Kidneys"`, `"KID_CAP_KID_VEN"` | Effector targets. |
+| `pressure_model` | – | `"AAR"` | Arterial pressure (averaged over each update), for `cat_input` `"pressure"`. |
+| `circulation_name`, `kidneys_name`, `efferent_name`, `heart_name` | – | `"Circulation"`, `"Kidneys"`, `"KID_CAP_KID_VEN"`, `"Heart"` | Effector targets. |
 
 ### Config: set-points
 
@@ -5919,6 +5928,7 @@ BaseModelClass
 | `volume_setpoint` | L | 0.4 | Healthy circulating volume of this patient. |
 | `osmo_na_setpoint` | mmol/L | 138 | Plasma Na (the osmolality proxy, osmolality ≈ 2·Na). |
 | `k_setpoint` | mmol/L | 3.5 | Plasma K. |
+| `pressure_setpoint` | mmHg | 60 | Arterial pressure (only for `cat_input` `"pressure"`). |
 
 The set-points are the patient's **healthy reference**, not its current state (see [Assumptions](#assumptions-and-limitations)).
 
@@ -5927,17 +5937,23 @@ The set-points are the patient's **healthy reference**, not its current state (s
 | Property | Default | Description |
 |---|---|---|
 | `renin_gain`, `renin_vol_gain` | 3.0, 3.0 | Angiotensin drive per fractional perfusion and volume deficit. |
+| `renin_min` | 0.35 | Floor on the renin target: how far a volume load can suppress the RAAS. |
 | `angiotensin_tc` | 30 s | Angiotensin time constant. |
 | `aldo_gain`, `aldo_k_in_gain` | 1.0, 2.0 | Aldosterone drive per (angiotensin − 1) and per fractional K excess. |
 | `aldosterone_tc` | 1800 s | Aldosterone time constant (physiologic; compress for demos). |
 | `adh_gain_osmo`, `adh_gain_baro` | 4.0, 1.0 | ADH drive per fractional Na excess and per fractional volume deficit. |
 | `adh_tc` | 120 s | ADH time constant. |
+| `cat_input` | `"volume"` | Catecholamine stimulus: `"volume"` (the blood-volume deficit) or `"pressure"` (the arterial pressure deficit). |
+| `cat_gain`, `cat_threshold` | 0, 0 | Catecholamine drive per fractional deficit beyond the threshold. |
+| `catecholamine_tc` | 60 s | Catecholamine time constant (adrenal release and plasma build-up). |
 | `hormone_min`, `hormone_max` | 0, 8 | Clamp on every hormone activity. |
 | `ang_svr_gain`, `ang_svr_ven_gain` | 0.3, 0.2 | Arteriolar and venular constriction per (angiotensin − 1). |
 | `adh_svr_gain` | 0.05 | Arteriolar constriction per (ADH − 1). |
 | `ang_efferent_gain` | 0.5 | Renal efferent constriction per (angiotensin − 1). |
 | `aldo_na_gain`, `aldo_k_gain` | 0.01, 0.1 | Na reabsorption rise and K reabsorption fall per (aldosterone − 1). |
 | `adh_water_gain` | 0.015 | Water reabsorption rise per (ADH − 1). |
+| `cat_hr_gain` | 0 | Heart-rate factor rise per (catecholamine − 1). **0 = the arm is off**; a scenario switches it on. |
+| `hr_factor_min`, `hr_factor_max` | 1.0, 1.6 | Clamp on the heart-rate effect. |
 | `svr_factor_min`, `svr_factor_max`, `efferent_factor_min`, `efferent_factor_max` | 0.5 / 5 | Clamps on the vascular effects. |
 | `na_factor_min`, `na_factor_max`, `k_factor_min`, `k_factor_max`, `water_factor_min`, `water_factor_max` | 0.95/1.02, 0.2/1.5, 0.5/1.03 | Clamps on the renal effects. |
 
@@ -5946,22 +5962,25 @@ The set-points are the patient's **healthy reference**, not its current state (s
 | Property | Description |
 |---|---|
 | `renin` | Instantaneous angiotensin drive (the target, un-lagged). |
-| `angiotensin`, `aldosterone`, `adh` | Hormone activities (1 = rest). |
+| `angiotensin`, `aldosterone`, `adh`, `catecholamine` | Hormone activities (1 = rest). |
 | `svr_factor`, `svr_ven_factor`, `efferent_factor` | Applied vascular effects. |
 | `na_reabs_factor`, `k_reabs_factor`, `water_reabs_factor` | Applied renal effects. |
-| `sensed_perfusion`, `sensed_volume`, `sensed_na`, `sensed_osmolality`, `sensed_k` | What the sensors read. |
+| `hr_cat_factor` | Applied heart-rate effect. |
+| `sensed_perfusion`, `sensed_volume`, `sensed_pressure`, `sensed_na`, `sensed_osmolality`, `sensed_k` | What the sensors read. |
 
 ## Calculation
 
-Every step the renal perfusion pressure is integrated, so the controller senses its mean, not one sample of a pulsatile pressure. **Every 1 s:**
+Every step the renal perfusion pressure and the arterial pressure are integrated, so the controller senses their means, not one sample of a pulsatile pressure. **Every 1 s:**
 
-1. **Fractional errors** against the set-points: perfusion and volume deficits, Na and K excesses.
+1. **Fractional errors** against the set-points: perfusion, volume and pressure deficits, Na and K excesses.
 2. **Hormones** (each a first-order lag with step fraction `min(1, Δt/tc)`, clamped 0–8):
    ```
-   renin       = 1 + renin_gain·perf_deficit + renin_vol_gain·vol_deficit
-   angiotensin → renin                                                      (tc 30 s)
-   aldosterone → 1 + aldo_gain·(angiotensin − 1) + aldo_k_in_gain·k_excess   (tc 1800 s)
-   adh         → 1 + adh_gain_osmo·na_excess + adh_gain_baro·vol_deficit      (tc 120 s)
+   renin         = max(renin_min, 1 + renin_gain·perf_deficit + renin_vol_gain·vol_deficit)
+   angiotensin   → renin                                                      (tc 30 s)
+   aldosterone   → 1 + aldo_gain·(angiotensin − 1) + aldo_k_in_gain·k_excess   (tc 1800 s)
+   adh           → 1 + adh_gain_osmo·na_excess + adh_gain_baro·vol_deficit      (tc 120 s)
+   catecholamine → 1 + cat_gain·max(0, deficit − cat_threshold)                (tc 60 s)
+                   deficit = vol_deficit (cat_input "volume") or pressure deficit ("pressure")
    ```
 3. **Effects**, clamped:
    ```
@@ -5971,6 +5990,7 @@ Every step the renal perfusion pressure is integrated, so the controller senses 
    Kidneys.reabsorption_factors.na     = 1 + 0.01·(aldo − 1)
    Kidneys.reabsorption_factors.k      = 1 − 0.1·(aldo − 1)
    Kidneys.reabs_factor_adh            = 1 + 0.015·(adh − 1)
+   Heart.hr_cat_factor                 = 1 + cat_hr_gain·(catecholamine − 1)  clamped 1.0–1.6
    ```
 
 ## Factor system
@@ -5979,13 +5999,14 @@ Hormones writes **its own channels**, so it composes with the other writers inst
 - **Circulation:** `svr_factor_hormones_art` / `_ven`, which Circulation adds to the vessels' `r_factor_ps` as deltas, next to the user's `svr_factor_art` and Drugs' `svr_factor_drug`. See [Circulation](./Circulation.md).
 - **The renal efferent resistor:** its `r_factor_ps`, owned by Hormones. The renal *afferent* is left to the Kidneys' autoregulation, which acts on `AD_KID_ART`.
 - **Kidneys:** dedicated hormone factors (`reabsorption_factors`, `reabs_factor_adh`), separate from the user's reabsorption layer. See [Kidneys](./Kidneys.md).
+- **Heart:** `hr_cat_factor`, added to the heart rate next to the baroreflex, Mob, temperature and drug terms. See [Heart](./Heart.md).
 
 ## Inputs and outputs
 
-- **Reads:** `KID_ART.pres`, `Circulation.total_blood_volume`, `AA.solutes.na` and `.k`.
+- **Reads:** `KID_ART.pres`, `AAR.pres`, `Circulation.total_blood_volume`, `AA.solutes.na` and `.k`.
 - **Writes:** the channels above.
 - **Written by:** the user (switches, gains); the scenario generators (set-points, via `scripts/_reference.mjs`).
-- **Read by:** Circulation, Kidneys and the efferent resistor (the channels); `DataCollector` watchers.
+- **Read by:** Circulation, Kidneys, Heart and the efferent resistor (the channels); `DataCollector` watchers.
 
 ## Assumptions and limitations
 
@@ -5993,10 +6014,24 @@ Hormones writes **its own channels**, so it composes with the other writers inst
 - **Near-neutral at rest** in term_neonate_72h (300 s from build): angiotensin, aldosterone and ADH 0.99–1.03.
 - **Aldosterone's volume effect is small:** water transport isn't osmotically coupled to Na, so aldosterone shows as lower urinary Na rather than volume. ADH and angiotensin carry the volume and pressure defence. With the physiologic `aldosterone_tc`, aldosterone barely moves in a short session.
 - **The owned channels are overwritten** while running: edit them through the hormones, or switch them off (`hormones_running`, `raas_enabled`, `adh_enabled`), which releases them to 1.
-- **Not modelled:** natriuretic peptides, thirst and intake, catecholamines (the ANS and Drugs cover those).
+- **The renin floor** (`renin_min` 0.35): an iso-oncotic load of 42 mL/kg over 60 min drove renin to 0.08 without it; with it, renin and angiotensin settle at 0.35 and aldosterone follows over its 30-min lag (Smith 1989: 38 % renin, 37 % aldosterone at 150 min). At 30 min the load leaves renin at 0.44, so the floor acts only at the extreme. ADH has no floor (no usable number; it holds ~0.74 under load).
+- **The catecholamine arm is fitted to the heart-rate outcome, not to plasma levels.** No newborn haemorrhage catecholamine concentrations were found, so `catecholamine` is an activity, and only its effect on heart rate is calibrated. It acts on the heart rate only (no inotropy, no vasoconstriction; the ANS and [Drugs](./Drugs.md) carry those).
+- **The fit is narrow.** In term_neonate_72h (`cat_gain` 20, `cat_threshold` 0.07, `cat_hr_gain` 0.175), `cat_hr_gain` 0.165 is already too weak for the 20 % target and 0.185 too strong. A later recalibration of the circulation can push it out of range: re-run `scripts/probe_haemorrhage.mjs` after one.
+- **Blood pressure after a 20 % bleed stays too high** (−12 % at 5 min, then about −7 to −8 % from 15 min, vs the lambs' −20 % sustained). The arm can't fix that, so it is an open item of the bleed side (refill, vessel tone).
+- **Not modelled:** natriuretic peptides, thirst and intake.
 - **Validation (at introduction, 2026-10):** `scripts/headless.mjs <scenario> --bleed FRAC | --naload Δ`:
   - a −8 % haemorrhage raises angiotensin and aldosterone and constricts the efferent, so GFR is defended and urine falls toward oliguria;
   - +12 mmol/L Na raises ADH 1.0 → 1.35 and halves urine output, while RAAS stays quiet.
+- **Validation of the catecholamine arm (2026-10):** `scripts/probe_haemorrhage.mjs` (5-min arterial bleed, `Fluids.remove_volume`), term_neonate_72h:
+
+  | Target | Window | Result |
+  |---|---|---|
+  | 10 %: no sustained HR rise (Smith 1997) | ±5 % at 15/30/60 min | pass |
+  | 20 %: HR +25 % sustained (Smith 1997) | +18 to +32 % at 15/30/60 min | pass |
+  | 35 %: MAP ~60 % of baseline (Bauer 1997) | −30 to −50 % at 5 min | pass |
+  | 20 %: MAP −20 % sustained (Smith 1997) | −15 to −25 % at 15/30/60 min | **fail** (too high) |
+
+  With the arm off, the 10 % and 35 % targets pass and both 20 % targets fail.
 
 ## Example definition (JSON)
 
@@ -6016,17 +6051,191 @@ From `term_neonate_72h.json`, `models.Hormones` (trimmed to gating and set-point
   "k_setpoint": 3.452,
   "angiotensin_tc": 30,
   "aldosterone_tc": 1800,
-  "adh_tc": 120
+  "adh_tc": 120,
+  "cat_input": "volume",
+  "cat_gain": 20,
+  "cat_threshold": 0.07,
+  "cat_hr_gain": 0.175
 }
 ```
 
 ## Usage in the scenarios
 
-One instance in every scenario, running. term_neonate_72h: `perfusion_setpoint` 40.9 mmHg, `volume_setpoint` 0.301 L.
+One instance in every scenario, running. term_neonate_72h: `perfusion_setpoint` 40.9 mmHg, `volume_setpoint` 0.301 L, catecholamine arm on (values above). The ToF scenarios leave the arm off.
 
 ## References
 
-No literature values; gains and time constants are model choices calibrated for teaching.
+The RAAS and ADH gains and time constants are model choices calibrated for teaching. The renin floor and the catecholamine arm rest on:
+
+- Smith 1989, conscious newborn lambs, saline at 5 % of body weight (doi:10.1152/ajpregu.1989.257.6.R1519): renin 38 %, aldosterone 37 % of baseline.
+- Smith 1990, fetal sheep, 18 mL/kg dextran (doi:10.1152/ajpregu.1990.259.5.R1050): renin 59 %.
+- Spitzer 1982 (doi:10.1038/ki.1982.60): the neonatal RAAS cannot be fully suppressed.
+- Smith & Abu-Amarah 1997, conscious newborn lambs (doi:10.1152/ajpheart.1997.273.1.H339): 20 % bleed, MAP −20 % and HR +25 % sustained for 60 min; 10–15 % transient only.
+- Smith 2000 (doi:10.1111/j.1469-445x.2000.02009.x): the HR rise is age-dependent (lambs yes, 11-week sheep no).
+- Rose 1987 (doi:10.1152/ajpregu.1987.252.2.R306): catecholamines and AVP rise and output falls after haemorrhage in lambs.
+- Padbury 1987 (doi:10.1172/JCI113166): adrenal adrenaline drives the newborn heart rate.
+- Bauer 1997 (doi:10.1016/S0940-2993(97)80139-X): MAP at 60 % of baseline after ~35 % blood loss.
+
+````
+
+### FILE: explain-engine/docs/Interstitium.md
+
+````markdown
+# Interstitium
+
+`Interstitium` is the extracellular fluid outside the blood: one well-mixed pool, filled by Starling filtration from the systemic capillary beds and drained by lymph back into the veins. It holds no blood: the pool is plain state (volume, solutes, albumin), so it stays out of the blood-pool loops (warming, lactate clearance, glucose, drugs, the [Circulation](./Circulation.md) volume sums). It is neutral at rest: filtration equals lymph flow, so a scenario behaves the same with or without it until the blood volume or the plasma albumin changes.
+
+## Physiology
+
+- **Starling filtration.** Across each capillary wall, water moves with the hydrostatic pressure difference (capillary − interstitial) minus the reflected oncotic pressure difference (plasma − interstitial). The filtration coefficient Kf sets how much flows per mmHg.
+- **The interstitium** is a large, compliant space (about 0.36 L/kg in the newborn, ECF minus plasma). Above its resting volume it swells easily; below it, it is stiff, so a dehydrated interstitium gives up little fluid.
+- **Lymph** returns the filtrate and the leaked albumin to the veins (the thoracic duct into the subclavian vein). It rises with the interstitial pressure and falls when the venous outflow pressure rises.
+- **What it does clinically:**
+  - **a crystalloid bolus** leaves the blood within minutes (most of it is in the interstitium by 30 min);
+  - **a colloid** (albumin) stays longer, because the capillary wall reflects albumin;
+  - **after a haemorrhage**, the lower capillary pressure draws interstitial fluid back into the blood (transcapillary refill), restoring part of the shed volume within half an hour and diluting the haemoglobin.
+
+## Inheritance
+
+```
+BaseModelClass
+  └── Interstitium
+```
+
+## Properties
+
+### Config (set in the definition JSON)
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `isf_volume_per_kg` | L/kg | 0.36 | Resting interstitial volume (ECF ~0.40 minus the plasma). |
+| `pif_rest` | mmHg | −1.0 | Resting interstitial fluid pressure. |
+| `compliance_above`, `compliance_below` | mL/mmHg/kg | 40, 4 | Interstitial compliance above and below the resting volume. |
+| `kf_per_kg` | mL/min/mmHg/kg | 0.08 | Whole-body capillary filtration coefficient (fitted, see [Assumptions](#assumptions-and-limitations)). |
+| `sigma` | – | 0.85 | Albumin reflection coefficient. |
+| `oncotic_base`, `albumin_ref` | mmHg, g/L | 18, 25 | Oncotic pressure at the reference albumin (the [Kidneys](./Kidneys.md) law). |
+| `isf_albumin_ratio` | – | 0.6 | Resting interstitial / plasma albumin. |
+| `lymph_flow_rest` | mL/min/kg | 0.1 | Resting lymph flow (= resting net filtration). |
+| `lymph_gain`, `lymph_gain_below` | /mmHg | 1.0, 0.3 | Fractional change of lymph flow per mmHg of interstitial pressure above / below rest. |
+| `lymph_pv_gain` | /mmHg | 0.127 | Fractional fall of lymph flow per mmHg of outflow (venous) pressure above rest. |
+| `lymph_max_ratio` | – | 3.4 | Lymph flow ceiling (× rest). |
+| `lymph_site` | – | `"SVC"` | Venous compartment the lymph drains into. |
+| `pc_art_fraction` | – | 0.2 | Lumped beds: share of the arteriovenous pressure drop downstream of the capillaries. |
+| `seed_delay` | s | 30 | Warm-up averaging before the resting balance is seeded. |
+| `filtration_sites` | list | RUB/VUB 0.4, RLB/VLB 0.4, INT_CAP 0.12, LS_CAP 0.08 | Filtering beds: compartment, its vein for a lumped bed (else `""`), share of Kf. |
+| `filterable_solutes` | list | Na, K, Ca, Cl, lactate, Mg, phosphates, UMA | Small solutes that travel with the water. |
+| `kf_factor`, `kf_factor_ps`, `kf_factor_scaling_ps` | – | 1.0 | The factor layers on Kf. |
+
+### State (saved with the state)
+
+| Property | Unit | Description |
+|---|---|---|
+| `isf_volume`, `isf_volume_rest` | L | Pool volume and the volume the interstitial pressure is referenced to (≤ 0 → seeded at `isf_volume_per_kg · weight`). |
+| `isf_solutes` | mmol/L (albumin g/L) | Pool composition (empty → seeded from the first site's blood). |
+| `p_offsets` | mmHg | Per-site offsets that make rest neutral (empty → seeded after the warm-up). |
+| `pv_rest` | mmHg | Resting lymph outflow pressure. |
+| `albumin_ps` | L/s | Diffusive albumin exchange that holds the resting pool at `isf_albumin_ratio · plasma`. |
+
+### Outputs
+
+| Property | Unit | Description |
+|---|---|---|
+| `pif` | mmHg | Interstitial fluid pressure. |
+| `oncotic_if` | mmHg | Interstitial oncotic pressure. |
+| `net_filtration` | mL/min | Blood → interstitium (negative = refill). |
+| `lymph_flow` | mL/min | Interstitium → blood. |
+| `isf_volume_ml_kg` | mL/kg | Pool volume. |
+
+## Calculation
+
+**Every 15 ms:**
+
+1. **Warm-up (first `seed_delay` s after build, or when `p_offsets` is empty):** each site's Starling drive and the lymph outflow pressure are averaged, then the offsets are seeded so every site filters its share of `lymph_flow_rest`, and `albumin_ps` is set so the pool's albumin balance closes at `isf_albumin_ratio`. Nothing moves during the warm-up.
+2. **Filtration, per site:**
+   ```
+   Pc     = the bed's pressure (a *_CAP compartment), or for a lumped bed
+            Pv + (Pa − Pv) · pc_art_fraction                              (Pappenheimer)
+   π      = oncotic_base · albumin / albumin_ref                          (plasma and pool)
+   Jv_i   = Kf_eff · share_i · [(Pc − Pif) − σ(πp − πif) − p_offset_i]
+   ```
+   - **Out of the blood** (Jv > 0): water carries the small solutes at the bed's concentration, and albumin crosses by (1 − σ) convection. Haemoglobin, glucose, the drugs and the blood gases stay behind and concentrate.
+   - **Back into the blood** (Jv < 0): pool water and small solutes return, with albumin at (1 − σ) of the pool's.
+   - **Albumin diffusion:** `albumin_ps · share · (Cp − Cif)` per site.
+   - Neither side is ever drained by more than half its volume in one update.
+3. **Interstitial pressure:** `Pif = pif_rest + (V − V_rest)/C`, with `C = compliance_above` above the resting volume and `compliance_below` under it.
+4. **Lymph** into `lymph_site`, with the pool's composition (no gases):
+   ```
+   Q = lymph_flow_rest · (1 + gain·(Pif − pif_rest)) · (1 − lymph_pv_gain·(Pv − pv_rest))
+   gain = lymph_gain above the resting pressure, lymph_gain_below under it;  0 ≤ Q ≤ lymph_max_ratio · rest
+   ```
+
+## Factor system
+
+Kf has the usual additive layers: `Kf_eff = kf + (kf_factor − 1)·kf + (kf_factor_ps − 1)·kf + (kf_factor_scaling_ps − 1)·kf`, with `kf_factor` reset every update.
+
+## Inputs and outputs
+
+- **Reads:** the filtration beds' and their veins' `pres` and `solutes.albumin`; `lymph_site.pres`; `model.weight`.
+- **Writes:** the beds' volume and composition (directly when filtering out, through `volume_in` when refilling); `lymph_site` through `volume_in`.
+- **Written by:** the user (Kf factors, gains).
+- **Read by:** `DataCollector` watchers.
+
+## Assumptions and limitations
+
+- **Kf is fitted for the 72 h term neonate** (0.08 mL/min/mmHg/kg), between the fetal lamb (0.4 for bleeding, Brace & Gold 1984) and the adult limb (~0.05), to these targets (`scripts/probe_interstitium.mjs`):
+
+  | Test | Model | Target |
+  |---|---|---|
+  | 20 mL/kg normal saline over 10 min, retained at the end of the infusion | 73 % | 50–75 % (adult, Hahn) |
+  | same, retained at 30 min | 21 % | 15–25 % (fetal 7 %, adult 20–40 %) |
+  | 14 % bleed over 5 min, volume restored at 30 min | 45 % | 35–50 % (fetal 53 %, Brace 1983) |
+
+- **No newborn data for the lymph response below rest.** `lymph_gain_below` (0.3/mmHg) is weaker than above rest so lymph keeps flowing when a bleed draws the interstitium down; with the symmetric gain it stopped at −2 mmHg.
+- **One pool, four beds.** The lungs, brain, kidneys and heart don't filter into it (the lungs have no interstitial compartment; the kidneys have their own [filtration](./Kidneys.md)). Glucose keeps its own interstitial pool ([Glucose](./Glucose.md)).
+- **No venous stress relaxation.** In a 60-min colloid load the CVP rises linearly (Merrill 1995 protocol: +11.6 mmHg vs +5.6 in conscious lambs). Making the systemic veins 2.5× more compliant closed most of that gap but buffered a haemorrhage so well that the newborn barely responded to blood loss, so it was reverted; the slow venous relaxation that would explain both is not modelled.
+- **No insensible loss:** the pool exchanges only with the blood.
+- **The read-outs are pulsatile** (they follow the beds' pressures); average them over a few beats.
+
+## Example definition (JSON)
+
+From `term_neonate_72h.json`, `models.Interstitium` (trimmed):
+
+```json
+{
+  "name": "Interstitium",
+  "model_type": "Interstitium",
+  "is_enabled": true,
+  "isf_volume_per_kg": 0.36,
+  "pif_rest": -1,
+  "compliance_above": 40,
+  "compliance_below": 4,
+  "kf_per_kg": 0.08,
+  "sigma": 0.85,
+  "lymph_flow_rest": 0.1,
+  "lymph_gain": 1,
+  "lymph_gain_below": 0.3,
+  "lymph_site": "SVC",
+  "filtration_sites": [
+    { "bed": "RUB", "vein": "VUB", "share": 0.4 },
+    { "bed": "RLB", "vein": "VLB", "share": 0.4 },
+    { "bed": "INT_CAP", "vein": "", "share": 0.12 },
+    { "bed": "LS_CAP", "vein": "", "share": 0.08 }
+  ]
+}
+```
+
+## Usage in the scenarios
+
+term_neonate_72h only. The ToF scenarios have none, so a fluid bolus there stays in the blood (see [Fluids](./Fluids.md)).
+
+## References
+
+- Brace & Gold 1984, fetal sheep (doi:10.1152/ajpregu.1984.247.5.R800): interstitial compliance 45 mL/mmHg/kg, vascular compliance 3.0–3.5, Kf 0.4–0.8.
+- Brace 1983, fetal sheep haemorrhage (doi:10.1161/01.res.52.6.730): ~53 % of the shed volume restored at 30 min.
+- Brace 1983, fetal sheep saline and dextran (PMID 6196973): saline retained 15/9/7 % at 10/20/30 min.
+- Hahn, volume kinetics of crystalloids in adults (grade B): 50–75 % retained at the end of an infusion, distribution half-life ~16 min.
+- Merrill 1995, conscious lambs 3–7 d (doi:10.1152/ajpheart.1995.268.3.H1343): conscious lambs, 42 mL/kg dextran over 60 min, RAP +5.6 mmHg.
+- Sola 1981: plasma colloid osmotic pressure at term 19.4 mmHg.
 
 ````
 
@@ -6151,7 +6360,7 @@ Each step (nothing while off; skipped if `KID_CAP` or `URINE` is missing):
 - **Oncotic pressure is linear in albumin.**
 - **Reabsorption fractions are static per solute:** no transport maxima, no secretion, no acid–base handling (bicarbonate, ammonium), no concentrating mechanism.
 - **The bladder never empties** (`URINE` accumulates).
-- **Urine water comes from `KID_CAP` only;** the rest of the body equilibrates through the circulation (no interstitial compartment).
+- **Urine water comes from `KID_CAP` only;** the rest of the body equilibrates through the circulation and, where a scenario has one, the [Interstitium](./Interstitium.md) (the kidney does not filter into it).
 
 ### Calibration
 
@@ -7722,7 +7931,7 @@ The reusable physical primitives every component model is built from.
 | [Ans](./Ans.md) | Autonomic nervous system controller; hub doc for the afferent→efferent baro/chemoreflex loop. |
 | [AnsAfferent](./AnsAfferent.md) | Afferent receptor (input → firing rate, piecewise linear with a time constant). |
 | [AnsEfferent](./AnsEfferent.md) | Efferent pathway (summed, clamped firing rate → effect factor on a target). |
-| [Hormones](./Hormones.md) | RAAS/ADH controllers acting on vascular tone & fluid balance. |
+| [Hormones](./Hormones.md) | RAAS/ADH controllers acting on vascular tone & fluid balance; circulating catecholamines on heart rate. |
 | [Kidneys](./Kidneys.md) | Renal filtration (NFP/GFR autoregulation, reabsorption, urine, per-solute mass balance). |
 | [Brain](./Brain.md) | Cerebral autoregulation (CBF control) + ICP / Monro-Kellie. |
 
@@ -7735,7 +7944,8 @@ The reusable physical primitives every component model is built from.
 | [Glucose](./Glucose.md) | Glucose/insulin homeostasis; IV dextrose. |
 | [Lactate](./Lactate.md) | Hypoxia-driven lactate production → Stewart SID → metabolic acidosis. |
 | [Drugs](./Drugs.md) | Pharmacology PK/PD (adrenaline, noradrenaline, PGE1): circuit transport, clearance, ke0, effect sites. |
-| [Fluids](./Fluids.md) | IV fluid/infusion administration into blood compartments. |
+| [Fluids](./Fluids.md) | IV fluid/infusion administration into blood compartments; timed blood loss. |
+| [Interstitium](./Interstitium.md) | Starling capillary filtration into an interstitial pool, drained by lymph (bolus redistribution, haemorrhage refill). |
 
 ## Respiratory
 
@@ -10084,10 +10294,20 @@ outside `model_definitions/`).
 | 2026-10-25 | Glucose (re-validation (i)), also the code defaults: interstitial pool (0.31 L/kg, τ 5 min), brain uptake insulin-independent and saturable (Km 1 mmol/L), insulin secretion blunted above the set-point (`insulin_gain` 6 → 0.54) with prompt suppression below (`insulin_suppression_gain` 6), counter-regulation one-sided; state re-baked | Rest unchanged (4.0 mmol/L); hepatic output stopped: 2.82 → 3.27 mmol/L at 10 min, 0.01 → 1.25 at 90; D10 2 mL/kg: cleared in ~8 min with a rebound to 1.99 → K 1.54 %/min, +2.1 mmol/L at 10 min | Bier 1977, Huang 1989, Salle 1976 |
 | 2026-10-25 | Thermoregulation (re-validation), also the code defaults: surface area `surface_area_k` 0.05 → 0.097 (0.116 → 0.226 m²); `h_radiative` 9.6 → 5.2, `h_convective` 7.0 → 4.9; perfusion coupling mass = the relaxed blood's heat capacity (`blood_volume_per_kg` removed); `loss_trim` re-seeded (−3.23 → −5.26 W) | Rest unchanged; dry-loss sensitivity 1.93 → 2.28 W/K (60 min at 28 °C: −0.97 → −1.10 °C; at 35 °C: +1.39 → +1.56 °C); skin evaporation 0.35 → 0.68 W (≈ respiratory, as measured); `Q_perf` returns to 0 | Sjörs 1997, Apedoh 1999, Riesenfeld 1995, Sedin 1983 |
 | 2026-10-25 | Hypoxic ventilatory depression (final pass), new in Breathing: `hvd_factor` relaxes over 120 s towards 1 − min(2 · (70 − pO2)/70, 0.8) below a pO2 of 70 mmHg | FiO₂ 0.15: ventilation +18 % at 1 min, +4 % at 5 min (12 % below the peak; was +11 % sustained); FiO₂ 0.07: pH 7.44 at 1 min, 7.33 at 7 min (was 7.41: the stronger chemoreflex of (l) kept the baby alkalotic, probe_lactate failed); rest unchanged | De Boeck 1984, Rehan 1996 |
+| 2026-10-29 | Interstitium (new model, [Interstitium](./Interstitium.md)): filtration from RUB, RLB, INT_CAP and LS_CAP into one pool, lymph into SVC; `kf_per_kg` 0.08, `lymph_gain_below` 0.3; `Fluids.remove_volume` for timed blood loss | Rest unchanged (neutral over 30 min). 20 mL/kg saline over 10 min: retained 100 → 73 % at the end, 100 → 21 % at 30 min; 14 % bleed: 0 → 45 % restored at 30 min | Brace & Gold 1984, Brace 1983 (fetal sheep); Hahn (adult) |
+| 2026-10-29 | Systemic venous compliance ×2.5 (`scripts/_fix_venous_compliance.mjs --factor 0.4`), **reverted 2026-10-31** | Merrill colloid load: CVP +11.6 → +7.6 mmHg (ref +5.6), but a 20 % bleed then moved MAP only −7.8 % and a 35 % bleed −18.5 % (ref about −40); SVC unstressed volume went negative. No venous factor fits both loading and loss; the original compliance is kept | Merrill 1995; Smith & Abu-Amarah 1997; Bauer 1997 |
+| 2026-10-30 | Renin floor, also the code default: `Hormones.renin_min` 0.35 | Merrill load at 60 min: renin 0.08 → 0.35, angiotensin 0.10 → 0.35, MAP 52.5 → 53.8; rest unchanged | Smith 1989 (38 % renin, 37 % aldosterone); Spitzer 1982 |
+| 2026-10-31 | Catecholamine arm on heart rate ([Hormones](./Hormones.md)): `cat_input` volume, `cat_gain` 20, `cat_threshold` 0.07, `cat_hr_gain` 0.175 | 20 % bleed: HR sustained at +18 to +32 % (was +14.5 % at 5 min fading to +8.5 %); 10 % bleed: still no sustained rise; 35 %: MAP still ~60 % of baseline; rest unchanged (HR 117, MAP 55.8). Narrow: 0.165 too weak, 0.185 too strong | Smith & Abu-Amarah 1997; Smith 2000; Padbury 1987 |
 
 ## Open items
 
 - **Koch & Wendel 1968** (arterial gases, first week): unavailable, so PaO₂ and BE stay grade C.
+- **Blood pressure after a 20 % bleed is too well defended:** −12 % at 5 min, then about −7 to −8 % from 15 min, against the lambs' −20 % sustained (Smith & Abu-Amarah 1997), with or without the catecholamine arm. It sits on the bleed side (refill, vessel tone), not the heart rate.
+- **The model breaks at an extreme blood loss (≥ 50 %):** arterial pressure goes below zero and the Monitor's output read-outs become meaningless. Up to 35 % it behaves. A vessel emptied below its unstressed volume needs a defined behaviour.
+- **No venous stress relaxation:** a 60-min colloid load raises the CVP +11.6 mmHg against +5.6 in conscious lambs (Merrill 1995), rising linearly without the plateau.
+- **Acid–base response to a lactic load is too weak:** a 35 % bleed raises lactate to 2.9 mmol/L but pH stays 7.36–7.39; at 50 % with lactate 3.4 (before the venous revert) pH was 7.357 against 7.365 at rest.
+- **Kidney after a 20 % bleed:** 30 min after the loss the kidney ends over-perfused (GFR above rest) where Smith 2003 (doi:10.1152/japplphysiol.00492.2003) finds GFR falls further; `probe_renal.mjs` still uses an instant volume scaling, which confounds it.
+- **ADH response to blood loss is flat** (activity 1.13–1.28 where lamb AVP rises ~18×; activity is not concentration, but the RAAS/ADH balance looks wrong).
 
 ```
 
@@ -13914,6 +14134,7 @@ export { Thermoregulation } from "./component_models/Thermoregulation";
 export { Glucose } from "./component_models/Glucose";
 export { Lactate } from "./component_models/Lactate";
 export { Kidneys } from "./component_models/Kidneys";
+export { Interstitium } from "./component_models/Interstitium";
 export { Uterus } from "./component_models/Uterus";
 export { Hormones } from "./component_models/Hormones";
 export { Drugs } from "./component_models/Drugs";

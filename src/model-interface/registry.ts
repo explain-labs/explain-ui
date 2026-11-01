@@ -2188,6 +2188,41 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
           ]
         }
       ]
+    },
+    {
+      "target": "remove_volume",
+      "caption": "Remove blood",
+      "type": "function",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false,
+      "args": [
+        {
+          "caption": "volume (ml)",
+          "target": "",
+          "type": "number",
+          "factor": 1,
+          "delta": 0.1,
+          "rounding": 1
+        },
+        {
+          "caption": "out time (s)",
+          "target": "_default_time",
+          "type": "number",
+          "factor": 1,
+          "default": 10,
+          "delta": 0.1,
+          "rounding": 1
+        },
+        {
+          "caption": "site",
+          "target": "site",
+          "type": "list",
+          "default": "AD",
+          "custom_options": true,
+          "choices": ["AD", "AA", "IVCI", "SVC"]
+        }
+      ]
     }
   ],
   "Gas": [
@@ -3062,6 +3097,211 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "caption": "non linear resistance coefficient factor",
       "target": "r_k_factor_ps",
       "type": "factor"
+    }
+  ],
+  "Interstitium": [
+    {
+      "target": "description",
+      "type": "string",
+      "build_prop": true,
+      "edit_mode": "all",
+      "readonly": true,
+      "caption": "description"
+    },
+    {
+      "target": "is_enabled",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "all",
+      "readonly": false,
+      "caption": "enabled"
+    },
+    {
+      "caption": "interstitial volume (mL/kg)",
+      "target": "isf_volume_ml_kg",
+      "type": "number",
+      "factor": 1,
+      "rounding": 1,
+      "build_prop": false,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "interstitial pressure (mmHg)",
+      "target": "pif",
+      "type": "number",
+      "factor": 1,
+      "rounding": 2,
+      "build_prop": false,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "net filtration out of the blood (mL/min)",
+      "target": "net_filtration",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "build_prop": false,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "lymph flow (mL/min)",
+      "target": "lymph_flow",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "build_prop": false,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "interstitial oncotic pressure (mmHg)",
+      "target": "oncotic_if",
+      "type": "number",
+      "factor": 1,
+      "rounding": 2,
+      "build_prop": false,
+      "edit_mode": "extra",
+      "readonly": true
+    },
+    {
+      "caption": "filtration coefficient Kf (mL/min/mmHg/kg)",
+      "target": "kf_per_kg",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.005,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 2
+    },
+    {
+      "caption": "albumin reflection coefficient",
+      "target": "sigma",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.01,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
+    },
+    {
+      "caption": "compliance above rest (mL/mmHg/kg)",
+      "target": "compliance_above",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 1,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 500
+    },
+    {
+      "caption": "compliance below rest (mL/mmHg/kg)",
+      "target": "compliance_below",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.1,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 500
+    },
+    {
+      "caption": "resting lymph flow (mL/min/kg)",
+      "target": "lymph_flow_rest",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.01,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 2
+    },
+    {
+      "caption": "lymph gain above rest (/mmHg)",
+      "target": "lymph_gain",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.05,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 10
+    },
+    {
+      "caption": "lymph gain below rest (/mmHg)",
+      "target": "lymph_gain_below",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.05,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 10
+    },
+    {
+      "caption": "lymph fall per mmHg outflow pressure",
+      "target": "lymph_pv_gain",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.005,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 1
+    },
+    {
+      "caption": "lymph flow ceiling, × rest",
+      "target": "lymph_max_ratio",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.1,
+      "rounding": 1,
+      "ll": 1,
+      "ul": 20
+    },
+    {
+      "caption": "lumped beds: capillary position, 0 = venous",
+      "target": "pc_art_fraction",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.01,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
+    },
+    {
+      "edit_mode": "factors",
+      "caption": "Kf factor",
+      "target": "kf_factor_ps",
+      "type": "factor",
+      "build_prop": false
     }
   ],
   "Kidneys": [
@@ -4113,6 +4353,14 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "catecholamines enabled",
+      "target": "catecholamines_enabled",
+      "type": "boolean",
+      "build_prop": true,
+      "edit_mode": "basic",
+      "readonly": false
+    },
+    {
       "caption": "angiotensin II (activity)",
       "target": "angiotensin",
       "type": "number",
@@ -4135,6 +4383,16 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
     {
       "caption": "ADH (activity)",
       "target": "adh",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "build_prop": false,
+      "edit_mode": "basic",
+      "readonly": true
+    },
+    {
+      "caption": "catecholamines (activity)",
+      "target": "catecholamine",
       "type": "number",
       "factor": 1,
       "rounding": 3,
@@ -4205,6 +4463,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "arterial pressure setpoint (mmHg)",
+      "target": "pressure_setpoint",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false,
+      "delta": 0.5,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 200
+    },
+    {
       "caption": "angiotensin time constant (s)",
       "target": "angiotensin_tc",
       "type": "number",
@@ -4244,6 +4515,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "catecholamine time constant (s)",
+      "target": "catecholamine_tc",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 1,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 36000
+    },
+    {
       "caption": "renin gain (perfusion)",
       "target": "renin_gain",
       "type": "number",
@@ -4268,6 +4552,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": true,
       "edit_mode": "advanced",
       "readonly": false
+    },
+    {
+      "caption": "renin floor",
+      "target": "renin_min",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.01,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1
     },
     {
       "caption": "aldosterone gain (AngII)",
@@ -4320,6 +4617,41 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "build_prop": true,
       "edit_mode": "advanced",
       "readonly": false
+    },
+    {
+      "caption": "catecholamine input",
+      "target": "cat_input",
+      "type": "list",
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "custom_options": true,
+      "choices": ["volume", "pressure"]
+    },
+    {
+      "caption": "catecholamine gain per fractional deficit",
+      "target": "cat_gain",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.5,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 200
+    },
+    {
+      "caption": "catecholamine threshold, fractional deficit",
+      "target": "cat_threshold",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.005,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 1
     },
     {
       "caption": "AngII → arteriolar SVR gain",
@@ -4413,6 +4745,19 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "catecholamines → heart rate gain, 0 = off",
+      "target": "cat_hr_gain",
+      "type": "number",
+      "factor": 1,
+      "build_prop": true,
+      "edit_mode": "advanced",
+      "readonly": false,
+      "delta": 0.005,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 2
+    },
+    {
       "caption": "SVR factor (applied)",
       "target": "svr_factor",
       "type": "number",
@@ -4453,6 +4798,16 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": true
     },
     {
+      "caption": "heart rate factor (applied)",
+      "target": "hr_cat_factor",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "build_prop": false,
+      "edit_mode": "extra",
+      "readonly": true
+    },
+    {
       "caption": "sensed perfusion (mmHg)",
       "target": "sensed_perfusion",
       "type": "number",
@@ -4468,6 +4823,16 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "type": "number",
       "factor": 1,
       "rounding": 4,
+      "build_prop": false,
+      "edit_mode": "extra",
+      "readonly": true
+    },
+    {
+      "caption": "sensed arterial pressure (mmHg)",
+      "target": "sensed_pressure",
+      "type": "number",
+      "factor": 1,
+      "rounding": 1,
       "build_prop": false,
       "edit_mode": "extra",
       "readonly": true
