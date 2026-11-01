@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **43 model_types**, **452 settable params**, **52 functions**
+Snapshot: **44 model_types**, **472 settable params**, **53 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -323,6 +323,7 @@ _setProp_:
 
 _call_:
 - `add_volume( (number, ml); _default_time (number, s); fluid type (list, one of normal_saline/ringers_lactate/packed_cells/albumin_20%/d5/d10))` — Adminster fluid
+- `remove_volume( (number, ml); _default_time (number, s); site (list, one of AD/AA/IVCI/SVC))` — Remove blood
 
 ### Gas
 
@@ -456,19 +457,26 @@ _setProp_:
 - `hormones_running` — hormones running (boolean)
 - `raas_enabled` — RAAS enabled (boolean)
 - `adh_enabled` — ADH enabled (boolean)
+- `catecholamines_enabled` — catecholamines enabled (boolean)
 - `perfusion_setpoint` — perfusion setpoint (mmHg) (number, mmHg, range 0–200) _(extra)_
 - `volume_setpoint` — volume setpoint (L) (number, L, range 0–20) _(extra)_
 - `osmo_na_setpoint` — Na/osmolality setpoint (mmol/L) (number, mmol/L, range 100–170) _(extra)_
 - `k_setpoint` — K setpoint (mmol/L) (number, mmol/L, range 1–8) _(extra)_
+- `pressure_setpoint` — arterial pressure setpoint (mmHg) (number, mmHg, range 0–200) _(extra)_
 - `angiotensin_tc` — angiotensin time constant (s) (number, s, range 0–36000) _(advanced)_
 - `aldosterone_tc` — aldosterone time constant (s) (number, s, range 0–36000) _(advanced)_
 - `adh_tc` — ADH time constant (s) (number, s, range 0–36000) _(advanced)_
+- `catecholamine_tc` — catecholamine time constant (s) (number, s, range 0–36000) _(advanced)_
 - `renin_gain` — renin gain (perfusion) (number, perfusion, range 0–50) _(advanced)_
 - `renin_vol_gain` — renin gain (volume) (number, volume, range 0–50) _(advanced)_
+- `renin_min` — renin floor (number, range 0–1) _(advanced)_
 - `aldo_gain` — aldosterone gain (AngII) (number, AngII, range 0–50) _(advanced)_
 - `aldo_k_in_gain` — aldosterone gain (K) (number, K, range 0–50) _(advanced)_
 - `adh_gain_osmo` — ADH gain (osmotic) (number, osmotic, range 0–50) _(advanced)_
 - `adh_gain_baro` — ADH gain (baroreg) (number, baroreg, range 0–50) _(advanced)_
+- `cat_input` — catecholamine input (list, one of volume/pressure) _(advanced)_
+- `cat_gain` — catecholamine gain per fractional deficit (number, range 0–200) _(advanced)_
+- `cat_threshold` — catecholamine threshold, fractional deficit (number, range 0–1) _(advanced)_
 - `ang_svr_gain` — AngII → arteriolar SVR gain (number, range 0–5) _(advanced)_
 - `ang_svr_ven_gain` — AngII → venular SVR gain (number, range 0–5) _(advanced)_
 - `ang_efferent_gain` — AngII → renal efferent gain (number, range 0–5) _(advanced)_
@@ -476,6 +484,23 @@ _setProp_:
 - `aldo_k_gain` — aldosterone → K waste gain (number, range 0–1) _(advanced)_
 - `adh_water_gain` — ADH → water reabs gain (number, range 0–1) _(advanced)_
 - `adh_svr_gain` — ADH → SVR gain (number, range 0–5) _(advanced)_
+- `cat_hr_gain` — catecholamines → heart rate gain, 0 = off (number, range 0–2) _(advanced)_
+- `is_enabled` — enabled (boolean) _(all)_
+
+### Interstitium
+
+_setProp_:
+- `kf_per_kg` — filtration coefficient Kf (mL/min/mmHg/kg) (number, mL/min/mmHg/kg, range 0–2) _(extra)_
+- `sigma` — albumin reflection coefficient (number, range 0–1) _(extra)_
+- `compliance_above` — compliance above rest (mL/mmHg/kg) (number, mL/mmHg/kg, range 0–500) _(extra)_
+- `compliance_below` — compliance below rest (mL/mmHg/kg) (number, mL/mmHg/kg, range 0–500) _(extra)_
+- `lymph_flow_rest` — resting lymph flow (mL/min/kg) (number, mL/min/kg, range 0–2) _(extra)_
+- `kf_factor_ps` — Kf factor (factor) _(factors)_
+- `lymph_gain` — lymph gain above rest (/mmHg) (number, /mmHg, range 0–10) _(advanced)_
+- `lymph_gain_below` — lymph gain below rest (/mmHg) (number, /mmHg, range 0–10) _(advanced)_
+- `lymph_pv_gain` — lymph fall per mmHg outflow pressure (number, range 0–1) _(advanced)_
+- `lymph_max_ratio` — lymph flow ceiling, × rest (number, range 1–20) _(advanced)_
+- `pc_art_fraction` — lumped beds: capillary position, 0 = venous (number, range 0–1) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 ### Kidneys
