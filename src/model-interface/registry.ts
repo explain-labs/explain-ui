@@ -1225,6 +1225,90 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "edit_mode": "extra",
       "build_prop": false,
       "readonly": true
+    },
+    {
+      "caption": "hypoxic depression enabled",
+      "target": "hvd_enabled",
+      "type": "boolean",
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "hypoxic depression pO2 site",
+      "target": "hvd_model",
+      "type": "list",
+      "options": [
+        "BloodCapacitance",
+        "BloodTimeVaryingElastance",
+        "BloodVessel",
+        "HeartChamber"
+      ],
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "hypoxic depression pO2 threshold (mmHg)",
+      "target": "hvd_po2_threshold",
+      "type": "number",
+      "delta": 1,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 200,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "hypoxic depression gain",
+      "target": "hvd_gain",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 20,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "hypoxic depression maximum (0-1)",
+      "target": "hvd_max",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "hypoxic depression time constant (s)",
+      "target": "hvd_tc",
+      "type": "number",
+      "delta": 10,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 3600,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "hypoxic depression factor on drive",
+      "target": "hvd_factor",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
     }
   ],
   "Capacitance": [

@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **472 settable params**, **53 functions**
+Snapshot: **44 model_types**, **478 settable params**, **53 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -233,6 +233,12 @@ _setProp_:
 - `ie_ratio` — insp/exp ratio (number)
 - `rmp_gain_max` — max muscle pressure (mmHg) (number, mmHg, range 0–200) _(extra)_
 - `load_compensation` — load compensation (0-1) (number, 0-1, range 0–1) _(extra)_
+- `hvd_enabled` — hypoxic depression enabled (boolean) _(advanced)_
+- `hvd_model` — hypoxic depression pO2 site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber) _(advanced)_
+- `hvd_po2_threshold` — hypoxic depression pO2 threshold (mmHg) (number, mmHg, range 0–200) _(advanced)_
+- `hvd_gain` — hypoxic depression gain (number, range 0–20) _(advanced)_
+- `hvd_max` — hypoxic depression maximum (0-1) (number, 0-1, range 0–1) _(advanced)_
+- `hvd_tc` — hypoxic depression time constant (s) (number, s, range 0–3600) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 ### Capacitance
