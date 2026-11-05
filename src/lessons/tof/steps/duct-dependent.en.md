@@ -4,4 +4,4 @@ Close the duct with the button below, or with the slider under *Interventions*. 
 
 > What happens to ductal flow, saturation and blood pressure? Why doesn't flow through the RVOT increase to make up for the loss?
 
-**Don't wait too long before the next step.** After about a minute with the duct closed, the oxygen shortage starts to weaken the heart muscle and the blood pressure falls. The longer the heart goes short of oxygen, the deeper it fails and the longer it takes to recover once the duct is reopened. In a real baby a long closure can be fatal. You can always start again with the button on the last step.
+**In the model the circulation holds for now.** The saturation settles at about 40 to 45 %, and the blood pressure stays up because coronary flow rises to keep the heart supplied. The body is still short of oxygen, so lactate builds up slowly. In a real baby this acidosis leads to circulatory failure if the duct stays closed, and that can be fatal. The model doesn't show that failure in the minutes of this lesson.

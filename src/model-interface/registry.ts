@@ -325,6 +325,22 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "delta": 0.1,
       "factor": 1,
       "rounding": 3
+    },
+    {
+      "caption": "gate model",
+      "target": "gate_model",
+      "type": "string",
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "gate property",
+      "target": "gate_prop",
+      "type": "string",
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
     }
   ],
   "AnsEfferent": [
@@ -6013,6 +6029,99 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "delta": 0.1,
       "factor": 1,
       "rounding": 1
+    },
+    {
+      "caption": "coronary regulation enabled",
+      "target": "cor_reg_enabled",
+      "type": "boolean",
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "coronary reference O2 extraction",
+      "target": "cor_ext_ref",
+      "type": "number",
+      "delta": 0.01,
+      "factor": 1,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 1,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "coronary regulation gain (1/s)",
+      "target": "cor_gain",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 5,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "coronary extraction smoothing (s)",
+      "target": "cor_ext_tc",
+      "type": "number",
+      "delta": 0.5,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 0.1,
+      "ul": 60,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "coronary factor minimum (maximal dilation)",
+      "target": "cor_factor_min",
+      "type": "number",
+      "delta": 0.01,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0.01,
+      "ul": 1,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "coronary factor maximum (maximal constriction)",
+      "target": "cor_factor_max",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 1,
+      "ul": 10,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "coronary factor on inflow resistance",
+      "target": "cor_factor",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
+    },
+    {
+      "caption": "coronary O2 extraction",
+      "target": "cor_extraction",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
     }
   ],
   "HeartFunction": [
@@ -6956,6 +7065,52 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 0,
       "ll": 10,
       "ul": 36000
+    },
+    {
+      "caption": "lung ventilation smoothing (s)",
+      "target": "lung_ventilation_tc",
+      "type": "number",
+      "delta": 0.5,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 0.1,
+      "ul": 60,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "fully ventilated from (mL/kg/min)",
+      "target": "ventilated_mv_per_kg",
+      "type": "number",
+      "delta": 10,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 1,
+      "ul": 1000,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "lung ventilation (L/min)",
+      "target": "lung_ventilation",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
+    },
+    {
+      "caption": "unventilated (0-1)",
+      "target": "unventilated",
+      "type": "number",
+      "factor": 1,
+      "rounding": 2,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
     }
   ],
   "Resuscitation": [
