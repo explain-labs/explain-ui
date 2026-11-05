@@ -10414,6 +10414,12 @@ Preliminary values taken while compiling; the formal comparison follows in step 
 Use `node scripts/probe_term_reference.mjs` for the full comparison (`--file` probes a scenario file
 outside `model_definitions/`).
 
+The cross-checks at the end of the probe output include twelve echo-style read-outs with no reference row:
+`lv_dpdt_peak` and `rv_dpdt_peak` (largest rate of chamber pressure rise, mmHg/s), `lv_dpdt_echo` and
+`rv_dpdt_echo` (mean rate while the ventricle-atrium gradient climbs 4→36 mmHg left and 4→16 mmHg right, the
+range a regurgitant jet is timed over at 1→3 and 1→2 m/s), `fo_grad_mean` and `fo_grad_peak` (LA − RA, mmHg), and `lv_ivct`, `lv_ej`, `lv_ivrt`, `rv_ivct`, `rv_ej`, `rv_ivrt`
+(isovolumic contraction, ejection and isovolumic relaxation times from the valve flows, ms).
+
 | Date | Change | Before → after | Basis |
 |---|---|---|---|
 | 2026-10-18 | Brain flow and O₂ use (`scripts/_fix_term_brain_mri.mjs`); freed flow → upper body (RUB) | CBF 144 → 106 mL/min (20 → 15 % of LVO); brain VO₂ 11.0 → 8.1 mL/min (42 → 31 %); extraction unchanged at 35 %; SVC stays 81 | Kooi 2019 term median; Liu 2014 extraction |
