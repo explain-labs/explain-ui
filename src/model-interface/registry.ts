@@ -5655,6 +5655,187 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "rounding": 3,
       "edit_mode": "extra",
       "readonly": true
+    },
+    {
+      "caption": "CO2 reactivity enabled",
+      "target": "co2_enabled",
+      "type": "boolean",
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 reactivity pCO2 site",
+      "target": "co2_model",
+      "type": "list",
+      "options": [
+        "BloodCapacitance",
+        "BloodTimeVaryingElastance",
+        "BloodVessel",
+        "HeartChamber"
+      ],
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 reactivity reference pCO2 (mmHg)",
+      "target": "co2_ref",
+      "type": "number",
+      "delta": 1,
+      "factor": 1,
+      "rounding": 1,
+      "ll": 0,
+      "ul": 150,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 reactivity gain (per mmHg)",
+      "target": "co2_gain",
+      "type": "number",
+      "delta": 0.005,
+      "factor": 1,
+      "rounding": 3,
+      "ll": 0,
+      "ul": 0.2,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 reactivity factor minimum",
+      "target": "co2_factor_min",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 reactivity factor maximum",
+      "target": "co2_factor_max",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 1,
+      "ul": 5,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 reactivity time constant (s)",
+      "target": "co2_tc",
+      "type": "number",
+      "delta": 5,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 600,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "CO2 factor on the CBF target",
+      "target": "co2_factor",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
+    },
+    {
+      "caption": "O2 reactivity enabled",
+      "target": "o2_enabled",
+      "type": "boolean",
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "O2 reactivity O2 content site",
+      "target": "o2_model",
+      "type": "list",
+      "options": [
+        "BloodCapacitance",
+        "BloodTimeVaryingElastance",
+        "BloodVessel",
+        "HeartChamber"
+      ],
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "O2 reactivity reference O2 content (mmol/L)",
+      "target": "o2_ref",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 20,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "O2 reactivity factor minimum",
+      "target": "o2_factor_min",
+      "type": "number",
+      "delta": 0.05,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 0,
+      "ul": 1,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "O2 reactivity factor maximum",
+      "target": "o2_factor_max",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 2,
+      "ll": 1,
+      "ul": 5,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "O2 reactivity time constant (s)",
+      "target": "o2_tc",
+      "type": "number",
+      "delta": 5,
+      "factor": 1,
+      "rounding": 0,
+      "ll": 0,
+      "ul": 600,
+      "edit_mode": "advanced",
+      "build_prop": true,
+      "readonly": false
+    },
+    {
+      "caption": "O2 factor on the CBF target",
+      "target": "o2_factor",
+      "type": "number",
+      "factor": 1,
+      "rounding": 3,
+      "edit_mode": "advanced",
+      "build_prop": false,
+      "readonly": true
     }
   ],
   "Mob": [
