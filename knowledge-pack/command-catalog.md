@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **484 settable params**, **53 functions**
+Snapshot: **44 model_types**, **497 settable params**, **53 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -219,6 +219,19 @@ _setProp_:
 - `autoregulation_gain` — autoregulation gain (1=intact, 0=pressure-passive) (number, 1=intact, 0=pressure-passive, range 0–1)
 - `icp_enabled` — ICP coupling enabled (boolean)
 - `cbv0` — baseline cerebral blood volume (mL) (number, mL, range ≥0) _(advanced)_
+- `co2_enabled` — CO2 reactivity enabled (boolean) _(advanced)_
+- `co2_model` — CO2 reactivity pCO2 site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber) _(advanced)_
+- `co2_ref` — CO2 reactivity reference pCO2 (mmHg) (number, mmHg, range 0–150) _(advanced)_
+- `co2_gain` — CO2 reactivity gain (per mmHg) (number, per mmHg, range 0–0.2) _(advanced)_
+- `co2_factor_min` — CO2 reactivity factor minimum (number, range 0–1) _(advanced)_
+- `co2_factor_max` — CO2 reactivity factor maximum (number, range 1–5) _(advanced)_
+- `co2_tc` — CO2 reactivity time constant (s) (number, s, range 0–600) _(advanced)_
+- `o2_enabled` — O2 reactivity enabled (boolean) _(advanced)_
+- `o2_model` — O2 reactivity O2 content site (list, one of BloodCapacitance/BloodTimeVaryingElastance/BloodVessel/HeartChamber) _(advanced)_
+- `o2_ref` — O2 reactivity reference O2 content (mmol/L) (number, mmol/L, range 0–20) _(advanced)_
+- `o2_factor_min` — O2 reactivity factor minimum (number, range 0–1) _(advanced)_
+- `o2_factor_max` — O2 reactivity factor maximum (number, range 1–5) _(advanced)_
+- `o2_tc` — O2 reactivity time constant (s) (number, s, range 0–600) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:
