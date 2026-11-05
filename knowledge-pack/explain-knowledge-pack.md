@@ -832,7 +832,7 @@ Every scenario (term_neonate_72h values; the set-points are re-anchored per scen
 
 So a fall in pressure (low baroreceptor firing) raises heart rate, vascular tone and contractility, and a rise in pCO2 raises minute ventilation. A fall in pO2 raises it too, through the negative weight on `CR_PO2`.
 
-**Hypoxic bradycardia** (in no shipped scenario): `CR_PO2_HR` (`AA.po2`, set-point a few mmHg below the resting pO2) → `EF_HR_CHEMO` → `Heart.hr_chemo_factor`, with effect 0.5 at firing 0 and 1 at 1, so it only slows the heart. See [Apnea](./Apnea.md).
+**Apnoeic bradycardia:** `CR_PO2_HR` (`AA.po2`) → `EF_HR_CHEMO` → `Heart.hr_chemo_factor`, effect 0.5 at firing 0 and 1 from firing 0.5 up, so it only slows the heart. The afferent is gated by `Respiration.unventilated`, so it is silent while gas moves through the airways. In term_neonate_72h the range is 60 down to 30 mmHg; each ToF scenario scales it to its own resting pO2. The chemoreflex slows the heart only when breathing is absent or ineffective (Henderson-Smart 1986; Daly 1979), while breathing newborn piglets on 10 % O2 speed up (Elnazir 1996). The range and the 50 % floor are model choices: only the timing has data, and that in preterms. See [Apnea](./Apnea.md).
 
 ## Factor system
 
@@ -874,13 +874,16 @@ From `term_neonate_72h.json`, `models.Ans` (trimmed; `components` holds the eigh
 
 ## Usage in the scenarios
 
-One instance in every scenario, with the network above. No shipped scenario has the hypoxic-bradycardia arc.
+One instance in every scenario, with the network above, including the apnoeic-bradycardia arc.
 
 ## References
 
 - Andriessen P, et al. Baroreceptor reflex sensitivity in human neonates: the effect of postmenstrual age. *J Physiol* 2005;568:333–41. doi:10.1113/jphysiol.2005.093641
 - Yiallourou SR, Sands SA, Walker AM, Horne RSC. Postnatal development of baroreflex sensitivity in infancy. *J Physiol* 2010;588:2193–203. doi:10.1113/jphysiol.2010.187070
 - Rigatto H, et al. Ventilatory response to 100% and 15% O2 during wakefulness and sleep in preterm infants. *Early Hum Dev* 1982;7:1–10. doi:10.1016/0378-3782(82)90002-0
+- Daly MD et al. Role of carotid-body chemoreceptors and their reflex interactions in bradycardia and cardiac arrest. *Lancet* 1979. doi:10.1016/s0140-6736(79)91218-2
+- Elnazir B et al. Postnatal development of the pattern of respiratory and cardiovascular response to systemic hypoxia in the piglet. *J Physiol* 1996. doi:10.1113/jphysiol.1996.sp021330
+- Henderson-Smart DJ et al. Incidence and mechanism of bradycardia during apnoea in preterm infants. *Arch Dis Child* 1986. doi:10.1136/adc.61.3.227
 - De Boeck C, Van Reempts P, Rigatto H, Chernick V. Naloxone reduces decrease in ventilation induced by hypoxia in newborn infants. *J Appl Physiol* 1984;56:1507–11. doi:10.1152/jappl.1984.56.6.1507
 
 The baroreflex HR dynamics and the peripheral chemoreceptor weight are set from the references above; the set-points are each scenario's calibrated rest, and the other ranges and gains are model choices.
@@ -912,6 +915,7 @@ BaseModelClass
 | Property | Unit | Default | Description |
 |---|---|---|---|
 | `input_model`, `input_prop` | – | `""` | The quantity sensed, e.g. `AAR` / `pres`, `AA` / `pco2`. |
+| `gate_model`, `gate_prop` | – | `""` | Optional 0–1 gate that scales the sent deviation from the 0.5 set-point: 0 sends the neutral 0.5, and a missing gate counts as 1. `CR_PO2_HR` uses `Respiration.unventilated`. |
 | `min_value` | input unit | 0 | Input at which the firing rate is 0. |
 | `set_value` | input unit | 0 | Set-point: firing rate 0.5. Re-anchored per scenario to its calibrated rest. |
 | `max_value` | input unit | 0 | Input at which the firing rate is 1. |
@@ -982,7 +986,7 @@ From `term_neonate_72h.json`, `models.Ans.components.BR_MAP` (trimmed to the con
 
 ## Usage in the scenarios
 
-`BR_MAP`, `CR_PCO2`, `CR_PO2` and `CR_PH` in every scenario; `CR_PO2_HR` (hypoxic bradycardia) in none. Their settings are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
+`BR_MAP`, `CR_PCO2`, `CR_PO2`, `CR_PH` and `CR_PO2_HR` (apnoeic bradycardia) in every scenario. Their settings are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
 
 ## References
 
@@ -1084,7 +1088,7 @@ From `term_neonate_72h.json`, `models.Ans.components.EF_HR` (trimmed to the conf
 
 ## Usage in the scenarios
 
-`EF_HR`, `EF_SVR`, `EF_HEART` and `EF_MV` in every scenario; `EF_HR_CHEMO` (hypoxic bradycardia) in none. Their targets, ranges and time constants are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
+`EF_HR`, `EF_SVR`, `EF_HEART`, `EF_MV` and `EF_HR_CHEMO` (apnoeic bradycardia) in every scenario. Their targets, ranges and time constants are tabled in [Ans → The reflex network](./Ans.md#the-reflex-network-in-the-scenarios).
 
 ## References
 
@@ -1169,7 +1173,7 @@ Each step:
 
 **Desaturation and bradycardia** are emergent:
 - the lungs stop refreshing alveolar gas, so [GasExchanger](./GasExchanger.md) loads less O2 and the arterial saturation falls;
-- where the scenario has one, a pO2 heart-rate chemoreceptor (`CR_PO2_HR`, reading `AA.po2`) drives `EF_HR_CHEMO` onto `Heart.hr_chemo_factor` (see [Ans](./Ans.md));
+- a pO2 heart-rate chemoreceptor (`CR_PO2_HR`, reading `AA.po2`) drives `EF_HR_CHEMO` onto `Heart.hr_chemo_factor` (see [Ans](./Ans.md)); It is gated by `Respiration.unventilated`, so it acts only while no gas moves through the airways.
 - its set-point is a few mmHg below the baseline pO2, so the reflex is neutral at rest.
 
 ## Factor system
@@ -2418,15 +2422,17 @@ It owns `AA_BR_ART.r_factor_ps` (inflow), and writes the non-persistent `BR_VEN_
   | 2 % CO2, 10 min (PaCO2 42.4, O2 reactivity not yet added) | 33.4 | not measured | 0.27 |
   | 4 % CO2, 10 min (PaCO2 47.3) | 39.2 | +31 % | 0.24 |
   | Drive ×1.7, 10 min (PaCO2 31.9) | 21.0 | −29 % | 0.43 |
-  | FiO2 0.15, 2 min | 26.9 | −14 % | 0.36 |
-  | FiO2 0.15, 15 min (SaO2 90 %) | 31.6 | −2 % | 0.31 |
-  | FiO2 0.12, 2 min | 26.2 | −23 % | 0.40 |
-  | FiO2 0.12, 15 min (SaO2 67 %) | 44.2 | +2 % | 0.30 |
-  | FiO2 1.0, 15 min (PaCO2 35.2) | 22.8 | −16 % | 0.37 |
+  | FiO2 0.15, 2 min | 26.8 | −14 % | 0.36 |
+  | FiO2 0.15, 30 min (SaO2 91 %, PaCO2 36.9) | 28.6 | −10 % | 0.34 |
+  | FiO2 0.12, 2 min | 25.6 | −23 % | 0.40 |
+  | FiO2 0.12, 30 min (SaO2 82 %, PaCO2 34.0) | 27.9 | −21 % | 0.39 |
+  | FiO2 0.10, 30 min (SaO2 58 %, PaCO2 33.3) | 37.6 | −25 % | 0.41 |
+  | FiO2 1.0, 30 min (PaCO2 35.2) | 22.8 | −16 % | 0.37 |
 
-  With CO2 reactivity alone, FiO2 0.12 at 15 min gave CBF 30.9, delivery −29 % and extraction 0.43. With both switched off the model matches the version before either was added.
-- **Early dip in hypoxia.** Hypoxic hyperventilation lowers PaCO2 before O2 content has fallen far, so CBF first falls. At FiO2 0.12 brain capillary O2 stays below its value without reactivity for about 4 minutes, then above it. No neonatal data confirm or refute this dip.
-- **Severe hypoxia.** At FiO2 0.10 the circulation collapses at 10–12 min (MAP about 26) and then cycles, with or without this reactivity; the raised CBF target cannot be met once pressure falls.
+  With both switched off the model matches the version before either was added.
+- **In sustained hypoxia the two effects pull apart, so O2 delivery is not constant.** Since `Breathing.hvd_max` went to 0.5, hypoxia keeps PaCO2 low (33–37), which offsets the O2 rise: CBF stays below rest at FiO2 0.15 and 0.12, and rises only from about FiO2 0.10. The lamb data behind the O2 rule are isocapnic, and Massik's lower PaCO2 was 33, so the size of this offset at hypocapnia is an assumption of multiplying the factors.
+- **Early dip in hypoxia.** Hypoxic hyperventilation lowers PaCO2 before O2 content has fallen far, so CBF first falls (about −14 % at 2 min, FiO2 0.15). No neonatal data confirm or refute this dip.
+- **Severe hypoxia.** The raised target cannot be met once pressure falls (FiO2 0.07 at 30 min: MAP 44, CBF 25.7), and from about FiO2 0.09 the capillary O2 becomes very low with MAP still normal (0.94 mmol/L at 30 min, MAP 58).
 - **One cerebral bed:** no regional flow, no venous haemorrhage model.
 
 ## Example definition (JSON)
@@ -2515,7 +2521,7 @@ BaseModelClass
 | `hvd_model` | – | `"AA"` | Arterial compartment whose pO2 is sensed. |
 | `hvd_po2_threshold` | mmHg | 70 | The depression grows as pO2 falls below this (term rests at ~75). |
 | `hvd_gain` | – | 2.0 | Drive reduction per fractional pO2 deficit below the threshold. |
-| `hvd_max` | – | 0.8 | Largest fractional reduction of the drive. |
+| `hvd_max` | – | 0.5 | Largest fractional reduction of the drive (see below). |
 | `hvd_tc` | s | 120 | Time constant of the depression (onset and offset). |
 | `hvd_factor` | – | 1.0 | Applied factor on the drive (state, saved; 1 = none). |
 | `hox_enabled` | boolean | `true` | Late rise of the drive under hyperoxia (below). |
@@ -2562,6 +2568,8 @@ Under sustained hypoxaemia the newborn's ventilation rises within a minute (the 
 ```
 1 − min(hvd_gain · (hvd_po2_threshold − pO2) / hvd_po2_threshold, hvd_max)     while pO2 < hvd_po2_threshold, else 1
 ```
+
+`hvd_max` was 0.8 until 2026-11-05. At FiO₂ 0.10 the drive then fell to 0.2, ventilation returned to its resting level, PaCO2 rose to 40 and SaO2 kept falling (22 % at 30 min, lactate 10). With 0.5, FiO₂ 0.10 settles at ventilation +15 %, PaCO2 33, SaO2 58 % at 30 min and lactate 2.1, against piglets at about +10 % at 10 min (Soliz 1994; Suguihara 1994 found half above baseline and half below) and SaO2 59 ± 12 % in ventilated piglets (Groner 1997). The other way: term babies born at 3,800 m had the same ventilation as lowland babies (Mortola 1992). FiO₂ 0.15 stays close (+5 % at 5 min, 30 min SaO2 91.4 %); FiO₂ 0.12 settles at SaO2 82 % (67 % before). The numbers in the next sentence date from `hvd_max` 0.8.
 
 term_neonate_72h (re-validation): FiO₂ 0.15 → ventilation +16 % at 30 s, +18 % at 1 min, back to +4 % by 5 min (12 % below the peak; data ~14–16 %); the chemoreflex re-drives against the depression (factor 0.51 at 5 min), so the net fall is smaller than the factor. FiO₂ 0.07 (`probe_lactate`): pH 7.44 at 1 min (early hyperventilation), then 7.33 at 7 min as the depression lets the lactic acidosis show. Without it, the stronger peripheral chemoreflex of re-validation (l) kept that baby alkalotic (pH 7.41 at 7 min).
 
@@ -2723,6 +2731,10 @@ The term breathing pattern (rate, tidal volume, minute ventilation, Ti/Ttot, pea
 - Rigatto H, Desai U, Leahy F, Kalapesi Z, Cates D. The effect of 2% CO2, 100% O2, theophylline and 15% O2 on "inspiratory drive" and "effective" timing in preterm infants. *Early Hum Dev* 1981;5:63–70. doi:10.1016/0378-3782(81)90071-2 (2 % CO2: Vt up, rate little changed)
 
 - De Boeck C, Van Reempts P, Rigatto H, Chernick V. Naloxone reduces decrease in ventilation induced by hypoxia in newborn infants. *J Appl Physiol* 1984;56:1507–11. doi:10.1152/jappl.1984.56.6.1507 (term newborns on 15 % O2: ventilation ~14 % below its early peak)
+- Groner JI. Endotoxin and transient hypoxia cause severe acidosis in the piglet. 1997. doi:10.1016/s0022-3468(97)90413-9
+- Mortola JP et al. Ventilation and gaseous metabolism in infants born at high altitude. 1992. doi:10.1164/ajrccm/146.5_pt_1.1206
+- Soliz A et al. Effect of amino acid infusion on the ventilatory response to hypoxia in protein-deprived neonatal piglets. 1994. doi:10.1203/00006450-199403000-00007
+- Suguihara C et al. Changes in ventilation and oxygen consumption during acute hypoxia in sedated newborn piglets. 1994. doi:10.1203/00006450-199405000-00004
 - Rehan V, Haider AZ, Alvaro RE, et al. The biphasic ventilatory response to hypoxia in preterm infants is not due to a decrease in metabolism. *Pediatr Pulmonol* 1996;22:287–94. doi:10.1002/(SICI)1099-0496(199611)22:5<287::AID-PPUL1>3.0.CO;2-I (−16 ± 2 % from the peak at 5 min; likely central)
 
 ````
@@ -5323,7 +5335,7 @@ BaseModelClass
 | `hr_mob_factor` | – | 1.0 | `Mob`: myocardial-oxygen-balance effect on rate. |
 | `hr_temp_factor` | – | 1.0 | `Thermoregulation`: temperature effect on rate. |
 | `hr_drug_factor` | – | 1.0 | `Drugs`: chronotropy. |
-| `hr_chemo_factor` | – | 1.0 | `EF_HR_CHEMO` efferent: hypoxic bradycardia (in no shipped scenario). |
+| `hr_chemo_factor` | – | 1.0 | `EF_HR_CHEMO` efferent: apnoeic bradycardia. |
 | `hr_cat_factor` | – | 1.0 | [Hormones](./Hormones.md): circulating catecholamines (sustained rise after a blood loss). |
 
 ### Outputs
@@ -7156,6 +7168,11 @@ BaseModelClass
 | `hr_factor_min`, `hr_factor_max`, `hr_tc` | –, s | 0.01, 1, 5 | Heart-rate channel range and time constant. |
 | `cont_factor_min`, `cont_factor_max`, `cont_tc` | –, s | 0.01, 1, 5 | Contractility channel. |
 | `ans_factor_min`, `ans_factor_max`, `ans_tc` | –, s | 0.01, 1, 5 | Sympathetic-responsiveness channel. |
+| `cor_reg_enabled` | boolean | `true` | Coronary regulation (below). |
+| `cor_ext_ref` | – | 0 | Fractional O2 extraction held; ≤ 0 = captured 30 s after build. Stored in every scenario at its resting value. |
+| `cor_gain` | 1/s | 0.2 | Rate of change of ln(factor) per unit of extraction error. |
+| `cor_ext_tc` | s | 2 | Smoothing of the sensed extraction. |
+| `cor_factor_min`, `cor_factor_max` | – | 0.12, 2.0 | Limits on the factor: maximal dilation and constriction. |
 
 ### Outputs
 
@@ -7170,6 +7187,8 @@ BaseModelClass
 | `o2_deficit` | mmol/s | Demand `COR` could not supply this step (0 at rest). |
 | `hr_factor`, `cont_factor`, `ans_activity_factor` | – | Applied hypoxia effects (1 = none). |
 | `hr_g`, `cont_g`, `ans_g` | – | Hypoxia gains (rebuilt every step). |
+| `cor_factor` | – | Applied factor on `AA_COR.r_factor_ps` (saved; 1 = neutral). |
+| `cor_extraction` | – | Smoothed fractional O2 extraction, `1 − COR.to2 / AA.to2`. |
 
 ## Calculation
 
@@ -7188,9 +7207,15 @@ Each step (skipped if `AA`, `AA_COR`, `COR`, `Heart`, `LV` or `RV` is missing):
    - each chamber's `el_max_mob_factor` = `cont_factor` (LV, RV, LA and the right-atrial halves);
    - `Heart.ans_activity_factor` = `ans_activity_factor` (scales the sympathetic drive the Heart passes to the chambers).
 
+5. **Coronary regulation:** extraction above `cor_ext_ref` dilates and below it constricts:
+   ```
+   cor_factor → cor_factor · exp(−cor_gain · (cor_extraction − cor_ext_ref) · dt)     clamped to the limits
+   AA_COR.r_factor_ps = cor_factor
+   ```
+
 ## Factor system
 
-None of its own; it writes the hypoxia channels above. `el_max_mob_factor` is one of HeartChamber's additive `el_max` layers.
+None of its own; it writes the hypoxia channels above and `AA_COR.r_factor_ps`. `el_max_mob_factor` is one of HeartChamber's additive `el_max` layers.
 
 ## Inputs and outputs
 
@@ -7208,6 +7233,9 @@ None of its own; it writes the hypoxia channels above. `el_max_mob_factor` is on
 
   The term flow (25.9 mL/min since the MVO2 raise of 2026-10-27, `scripts/_fix_term_mvo2.mjs`) sits at the upper end of the ~18–26 mL/min whole-heart flow that Aburawi's healthy-neonate LAD flow of 8.2 mL/min suggests. The flow is a fixed resistance (plus the systolic compression): it does not follow MVO2 when demand rises (no metabolic coronary regulation).
 - **The hypoxia effects start only at a very low `COR.to2`** (0.2 mmol/L, ~2 % saturation). At rest they are inactive, and they engage only in profound coronary hypoxia.
+- **Coronary regulation holds extraction, so O2 delivery stays matched to O2 use.** With a fixed resistance the heart's demand emptied `COR` once `AA.to2` fell to about 5.6 mmol/L (SaO2 about 57 %), and Mob then collapsed the circulation: FiO₂ 0.10 reached MAP 26 at 10–12 min and cycled. Ventilated newborn lambs raise LV flow by 277 % at maximal hypoxemia, with LV O2 delivery and consumption maintained (Bernstein 1990; also Fisher 1983, 1984), and call FiO₂ 0.09 moderate (Sidi 1988). Now flow rises as far as 3.75 × rest at the dilation limit, and only past it do the hypoxia effects start. FiO₂ 0.10 at 30 min: MAP 60, HR 119, SaO2 58 %, coronary flow 47.5 mL/min. `cor_gain` and the limits are model choices; the maximal flow sits by construction close to Bernstein's 3.77 ×. Myocardial O2 use stays independent of arterial O2, though it rises in hypoxemic lambs (Fisher 1989).
+- **A cyanotic patient's own resting extraction counts as neutral** (ToF 0.68–0.80), which assumes adaptation. A cyanotic baby's real coronary bed may instead be dilated at rest.
+- **Tolerance may now be too good.** `tof_severe` with the duct closed holds MAP 61 at 20 min (SaO2 40 %, lactate 5.7, pH 7.30), where it used to collapse within 3 min. A slow course is plausible, but the model has no acidotic depression of the heart, so nothing ends it.
 - **Hypoxia depresses contractility through `cont_factor` only.** `ans_activity_factor` scales just the sympathetic deviation from rest (`Heart` passes `1 + (ans_activity − 1) · ans_activity_factor`), so it removes the adrenergic reserve but cannot push `el_max` below rest. Before 2026-10-30 `Heart` passed `ans_activity · ans_activity_factor`: in the chambers' additive `el_max` sum that counted the hypoxia twice and drove contractility to zero after ~2 min of severe hypoxia, with no recovery (e.g. `tof_severe` with the duct closed for 3 min).
 - **Heart weight follows body weight only** (no hypertrophy).
 
@@ -7254,6 +7282,9 @@ Until 2026-10-27 the term baby had the default (3.7e-5): 10.7 mL/100 g/min, an a
 
 - Aburawi EH, Malcus P, Thuring A, Fellman V, Pesonen E. Coronary flow in neonates with impaired intrauterine growth. *J Am Soc Echocardiogr* 2012;25(3):313–8. doi:10.1016/j.echo.2011.11.019 (healthy controls: LAD flow 8.2 ± 3.0 mL/min at 1 week).
 - Yasuoka K, Harada K, Tamura M, Takada G. Left anterior descending coronary artery flow and its relation to age in children. *J Am Soc Echocardiogr* 2002;15:69–75. doi:10.1067/mje.2002.115537 (LAD flow per gram of LV highest in young infants).
+- Bernstein D et al. 1990, myocardial and systemic oxygenation during severe hypoxemia in ventilated lambs. doi:10.1152/ajpheart.1990.258.6.h1856
+- Fisher DJ. 1983, left ventricular oxygen consumption and function in hypoxemia in conscious lambs, doi:10.1152/ajpheart.1983.244.5.h664; 1984, increased regional myocardial blood flows and oxygen deliveries during hypoxemia in lambs, doi:10.1203/00006450-198407000-00007; 1989, doi:10.1203/00006450-198906000-00007.
+- Sidi D et al. 1988, effect of beta-adrenergic receptor blockade on responses to acute hypoxemia in lambs. doi:10.1203/00006450-198802000-00020
 - Smolich JJ, Berger PJ, Walker AM. Interrelation between ventricular function, myocardial blood flow, and O2 consumption changes at birth in lambs. *Am J Physiol* 1996;270:H741–9. doi:10.1152/ajpheart.1996.270.2.H741 (LV myocardial flow 234 → 199 mL/min/100 g fetus → 4 h; LV AV O2 difference 3.6 → 7.5 mL/dL).
 
 ````
@@ -8649,6 +8680,16 @@ Multipliers around 1; a change is added as a delta to the members' persistent la
 | `res_upper_airways_factor` | 1.0 | upper airways' `r_factor_ps` |
 | `res_lower_airways_factor` | 1.0 | lower airways' `r_factor_ps` |
 | `gex_factor` | 1.0 | gas exchangers' `dif_o2_factor_ps` and `dif_co2_factor_ps` |
+
+### Config: lung ventilation
+
+| Property | Unit | Default | Description |
+|---|---|---|---|
+| `upper_airway_paths` | – | `["MOUTH_DS", "VENT_ETTUBE"]` | Gas paths from the outside to the dead space. |
+| `lung_ventilation_tc` | s | 3 | Smoothing of the measured ventilation. |
+| `ventilated_mv_per_kg` | mL/kg/min | 100 | Ventilation from which the lungs count as fully ventilated. |
+| `lung_ventilation` | L/min | – | Output: half the mean of the smaller of the upper and lower airway flows, so an effort against a closed airway counts as none. |
+| `unventilated` | – | – | Output: 1 with no gas moving, 0 from `ventilated_mv_per_kg` up. Gate of the apnoeic bradycardia ([Ans](./Ans.md)). After breathing stops it reaches about 0.5 within 5 s and 0.9 within 10 s; it returns to 0 within 5 s of breathing again. |
 
 ### Config: series dead space
 
@@ -10399,6 +10440,9 @@ outside `model_definitions/`).
 | 2026-11-02 | Glucose interstitial pool, also the code default: `isf_volume` 0.31 → 0.36 L/kg (the old value subtracted the whole blood from the ECF, red cells included; now the plasma, as Interstitium); `insulin_gain` 0.54 → 0.6 to keep the K target | Rest unchanged (this page's checks and the vitals identical). D10 2 mL/kg: K 1.56 → 1.53 %/min (1.38 without the retune). Hepatic output stopped: 1.52 → 1.73 mmol/L at 90 min |
 | 2026-11-02 | Late rise of ventilation under hyperoxia, new in Breathing: `hox_factor` relaxes over 120 s towards 1 + 1.3 · min((pO2 − 90)/210, 1) above a pO2 of 90 mmHg; `hox_max` fitted to PaCO2, the rest are model choices | FiO₂ 1.0: first 30 s −12 % (was −16 %; −9.8 %), 10 min MV +10 % (was −14 %; +31 %), PaCO2 35.3 (was 47.4), pH 7.404 (was 7.299). Rest and FiO₂ 0.15 unchanged | Davi 1980 (doi:10.1159/000241346), Rigatto 1982 (doi:10.1016/0378-3782(82)90002-0), Hertzberg 1987 (doi:10.1136/adc.62.12.1238) |
 | 2026-11-05 | CO2 and O2 reactivity, new in Brain: the flow held is `cbf_setpoint · co2_factor · o2_factor`, with `co2_factor` 1 + 0.04 · (pCO2 − ref) and `o2_factor` ref / `to2` (clamps 0.8–2.0), both over 30 s; `co2_ref` and `o2_ref` stored per scenario | Rest unchanged. 4 % CO2: CBF +31 % (was 0). FiO₂ 0.12 at 15 min: CBF 44.2 (was 29.9), brain capillary O₂ 4.64 (was 3.68), delivery +2 % of rest (was −31 %). FiO₂ 1.0 at 15 min: CBF −24 % | Koehler 1982 (doi:10.1152/ajpheart.1982.243.1.h27), 1984 (doi:10.1038/jcbfm.1984.16), Borel 1987 (doi:10.1152/ajpheart.1987.253.6.h1342), Massik 1989 (doi:10.1152/jappl.1989.66.3.1065), Pryds 1989 (doi:10.1016/s0022-3476(89)80301-4); newborn lambs and preterm infants, abstracts only |
+| 2026-11-05 | Coronary regulation, new in Mob: integral control of `AA_COR.r_factor_ps` on the fractional O2 extraction (held at 0.5523), factor 0.12–2.0 | Rest unchanged. FiO₂ 0.10 no longer collapses; hyperoxia lowers coronary flow to 23 (26 at rest) | Bernstein 1990 (doi:10.1152/ajpheart.1990.258.6.h1856), Fisher 1983, 1984, Sidi 1988; lambs, abstracts only |
+| 2026-11-05 | `Breathing.hvd_max` 0.8 → 0.5, also the code default | FiO₂ 0.10 at 30 min: ventilation +15 % (was −5 %), SaO₂ 58 % (22 %), PaCO₂ 33 (40), lactate 2.1 (10.2). FiO₂ 0.12: SaO₂ 82 % (67 %). FiO₂ 0.15 at 5 min: +5 % (+2 %) | Soliz 1994 (doi:10.1203/00006450-199403000-00007), Suguihara 1994 (doi:10.1203/00006450-199405000-00004), Groner 1997 (doi:10.1016/s0022-3468(97)90413-9); against: Mortola 1992 (doi:10.1164/ajrccm/146.5_pt_1.1206) |
+| 2026-11-05 | Apnoeic bradycardia, now in every scenario: `CR_PO2_HR` → `EF_HR_CHEMO`, gated by the new `Respiration.unventilated`; pO2 range 60–30 mmHg, floor 0.5, model choices | Apnoea: HR 106 at 20 s, 92 at 30 s, 75 at 60 s, 59 at 120 s; 116 at 5 s after 60 s of apnoea, with SaO₂ 77 %. Obstructed airway and ventilator disconnection alike | Henderson-Smart 1986 (doi:10.1136/adc.61.3.227; preterm), Daly 1979 (doi:10.1016/s0140-6736(79)91218-2) |
 
 ## Open items
 
@@ -10409,7 +10453,9 @@ outside `model_definitions/`).
 - **Acid–base response to a lactic load is too weak:** a 35 % bleed raises lactate to 2.9 mmol/L but pH stays 7.36–7.39; at 50 % with lactate 3.4 (before the venous revert) pH was 7.357 against 7.365 at rest. Separately, a metabolic acidosis gets no respiratory compensation: `CR_PH` has no efferents, so lactate held +5 mmol/L gives pH 7.28, BE −7.2 and PaCO2 39.7, ventilation at baseline by 5 min (Winter's formula, an adult one, gives ~35.6). Lambs do hyperventilate as arterial pH falls (Bureau 1979, doi:10.1152/jappl.1979.47.6.1212); newborn numbers are still needed.
 - **Kidney after a 20 % bleed:** 30 min after the loss the kidney ends over-perfused (GFR above rest) where Smith 2003 (doi:10.1152/japplphysiol.00492.2003) finds GFR falls further; `probe_renal.mjs` still uses an instant volume scaling, which confounds it.
 - **ADH response to blood loss is flat** (activity 1.13–1.28 where lamb AVP rises ~18×; activity is not concentration, but the RAAS/ADH balance looks wrong).
-- **Moderate hypoxia collapses the circulation:** at FiO₂ 0.10 MAP falls to about 26 mmHg at 10–12 min, then cycles between about 26 and 55 with HR 60–85. It predates the Brain CO2 and O2 reactivity (same on the commit before it) and has not been traced or compared with data. FiO₂ 0.12 settles at SaO₂ 67 %, also unchecked.
+- **Hypoxic metabolism:** newborn animals lower their O2 use in hypoxia (Mortola 1989, doi:10.1016/0034-5687(89)90140-0; Suguihara 1994), and the model does not. Lowering it by 25 % on its own did not stop the SaO₂ drift that `hvd_max` 0.5 addressed, so it was not the main cause.
+- **Recovery from long apnoea looks too easy:** after 180 s of apnoea (sinus rate 0, SaO₂ 8 %, MAP 27) HR is 90 and MAP 58 only 15 s after breathing resumes. Main recovered in about 30–60 s. Real recovery probably needs resuscitation; no term time course was found.
+- **Acidosis doesn't depress the heart:** `tof_severe` with the duct closed holds MAP 61 at 20 min, and FiO₂ 0.09 holds MAP 58 at 30 min at SaO₂ 29 %.
 
 ```
 
