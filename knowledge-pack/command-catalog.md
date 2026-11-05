@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **497 settable params**, **53 functions**
+Snapshot: **44 model_types**, **505 settable params**, **53 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -597,6 +597,12 @@ _setProp_:
 - `is_enabled` — enabled (boolean)
 - `mech_efficiency` — myocardial mechanical efficiency (0-1) (number, 0-1, range 0.05–1) _(extra)_
 - `caloric_equiv_o2` — caloric equivalent of O2 (J/mL) (number, J/mL, range 15–25) _(advanced)_
+- `cor_reg_enabled` — coronary regulation enabled (boolean) _(advanced)_
+- `cor_ext_ref` — coronary reference O2 extraction (number, range 0–1) _(advanced)_
+- `cor_gain` — coronary regulation gain (1/s) (number, 1/s, range 0–5) _(advanced)_
+- `cor_ext_tc` — coronary extraction smoothing (s) (number, s, range 0.1–60) _(advanced)_
+- `cor_factor_min` — coronary factor minimum (maximal dilation) (number, maximal dilation, range 0.01–1) _(advanced)_
+- `cor_factor_max` — coronary factor maximum (maximal constriction) (number, maximal constriction, range 1–10) _(advanced)_
 - `mob_active` — myocardial oxygen balance (boolean)
 - `to2_min` — minimal to2 (mmol/l) (number, mmol/l)
 - `to2_ref` — reference to2 (mmol/l) (number, mmol/l)
@@ -687,6 +693,8 @@ _setProp_:
 - `atelectasis_tau_close` — atelectasis derecruitment time constant (s) (number, s, range 1–600) _(advanced)_
 - `atelectasis_resorb_tau_air` — resorption time constant, trapped air (s) (number, s, range 10–36000) _(advanced)_
 - `atelectasis_resorb_tau_o2` — resorption time constant, trapped oxygen (s) (number, s, range 10–36000) _(advanced)_
+- `lung_ventilation_tc` — lung ventilation smoothing (s) (number, s, range 0.1–60) _(advanced)_
+- `ventilated_mv_per_kg` — fully ventilated from (mL/kg/min) (number, mL/kg/min, range 1–1000) _(advanced)_
 - `is_enabled` — enabled (boolean) _(all)_
 
 _call_:

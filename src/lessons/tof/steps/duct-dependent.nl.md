@@ -4,4 +4,4 @@ Sluit de ductus met de knop hieronder, of met de schuif onder *Interventies*. He
 
 > Wat gebeurt er met de ductusstroom, de saturatie en de bloeddruk? Waarom neemt de stroming door de RVOT niet toe om het verlies op te vangen?
 
-**Wacht niet te lang met de volgende stap.** Na ongeveer een minuut met een gesloten ductus begint het zuurstoftekort de hartspier te verzwakken en daalt de bloeddruk. Hoe langer het hart zuurstof tekortkomt, hoe dieper het faalt en hoe langer het herstel duurt als de ductus weer opengaat. Bij een echte baby kan een lange sluiting fataal zijn. Je kunt altijd opnieuw beginnen met de knop bij de laatste stap.
+**In het model houdt de circulatie voorlopig stand.** De saturatie stabiliseert rond 40 tot 45 %, en de bloeddruk blijft op peil doordat de coronaire doorbloeding stijgt om het hart van zuurstof te voorzien. Het lichaam komt nog steeds zuurstof tekort, dus het lactaat loopt langzaam op. Bij een echte baby leidt deze acidose tot circulatoir falen als de ductus gesloten blijft, en dat kan fataal zijn. Dat falen laat het model niet zien in de minuten van deze les.
