@@ -7717,7 +7717,7 @@ Before birth the duct carries most of the right ventricle's output past the flui
 
 The **size** of the duct sets how much flows, and its **shape** sets the Doppler picture:
 - **Large, unrestrictive duct:** low flow velocity, aortic and pulmonary pressures nearly equal, flow following the pressure difference over the cycle.
-- **Restrictive duct (narrow, short throat):** a fast continuous jet (2–3 m/s) over a large pressure difference.
+- **Restrictive duct (narrowed at the pulmonary end):** a fast continuous jet (2.5–4 m/s) over a large pressure difference. The velocity **rises** as the duct closes, because a short narrowing turns the aorta–pulmonary pressure difference into jet speed. Catheter studies show that ductal Doppler follows the instantaneous pressure difference over the whole beat: 4v² against the Ao–MPA gradient has slope 1.03 at peak, 1.06 mean and 1.12 at end-diastole (Musewe 1987, 70 % of ducts narrowest at the pulmonary end).
 
 Prostaglandin E1 keeps a constricting duct open (duct-dependent heart disease).
 
@@ -7734,10 +7734,11 @@ BaseModelClass
 
 | Property | Unit | Default | Description |
 |---|---|---|---|
-| `diameter_ao_max` | mm | 3.0 | Fully open diameter at the aortic end. |
-| `diameter_pa_max` | mm | 2.0 | Fully open diameter at the pulmonary (narrowest) end. **Equal to `diameter_ao_max` in every shipped scenario**, so the duct is a cylinder there. |
-| `diameter_relative` | – | 0.0 | Patency fraction 0–1, scaling both ends together; 0 = closed. term_neonate_72h 0. |
-| `length` | mm | 20 | Length of the duct (the Poiseuille term). A restrictive jet needs a short throat (~1–2 mm). term_neonate_72h 14. |
+| `diameter_ao_max` | mm | 3.0 | Diameter of the aortic ampulla. It stays open while the duct constricts. |
+| `diameter_pa_max` | mm | 2.0 | Fully open diameter at the pulmonary (narrowest) end. **Equal to `diameter_ao_max` in every shipped scenario**, so the fully open duct is a cylinder. |
+| `diameter_relative` | – | 0.0 | Patency fraction 0–1 of the **pulmonary end**; 0 = closed. term_neonate_72h 0. |
+| `length` | mm | 20 | Total length of the duct (ampulla plus constriction). term_neonate_72h 14. |
+| `constriction_length` | mm | 2 | Length of the pulmonary-end segment that narrows as the duct closes; the rest is ampulla. Clamped to `length`. Set to 2 mm because it keeps 4v²/ΔP at 0.90–0.95 for 0.25–2 mm in term_neonate_72h; no measured value was found (NeoCardioLab: a "localized narrowing" at the pulmonary end). |
 | `discharge_coeff` | – | 0.9 | Vena-contracta coefficient of the pulmonary-end orifice; lower = tighter jet. 0.9 in every shipped scenario. |
 
 ### Set by other models
@@ -7752,8 +7753,8 @@ BaseModelClass
 | Property | Unit | Description |
 |---|---|---|
 | `diameter_relative_eff` | – | `diameter_relative · diameter_drug_factor`. |
-| `diameter_ao`, `diameter_pa` | mm | Current diameters at both ends. |
-| `res` | mmHg·s/L | Viscous resistance of the duct (conical Poiseuille). |
+| `diameter_ao`, `diameter_pa` | mm | Current diameters of the ampulla and the pulmonary end. |
+| `res` | mmHg·s/L | Viscous resistance of the duct (ampulla cylinder plus constricting cone). |
 | `bernoulli_b` | mmHg·s²/L² | Orifice coefficient at the pulmonary end (see [Orifice](./Orifice.md)). |
 | `flow` | L/s | Shunt flow; positive = left-to-right (aorta → pulmonary artery). |
 | `flow_ao`, `flow_pa` | L/s | Aliases of `flow` (kept for older probes). |
@@ -7768,15 +7769,16 @@ BaseModelClass
 Each step (skipped if `AAR_DA` is missing):
 
 1. **Closed duct** (`diameter_relative` exactly 0). `AAR_DA` is sealed (`no_flow`, resistance 10⁸) and the outputs are zeroed.
-2. **Geometry.**
+2. **Geometry: closure from the pulmonary end.**
    ```
-   d_ao = min(diameter_relative · drug_factor · diameter_ao_max, diameter_ao_max)
-   d_pa = likewise with diameter_pa_max
+   d_pa = min(diameter_relative · drug_factor · diameter_pa_max, diameter_pa_max)
+   d_ao = max(diameter_ao_max, d_pa)                     (the ampulla stays open)
    ```
-3. **Viscous resistance** over a linearly tapered cone (Hagen–Poiseuille integrated along the length):
+3. **Viscous resistance** of two segments in series: the ampulla, a cylinder of `d_ao` over `length − constriction_length`, and the constriction, a cone from `d_ao` to `d_pa` over `constriction_length` (Hagen–Poiseuille integrated along the taper):
    ```
-   res = 8·η·L / (3π) · (r₁² + r₁·r₂ + r₂²) / (r₁³ · r₂³)        (a cylinder when r₁ = r₂)
+   res = 8·η·L_amp / (π·r_ao⁴)  +  8·η·L_c / (3π) · (r_ao² + r_ao·r_pa + r_pa²) / (r_ao³ · r_pa³)
    ```
+   With `d_ao = d_pa` (fully open, equal ends) this is one cylinder of the full length, as in earlier versions.
 4. **Bernoulli loss** at the pulmonary end: `B = K_BERNOULLI / (Cd · π·r_pa²)²`.
 5. **Resistor:** `AAR_DA.r_for = AAR_DA.r_back = res + B·|Q_prev|`, with `r_k = 0`. The quadratic loss is linearised with the previous step's flow (semi-implicit, stable). It differs from the exact `res·Q + B·Q²` by about 1 % of the Bernoulli term per 0.5 ms step (see [Shunts](./Shunts.md#calculation)).
 6. **Velocities:**
@@ -7785,7 +7787,7 @@ Each step (skipped if `AAR_DA` is missing):
    - then the per-beat envelope is updated.
 
 **Doppler velocity.** Because `B·Q²` is the kinetic (Bernoulli) loss, `velocity_doppler` is the velocity through the vena contracta, consistent across the whole closure trajectory. The viscous loss along the duct doesn't accelerate the blood, so it isn't attributed to the jet. Two consequences:
-- a **long, narrow duct** is viscous-limited: low flow and low velocity even across a large gradient;
+- a **long, narrow duct** is viscous-limited: low flow and low velocity even across a large gradient. Narrowing only a short pulmonary-end segment avoids this, so the velocity follows the pressure difference as in the catheter data. Before `constriction_length`, `diameter_relative` narrowed the whole 14 mm duct and 4v²/ΔP fell to 0.23 at 1 mm and 0.02 at 0.5 mm, so the velocity fell as the duct closed;
 - the jet can't exceed `√(gradient / 3.975)`: a faster jet needs a larger aorta–pulmonary pressure difference, not a different duct geometry.
 
 Earlier versions reported other velocity outputs (from a separate `DA` compartment and the old 4·v² rule); they were replaced by this single orifice velocity, consistent with [Shunts](./Shunts.md) and [Orifice](./Orifice.md).
@@ -7802,12 +7804,14 @@ None of its own. It writes the **base** `r_for`/`r_back`/`r_k`/`no_flow` of `AAR
 - **Read by:**
   - `probe_vitals` (duct shunt), and `Monitor` through its configurable `flow_targets`;
   - `scripts/probe_pda.mjs`, `probe_term_reference.mjs` (Doppler envelope);
+  - `scripts/probe_pda_ramp.mjs` (opens the duct slowly and reports velocity, peak/ED, 4v²/ΔP and the early-systolic dip at each size);
   - `DataCollector` watchers.
 
 ## Assumptions and limitations
 
-- **No closure physiology.** Constriction by oxygen and falling PGE2, closure from the pulmonary end first, and the wall's passive and active elastance aren't computed. The duct's size is a scenario or user setting.
-- **Symmetric patency.** `diameter_relative` scales both ends together. The shipped scenarios also set both ends equal, so the duct is a cylinder.
+- **No closure physiology.** Constriction by oxygen and falling PGE2 and the wall's passive and active elastance aren't computed. The duct's size is a scenario or user setting; only its geometry (closure from the pulmonary end) is modelled.
+- **Fixed constriction length.** The narrowing segment keeps its length while it narrows. With the shipped 6 cP blood the fully open 3 mm × 14 mm duct still has 4v²/ΔP 0.79 at peak and 0.57 at end-diastole (viscous loss along the ampulla).
+- **Doppler shape follows the pressures.** The velocity follows the aorta–pulmonary pressure difference, so the early-systolic dip and the saw-tooth come from the aortic and PA pressure curves, not from the duct. In term_neonate_72h the pulmonary and aortic valves open together and both pressures peak together, so the dip is small (velocity falls to about 95 % of its value at activation, against 40–60 % in NeoCardioLab's examples) and the pressure difference swings only about 8 mmHg per beat (catheter example 27). Raising PVR until the peak difference is about 17 mmHg doesn't create a dip either: the pulmonary valve then opens about 30 ms after the aortic valve, as in term babies on day 0 (Shiraishi 1987: right pre-ejection period 94 ms, left 77 ms). The restrictive early-systolic dip probably needs preterm physiology, with blood pressure close to PA pressure and the RV ejecting first. It is left for the preterm scenarios; Walther 1986 (doi 10.1111/j.1651-2227.1986.tb10251.x) has preterm and term pre-ejection periods of both ventricles.
 - **Absolute millimetres.** The diameters and `length` aren't scaled with body size; each scenario sets them.
 - **PGE1 cannot reopen a closed duct** (`diameter_relative` 0 is a hard stop).
 - **Reopening transient.** On the first step after reopening, the Bernoulli term is 0 (no previous flow), so flow briefly overshoots for one step.
@@ -7825,6 +7829,7 @@ From `term_neonate_72h.json`, `models.Pda` (trimmed to the config props; `compon
   "diameter_pa_max": 3,
   "diameter_relative": 0,
   "length": 14,
+  "constriction_length": 2,
   "discharge_coeff": 0.9,
   "diameter_drug_factor": 1
 }
@@ -7837,9 +7842,17 @@ One instance in every scenario, owning `AAR_DA` (`AAR` → `PA`, implicit):
 | Scenario | `diameter_relative` × max (mm) | `length` (mm) | `discharge_coeff` | Duct |
 |---|---|---|---|---|
 | term_neonate_72h | 0 | 14 | 0.9 | closed |
+| tof, tof_pink | 0 | 14 | 0.9 | closed |
+| tof_pa | 1 × 2.5 | 14 | 0.9 | open (duct-dependent) |
+| tof_severe | 1 × 2.2 | 14 | 0.9 | open |
+
+`constriction_length` isn't set in any scenario, so the class default (2 mm) applies. A fully open duct with equal end diameters doesn't depend on it, so tof_pa and tof_severe are unchanged by it.
 
 ## References
 
+- Musewe NN, Smallhorn JF, Benson LN, Burrows PE, Freedom RM. Validation of Doppler-derived pulmonary arterial pressure in patients with ductus arteriosus under different hemodynamic states. Circulation 1987;76:1081–91. [doi](https://doi.org/10.1161/01.cir.76.5.1081)
+- Shiraishi H, Yanagisawa M. Pulsed Doppler echocardiographic evaluation of neonatal circulatory changes. Br Heart J 1987;57:161–7. [doi](https://doi.org/10.1136/hrt.57.2.161)
+- Altit G. Understanding PDA spectral Doppler; Restrictive vs unrestrictive. NeoCardioLab, 2025. https://www.neocardiolab.com/tnecho-and-neonatal-hemodynamics/patent-ductus-arteriosus
 
 The orifice constant is derived in [Orifice](./Orifice.md).
 
@@ -10137,7 +10150,7 @@ The `probe_*.mjs` scripts, grouped by what they verify:
 | **Core vitals / calibration** | `probe_vitals.mjs`, `probe_tune.mjs`, `probe_ea.mjs` | Regulated vitals + ABG vs normal ranges; the live closed-loop tuner; mitral E/A ratio. |
 | **Physiology systems** | `probe_brain.mjs`, `probe_respiratory.mjs`, `probe_co2_response.mjs`, `probe_thermo.mjs`, `probe_glucose.mjs`, `probe_lactate.mjs`, `probe_renal.mjs`, `probe_heartfunction.mjs`, `probe_cpap.mjs`, `probe_nasal_cpap.mjs`, `probe_arrhythmia.mjs`, `probe_drugs.mjs`, `probe_pge1.mjs` | Cerebral autoregulation/ICP; respiratory/acid-base dose-response sweeps (FiO2, O2 diffusion, minute volume, UMA); steady-state ventilatory response to inhaled CO2 (slope of MV against PaCO2, with the RR/Vt split); thermoregulation; glucose/insulin; hypoxic lactate; GFR + RAAS/ADH response to haemorrhage and volume load; load-induced contractility; CPAP/PS ventilation of spontaneous breathing; CPAP by interface (tube, nasal prongs, mask; mouth closed and open); conduction arrhythmias; adrenaline/noradrenaline PK/PD; PGE1 ductal patency. |
 | **Devices** | `probe_ventilator.mjs`, `probe_sle6000.mjs`, `probe_ecls.mjs`, `probe_resuscitation.mjs` | Pressure-control ventilation with spontaneous drive off, sweeping FiO2 / rate / PEEP; veno-arterial ECMO rescue under near-abolished alveolar diffusion, sweeping pump speed / sweep-gas flow (both report the **emergent** blood gas from the gas-exchange physics, not the device); the SLE6000 device model — pass/fail checks of its modes, settings validation, VTV, CPAP backup, O2 Boost and monitored values (exit 1 on failure); CPR — under a simulated arrest, verifies the compression waveform, that compressions drive forward aortic flow via `pres_ext`, the `vent_no`-breaths-per-pause timing, and a clean `switch_cpr` re-toggle. |
-| **PDA / CDH** | `probe_pda.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; congenital diaphragmatic hernia phenotypes. |
+| **PDA / CDH** | `probe_pda.mjs`, `probe_pda_ramp.mjs`, `probe_cdh.mjs` | PDA Doppler envelope classification; ductal Doppler features over a slow opening ramp; congenital diaphragmatic hernia phenotypes. |
 | **CHD family** | `probe_as.mjs`, `probe_coarc.mjs`, `probe_dtga.mjs`, `probe_hlhs.mjs`, `probe_paivs.mjs`, `probe_pavsd.mjs`, `probe_ps.mjs`, `probe_ta.mjs`, `probe_tapvc.mjs`, `probe_tof.mjs` | Duct/FO-dependent congenital heart disease scenarios (aortic stenosis, coarctation, d-TGA, HLHS, PA-IVS, PA-VSD, pulmonary stenosis, tricuspid atresia, TAPVC, tetralogy of Fallot). The ToF family (`tof_pink`, `tof`, `tof_severe`, `tof_pa`) is validated against its reference sets with `probe_term_reference.mjs <key> --ref scripts/reference/<key>.json` (incl. the duct-closure test); `probe_tof.mjs` remains a quick look. |
 
 > Every probe defaults to `term_neonate_72h`. `probe_pge1` (it needs a duct-dependent lesion) has no shipped scenario to run on. `probe_tune` takes the scenario first: `probe_tune.mjs term_neonate_72h --map 50 --co x0.8`. Check the script's `Usage:` header.

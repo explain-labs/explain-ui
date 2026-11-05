@@ -24,7 +24,7 @@ Rules of thumb:
   compose with interventions and weight-scaling. E.g. stiffer LV → `LV.el_max_factor_ps` 1.3.
 - Only fields listed here are accepted; readonly measured-outputs and structural wiring are omitted.
 
-Snapshot: **44 model_types**, **505 settable params**, **53 functions**
+Snapshot: **44 model_types**, **506 settable params**, **53 functions**
 (+ 71 Guided commands, 7 diagram actions). Regenerate with `node scripts/build_command_catalog.mjs`.
 
 ---
@@ -634,6 +634,7 @@ _setProp_:
 - `diameter_ao_max` — max diameter aortic ampulla (mm) (number, mm) _(extra)_
 - `diameter_pa_max` — max diameter pulmonary end (mm) (number, mm) _(extra)_
 - `length` — ductus arteriosus length (mm) (number, mm) _(extra)_
+- `constriction_length` — constricting segment at the pulmonary end (mm) (number, mm) _(extra)_
 - `discharge_coeff` — orifice discharge coefficient (number, range 0.3–1) _(extra)_
 - `is_enabled` — enabled (boolean) _(all)_
 

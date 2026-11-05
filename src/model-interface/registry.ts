@@ -6422,6 +6422,17 @@ export const MODEL_INTERFACES: Record<string, InterfaceField[]> = {
       "readonly": false
     },
     {
+      "caption": "constricting segment at the pulmonary end (mm)",
+      "target": "constriction_length",
+      "type": "number",
+      "delta": 0.1,
+      "factor": 1,
+      "rounding": 1,
+      "build_prop": true,
+      "edit_mode": "extra",
+      "readonly": false
+    },
+    {
       "caption": "orifice discharge coefficient",
       "target": "discharge_coeff",
       "type": "number",
