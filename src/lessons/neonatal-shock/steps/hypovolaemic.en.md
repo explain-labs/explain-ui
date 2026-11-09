@@ -34,7 +34,11 @@ Now give **Bolus NaCl 0.9 % 20 ml/kg**.
 
 The target was **preload**: the volume came back, and so did stroke volume. The fall in BE is the **hyperchloraemic acidosis** of saline. And look at the **Hb**: it fell from 10 to about 7 mmol/l. The heart now pumps more blood with less oxygen in it.
 
-Press **Start this case again**, bleed again, and this time press **Transfuse packed red cells 20 ml/kg**.
+Now the same bleed, treated with blood. Press **Repeat the bleed**: the baby is reset, bleeds 35 % and the 2 minutes pass, computed in one go (this takes about half a minute). You arrive at the moment you gave the saline.
+
+[[action:replay]]
+
+Then press **Transfuse packed red cells 20 ml/kg**.
 
 [[action:transfuse]]
 

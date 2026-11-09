@@ -226,6 +226,8 @@ export function useLesson(lesson: Lesson) {
       .filter((c): c is Intervention => !!c && (c.requires ?? []).every((m) => m in models));
   });
 
+  // rebuilds and fast-forwards in progress (ops that take seconds of wall clock)
+  const computing = ref(0);
   const pending = ref<Record<string, Pending>>({});
   function setPending(id: string, p: Pending) {
     pending.value = { ...pending.value, [id]: p };
@@ -285,12 +287,22 @@ export function useLesson(lesson: Lesson) {
   }
   const timed = ref<Record<string, { start: number; seconds: number }>>({});
   const actionKey = (actionId: string) => `${step.value.id}/${actionId}`;
-  function runAction(a: LessonAction) {
+  // The action whose ops are still being applied (a rebuild or a fast-forward
+  // takes seconds); its button shows a spinner and all buttons wait for it.
+  const busyKey = ref<string | null>(null);
+  async function runAction(a: LessonAction) {
+    if (busyKey.value || computing.value > 0) return;
     const t0 = modelTime();
     if (a.duration && a.duration > 0 && t0 !== undefined)
       timed.value = { ...timed.value, [actionKey(a.id)]: { start: t0, seconds: a.duration } };
-    applyOps(a.ops);
+    busyKey.value = actionKey(a.id);
+    try {
+      await applyOps(a.ops);
+    } finally {
+      busyKey.value = null;
+    }
   }
+  const isBusy = (actionId: string) => busyKey.value === actionKey(actionId);
   // 0–100 while a timed action plays out, undefined otherwise (and once done)
   function actionTimeProgress(actionId: string): number | undefined {
     const tm = timed.value[actionKey(actionId)];
@@ -385,7 +397,12 @@ export function useLesson(lesson: Lesson) {
   async function applyOp(op: Op) {
     switch (op.kind) {
       case "loadScenario":
-        await loadScenario(op.scenario, op.fresh);
+        computing.value++;
+        try {
+          await loadScenario(op.scenario, op.fresh);
+        } finally {
+          computing.value--;
+        }
         break;
       case "experiment":
         await runExperiment(op.id);
@@ -403,8 +420,15 @@ export function useLesson(lesson: Lesson) {
         applyControl(op.id, op.state);
         break;
       case "calculate":
-        explain.calculate(op.seconds);
-        explain.refreshState();
+        // wait for the worker to finish (seconds of wall clock for minutes of
+        // model time) so the page can show it is computing; the timeout keeps a
+        // lost status message from locking the buttons
+        computing.value++;
+        try {
+          await Promise.race([settleModel(op.seconds), new Promise((r) => setTimeout(r, 180_000))]);
+        } finally {
+          computing.value--;
+        }
         break;
       case "run":
         explain.start();
@@ -631,6 +655,8 @@ export function useLesson(lesson: Lesson) {
     applyControl: (id: string, state: ToggleState | number) => applyOps([{ kind: "control", id, state }]),
     applyOps,
     runAction,
+    isBusy,
+    computing: computed(() => computing.value > 0),
     actionTimeProgress,
     restart,
     toggleRun,

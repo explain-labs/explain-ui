@@ -148,6 +148,14 @@ export default defineLesson({
           duration: 60,
         },
         {
+          // back to the moment the saline was given (bleed done + 2 min), computed at once
+          id: "replay",
+          label: "Repeat the bleed (reset, bleed 35 %, wait 2 min)",
+          icon: "pi pi-replay",
+          severity: "secondary",
+          ops: [...TERM, call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD"), { kind: "calculate", seconds: 240 }],
+        },
+        {
           id: "transfuse",
           label: "Transfuse packed red cells 20 ml/kg",
           icon: "pi pi-plus",

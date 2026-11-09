@@ -105,7 +105,7 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 | `{ kind: "call", fn, args?, at? }` | `call(fn, args, at)`, e.g. `fn: "Drugs.set_infusion", args: ["pge1", 0.05]` |
 | `{ kind: "scale", group, factor }` | `scale(group, factor)` for each group: an absolute ModelScaler factor (1 = baseline). This is the lever of Common tasks' scale tasks, e.g. `["left_lung_elastances", "right_lung_elastances"]` for lung compliance (elastance ×2 = compliance ÷2) |
 | `{ kind: "control", id, state }` | Drive an intervention: `"on"`/`"off"` for toggles, a raw number for sliders |
-| `{ kind: "calculate", seconds }` | Fast-forward model time synchronously |
+| `{ kind: "calculate", seconds }` | Fast-forward model time synchronously. The op list waits until the worker reports the calculation done (3 min timeout); meanwhile, and during a `loadScenario`, the step header shows "Computing…", the clicked button a spinner, and all action buttons are disabled |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |
 | `{ kind: "restart" }` | Rebuild the starting state and return to step 1 |
 | `{ kind: "loadScenario", scenario, fresh? }` | Load another bundled scenario; the rest of the op list waits for the rebuild. `fresh: true` rebuilds even when that scenario is already loaded (a clean patient per case, as in `neonatal-shock`) |

@@ -59,6 +59,7 @@ export const UI = {
   next: { nl: "Volgende", en: "Next" },
   // a [[reveal]] point in a step's text: think first, then read on
   reveal: { nl: "Verder lezen", en: "Continue" },
+  computing: { nl: "Rekenen…", en: "Computing…" },
   revealHint: { nl: "Denk eerst zelf na.", en: "Think about it first." },
   step: { nl: "Stap", en: "Step" },
   restart: { nl: "Opnieuw beginnen", en: "Restart" },

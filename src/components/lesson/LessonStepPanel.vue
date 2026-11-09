@@ -49,6 +49,9 @@ const restActions = computed(() =>
         {{ t(UI.step, rt.lang.value) }} {{ rt.stepIndex.value + 1 }}/{{ rt.steps.length }}
       </span>
       <Tag v-if="rt.step.value.draft" :value="t(UI.draft, rt.lang.value)" severity="warn" />
+      <span v-if="rt.computing.value" class="ml-auto text-xs opacity-70 flex items-center gap-1">
+        <i class="pi pi-spin pi-spinner text-xs"></i>{{ t(UI.computing, rt.lang.value) }}
+      </span>
     </div>
     <h2 class="text-xl font-semibold leading-tight">{{ t(rt.step.value.title, rt.lang.value) }}</h2>
 

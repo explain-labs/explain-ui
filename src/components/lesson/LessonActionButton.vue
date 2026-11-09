@@ -2,13 +2,16 @@
 import { computed, inject } from "vue";
 import Button from "primevue/button";
 import { LessonKey } from "@/composables/useLesson";
-import { t } from "@/lessons/i18n";
+import { t, UI } from "@/lessons/i18n";
 import type { LessonAction } from "@/lessons/types";
 
 // One lesson action button, in the step text (at a `[[action:id]]` marker) or
 // in the row under it. While the action plays out it fills as a progress bar.
 const props = defineProps<{ action: LessonAction }>();
 const rt = inject(LessonKey)!;
+
+// this button's ops are still being applied (a rebuild or a fast-forward)
+const busy = computed(() => rt.isBusy(props.action.id) && rt.computing.value);
 
 // Progress (0–100): a timed action (`duration`) playing out in model time, else
 // the first control it drives that is currently moving in the button's own
@@ -34,14 +37,15 @@ const progress = computed<number | undefined>(() => {
     :severity="action.severity ?? 'primary'"
     size="small"
     class="action-btn relative overflow-hidden"
-    :disabled="!rt.modelReady.value"
+    :disabled="!rt.modelReady.value || rt.computing.value"
     @click="rt.runAction(action)"
   >
-    <span v-if="progress !== undefined" class="action-fill" :style="{ width: `${progress}%` }"></span>
-    <i v-if="progress !== undefined" class="pi pi-spin pi-spinner relative"></i>
+    <span v-if="!busy && progress !== undefined" class="action-fill" :style="{ width: `${progress}%` }"></span>
+    <i v-if="busy || progress !== undefined" class="pi pi-spin pi-spinner relative"></i>
     <i v-else-if="action.icon" :class="action.icon" class="relative"></i>
     <span class="relative">{{ t(action.label, rt.lang.value) }}</span>
-    <span v-if="progress !== undefined" class="relative tabular-nums opacity-90">{{ progress }}%</span>
+    <span v-if="busy" class="relative opacity-90">{{ t(UI.computing, rt.lang.value) }}</span>
+    <span v-else-if="progress !== undefined" class="relative tabular-nums opacity-90">{{ progress }}%</span>
   </Button>
 </template>
 
