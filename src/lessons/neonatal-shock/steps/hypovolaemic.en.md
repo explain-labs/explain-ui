@@ -10,6 +10,10 @@ Press **Fast-forward 2 min**.
 
 The **baroreflex** defends the pressure with tachycardia and vasoconstriction, *at the cost of* flow. A recovering BP in a tachycardic baby with a falling SvO₂ is compensated shock, not recovery.
 
+> Compare **DO₂ brain** and **DO₂ lower body**. Which falls more?
+
+The brain is spared (delivery falls by about 40 %) while the lower body loses about 80 %: vasoconstriction redistributes the flow that is left. This is why gut and kidneys are the first casualties (NEC, oliguria) and why a normal-looking brain does not mean the baby is fine.
+
 Now give **Bolus NaCl 0.9 % 20 ml/kg**.
 
 > What happens to the CVP, the stroke volume and the heart rate? And to the **BE**?

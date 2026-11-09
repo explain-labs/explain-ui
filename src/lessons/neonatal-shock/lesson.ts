@@ -99,6 +99,10 @@ export default defineLesson({
       title: "Oxygen balance",
       parameters: [
         num("SvO₂ (mixed venous)", "Monitor.svo2", "%"),
+        // regional delivery = regional flow × arterial O2 content (Monitor). The lower body is an
+        // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
+        num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
+        num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
         num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
         num("pH", "AA.ph", "", 2),
         num("BE", "AA.be", "mmol/l", 1),
@@ -124,7 +128,7 @@ export default defineLesson({
       id: "hypovolaemic",
       title: "Hypovolaemic shock",
       onEnter: TERM,
-      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2", "Lactate.arterial_lactate"],
+      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2", "Monitor.do2_br", "Monitor.do2_lb"],
       actions: [
         {
           id: "bleed",
@@ -242,7 +246,7 @@ export default defineLesson({
       id: "pphn",
       title: "PPHN, the right ventricle and the duct",
       onEnter: TRANSITION,
-      highlight: ["Monitor.flows.da_flow", "Monitor.fo_flow", "Heart.rv_edp", "Monitor.svo2"],
+      highlight: ["Monitor.flows.da_flow", "Monitor.fo_flow", "Heart.rv_edp", "Monitor.do2_lb"],
       monitorHighlight: ["spo2_pre", "spo2_post"],
       diagramHighlight: ["DA", "FO"],
       controls: ["ductus"],

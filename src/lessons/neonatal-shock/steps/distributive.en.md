@@ -4,7 +4,7 @@ Press **Sepsis: vasodilation + capillary leak**.
 
 > The blood pressure falls. What does the cardiac output do? What about SvO₂?
 
-This is **warm shock**: output is high and SvO₂ is normal. The problem here is **perfusion pressure** (coronaries, brain, kidneys), not total flow. In real sepsis, maldistribution and cellular dysfunction also play a role: the model does not show that.
+This is **warm shock**: output is high, SvO₂ is normal and the lower-body delivery even rises. The problem here is **perfusion pressure** (coronaries, brain, kidneys), not total flow. In real sepsis, maldistribution and cellular dysfunction also play a role: the model does not show that.
 
 Now give **Bolus NaCl 0.9 % 20 ml/kg**, then press **Fast-forward 2 min**. Watch **Blood volume** and **Interstitial fluid**.
 

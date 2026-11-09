@@ -4,7 +4,7 @@ Press **PPHN: PVR ×3**.
 
 > Compare the pre- and post-ductal saturations. Which way do the duct and the foramen ovale flow now?
 
-**Differential cyanosis**: deoxygenated blood goes right-to-left through the duct into the descending aorta. Left ventricular output falls, because less blood passes through the lungs to the left atrium.
+**Differential cyanosis**: deoxygenated blood goes right-to-left through the duct into the descending aorta. Watch **DO₂ lower body**: it is fed by that post-ductal blood. Left ventricular output falls, because less blood passes through the lungs to the left atrium.
 
 Start **Noradrenaline 0.3 mcg/kg/min**.
 

@@ -12,4 +12,4 @@ What is special about the neonate:
 - High and labile **PVR** in the first days, with open fetal channels.
 - **Blood pressure is a late marker.** Look at heart rate, CVP, SvO₂ and lactate as well.
 
-Find these on the right: **LV stroke volume**, **LV output**, **SvO₂** (mixed venous saturation: falls when delivery falls behind demand) and **lactate**. This is a healthy term baby, 3 days old, 3.5 kg. Remember the numbers.
+Find these on the right: **LV stroke volume**, **LV output**, **SvO₂** (mixed venous saturation: falls when delivery falls behind demand), **lactate**, and the oxygen delivery to the **brain** and the **lower body** (ml O₂/min; the lower body is an estimate from renal flow). This is a healthy term baby, 3 days old, 3.5 kg. Remember the numbers.
