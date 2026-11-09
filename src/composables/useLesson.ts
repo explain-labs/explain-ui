@@ -475,6 +475,23 @@ export function useLesson(lesson: Lesson) {
     });
   }
 
+  // like waitFor, but only on a change from now on: the current value never
+  // counts (a status left over from an earlier calculation must not end the wait)
+  function waitForChange<T>(source: { value: T }, pred: (v: T) => boolean): Promise<void> {
+    return new Promise((resolve) => {
+      const stop = watch(
+        source as any,
+        (v: T) => {
+          if (pred(v)) {
+            stop();
+            resolve();
+          }
+        },
+        { flush: "sync" },
+      );
+    });
+  }
+
   async function loadScenario(name: string, force = false) {
     if (!force && name === scenarioName && modelReady.value) return;
     scenarioName = name;
@@ -484,13 +501,16 @@ export function useLesson(lesson: Lesson) {
   }
 
   // The worker handles messages in order and reports "calculated in … ms" when an
-  // offline calculation ends. Wait for that status (registered after the request,
-  // so an earlier calculation's message cannot satisfy it), then for the state
-  // snapshot requested behind it: that snapshot is the settled model, whatever
+  // offline calculation ends. Wait for that status as a change (an earlier
+  // calculation's message may still be the current status: two calculations in a
+  // row used to end the second wait at once), then for the state snapshot
+  // requested behind it: that snapshot is the settled model, whatever
   // other snapshots arrived meanwhile (stopping the loop requests one too).
   async function settleModel(seconds: number) {
+    // listen before asking; the worker posts "calculating …" then "calculated in …",
+    // so this calculation's own message is always a change
+    const calculated = waitForChange(status, (m) => /^calculated in/.test(String(m ?? "")));
     explain.calculate(seconds);
-    const calculated = waitFor(status, (m) => /^calculated in/.test(String(m ?? "")));
     explain.refreshState();
     await calculated;
     const before = modelState.value;
