@@ -135,6 +135,50 @@ const INTERVENTIONS: Record<string, Intervention> = {
     requires: ["Ventilator", "Breathing"],
     ops: [call("Ventilator.sle_standby"), call("Breathing.switch_breathing", true)],
   },
+  // VA-ECMO with the scenario's own circuit (PediMag pump, Quadrox-i Neonatal, drainage RA,
+  // return aortic arch). Checked headlessly in the weak heart (contractility x0.3): 2500 rpm
+  // ~137 ml/kg/min, MAP 43 -> 57, SvO2 62 -> 83 %; from ~3000 rpm the LV stops ejecting
+  // (pulse pressure 2, LV EDP 9 -> 15): LV distension
+  ecmo_start: {
+    id: "ecmo_start",
+    kind: "button",
+    label: "Start VA-ECMO",
+    icon: "pi pi-play",
+    help: "Drainage right atrium, return aortic arch; 2500 rpm (~135 ml/kg/min), sweep gas 0.5 l/min with 60 % O₂.",
+    requires: ["Ecls"],
+    ops: [
+      { kind: "set", path: "Ecls.cannulation", value: "VA" },
+      { kind: "set", path: "Ecls.gas_fio2", value: 0.6, it: 1 },
+      { kind: "set", path: "Ecls.gas_flow", value: 0.5, it: 1 },
+      { kind: "set", path: "Ecls.pump_rpm", value: 2500, it: 1 },
+      { kind: "set", path: "Ecls.ecls_clamped", value: false },
+      { kind: "set", path: "Ecls.ecls_running", value: true },
+    ],
+  },
+  ecmo_rpm: {
+    id: "ecmo_rpm",
+    kind: "slider",
+    label: "ECMO pump speed",
+    help: "Higher speed = more ECMO flow and more afterload for the left ventricle.",
+    requires: ["Ecls"],
+    read: "Ecls.pump_rpm",
+    min: 0,
+    max: 4000,
+    step: 100,
+    unit: " rpm",
+    it: 4,
+  },
+  ecmo_stop: {
+    id: "ecmo_stop",
+    kind: "button",
+    label: "Stop ECMO",
+    icon: "pi pi-stop",
+    requires: ["Ecls"],
+    ops: [
+      { kind: "set", path: "Ecls.ecls_running", value: false },
+      { kind: "set", path: "Ecls.ecls_clamped", value: true },
+    ],
+  },
   contractility: scaleSlider("contractility", "Contractility", "heart_el_max", "LV.el_max_factor_scaling_ps", 20, 300,
     "Both ventricles and atria. 100 % = normal."),
   diastolic_function: scaleSlider("diastolic_function", "Diastolic function", "heart_el_min", "LV.el_min_factor_scaling_ps", 20, 200,
@@ -153,7 +197,7 @@ export default defineLesson({
   scenario: "term_neonate_72h",
   controls: [
     "saline", "transfusion", "contractility", "diastolic_function", "svr", "pvr", "ductus", "foramen_ovale",
-    "ventilate", "extubate",
+    "ventilate", "extubate", "ecmo_start", "ecmo_rpm", "ecmo_stop",
   ],
   ventilatorStopsBreathing: true,
   interventions: INTERVENTIONS,
@@ -183,6 +227,7 @@ export default defineLesson({
         perKg("RV output", "Monitor.flows.rvo", "ml/kg/min"),
         perKg("Duct (+ = L→R)", "Monitor.flows.da_flow", "ml/kg/min"),
         perKg("Foramen ovale (+ = L→R)", "Monitor.fo_flow", "ml/kg/min"),
+        perKg("ECMO flow", "Ecls.flow_avg", "ml/kg/min"),
       ],
     },
     {
