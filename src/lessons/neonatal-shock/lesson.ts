@@ -6,7 +6,8 @@ import { introSteps } from "@/lessons/_shared/intro";
 // one-hour plenary session with fellows following on their own laptops. English only.
 //
 // Doses and factors were checked headlessly on the shipped scenarios before use (term_neonate_72h:
-// 3.545 kg, blood volume 85 ml/kg = 301 ml; term_neonate_1h for the PPHN step). Two settings are
+// 3.545 kg, blood volume 85 ml/kg = 301 ml; term_neonate_12h for the bleed, term_neonate_1h for
+// the PPHN step). Two settings are
 // deliberately compressed in time so a case fits a 10-minute slot, and the step text says so:
 // the capillary leak (Kf ×10, a bolus leaks out within ~4 min) and the bleed (35 % over 2 min).
 
@@ -20,6 +21,9 @@ const fresh = (scenario: string): Op[] => [
   { kind: "calculate", seconds: 100 },
 ];
 const TERM = fresh("term_neonate_72h");
+// the bleed case: a subgaleal haemorrhage presents in the first hours to day of life,
+// so a 12 h baby with the duct still half open (left-to-right)
+const NEWBORN = fresh("term_neonate_12h");
 const TRANSITION = fresh("term_neonate_1h");
 
 const call = (fn: string, ...args: unknown[]): Op => ({ kind: "call", fn, args });
@@ -128,8 +132,8 @@ export default defineLesson({
     {
       id: "hypovolaemic",
       title: "Hypovolaemic shock",
-      onEnter: TERM,
-      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2", "Monitor.do2_br", "Monitor.do2_lb"],
+      onEnter: NEWBORN,
+      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2", "Monitor.do2_br", "Monitor.do2_lb", "Monitor.flows.da_flow"],
       actions: [
         {
           id: "bleed",
@@ -153,7 +157,7 @@ export default defineLesson({
           label: "Repeat the bleed (reset, bleed 35 %, wait 2 min)",
           icon: "pi pi-replay",
           severity: "secondary",
-          ops: [...TERM, call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD"), { kind: "calculate", seconds: 240 }],
+          ops: [...NEWBORN, call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD"), { kind: "calculate", seconds: 240 }],
         },
         {
           id: "transfuse",
@@ -162,7 +166,7 @@ export default defineLesson({
           ops: [call("Fluids.add_volume", ML(20), 60, "packed_cells", "VLB")],
           duration: 60,
         },
-        again(TERM),
+        again(NEWBORN),
       ],
     },
     {

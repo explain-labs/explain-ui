@@ -1,4 +1,4 @@
-A term baby after a difficult vacuum extraction. The head circumference is increasing: a **subgaleal bleed**. The patient has just been reset to a healthy baby.
+A term baby, **12 hours old**, after a difficult vacuum extraction. The head circumference is increasing: a **subgaleal bleed**. The patient has just been reset to a healthy baby of that age: the **duct is still half open**, with left-to-right flow.
 
 Press **Subgaleal bleed**. The baby loses 35 % of its blood volume over 2 minutes (in reality this usually takes longer: the clock is compressed).
 
@@ -22,7 +22,13 @@ The **baroreflex** defends the pressure with tachycardia and vasoconstriction, *
 
 [[reveal]]
 
-The brain is spared (delivery falls by about 40 %) while the lower body loses about 80 %: vasoconstriction redistributes the flow that is left. This is why gut and kidneys are the first casualties (NEC, oliguria) and why a normal-looking brain does not mean the baby is fine.
+The lower body loses most (delivery falls by about 85 %): vasoconstriction redistributes the flow that is left toward the brain. This is why gut and kidneys are the first casualties (NEC, oliguria).
+
+> And the duct? Look at its flow and compare it with the LV output.
+
+[[reveal]]
+
+The duct stays open **left-to-right**: of an LV output of about 100 ml/kg/min, some 40 go back into the lungs. In the first day of life the body gets even less than the LV output suggests, which is why the brain is hit harder here (delivery about −55 %) than in an older baby with a closed duct (about −40 %).
 
 Now give **Bolus NaCl 0.9 % 20 ml/kg**.
 
@@ -46,4 +52,4 @@ Then press **Transfuse packed red cells 20 ml/kg**.
 
 [[reveal]]
 
-After the transfusion the Hb is back to normal and there is no acidosis. The heart delivers *more* oxygen while pumping almost 30 % *less* (LV output about 175 against 225 ml/kg/min after saline). In a large haemorrhage, blood replaces both volume and oxygen-carrying capacity; crystalloid only replaces volume.
+After the transfusion the Hb is back to normal and there is no acidosis. The heart delivers *more* oxygen while pumping about 20 % *less* (LV output about 210 against 265 ml/kg/min after saline). In a large haemorrhage, blood replaces both volume and oxygen-carrying capacity; crystalloid only replaces volume.
