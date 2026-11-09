@@ -8142,7 +8142,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 | Doc | What it covers |
 |---|---|
 | [TermNeonateReference](./TermNeonateReference.md) | Literature reference values for a healthy term neonate at ~72 h (hemodynamics, heart, flows, breathing, gases, metabolism, shunts), graded by evidence, with the matching JSON for validating `term_neonate_72h`. |
-| [TermTransitionReference](./TermTransitionReference.md) | Literature reference values for a healthy term neonate at 12 h and 24 h (transition), derived from the 72 h baby by within-study changes, with the ductal Doppler evidence and the matching JSONs for validating `term_neonate_12h` and `term_neonate_24h`. |
+| [TermTransitionReference](./TermTransitionReference.md) | Literature reference values for a healthy term neonate at 1 h, 12 h and 24 h (transition), derived from the 72 h baby by within-study changes, with the ductal Doppler evidence and the matching JSONs for validating `term_neonate_1h`, `term_neonate_12h` and `term_neonate_24h`. |
 | [TofReference](./TofReference.md) | Literature reference values for tetralogy of Fallot at 72 h in four grades (pink, moderate, severe on PGE1, pulmonary atresia), built on Rudolph ch 14, with the matching JSONs for validating `tof_pink`, `tof`, `tof_severe`, `tof_pa`. |
 | [chd_duct_fo_dependent](./chd_duct_fo_dependent.md) | Duct- & foramen-ovale-dependent CHD taxonomy, lesion catalog, engine-lever mapping, build roadmap, bibliography. |
 
@@ -10097,7 +10097,7 @@ A probe is a self-contained `.mjs` that boots the engine, runs a scripted physio
 6. **Perturb (optional)** — apply an insult between phases (e.g. remove a volume fraction from every blood compartment for a haemorrhage, then `calc` again and re-measure) to compare baseline vs perturbed.
 7. **Report** — print a labelled table with normal-range flags (`ok` / `LOW` / `HIGH`).
 
-`probe_vitals.mjs` is the canonical example: it reports HR, ABP (sys/dia/mean), CVP, PAP, CO/RV-output, cardiac index, SpO2 (pre/post-ductal), PDA shunt, SvO2, RR, etCO2, temperature, and a full arterial blood gas, each flagged against a `RANGES` table selected by `--profile adult|neonate` (auto-picked from body weight when omitted: every patient under 10 kg gets `neonate`). The neonate's PAP ranges follow the scenario's postnatal age (`model_definition.age`, through `rangesFor()` and `NEONATE_PAP_BY_AGE`), and while the duct is open SvO2 is judged at the right heart, because the pulmonary artery then also carries oxygenated ductal blood. The measurement loop, the `RANGES` tables, and `selectProfile()`/`flagOf()` are shared via `scripts/_probe.mjs` so the generic builder (`build_patient.mjs`) measures identically.
+`probe_vitals.mjs` is the canonical example: it reports HR, ABP (sys/dia/mean), CVP, PAP, CO/RV-output, cardiac index, SpO2 (pre/post-ductal), PDA shunt, SvO2, RR, etCO2, temperature, and a full arterial blood gas, each flagged against a `RANGES` table selected by `--profile adult|neonate` (auto-picked from body weight when omitted: every patient under 10 kg gets `neonate`). The neonate's PAP ranges (and below 6 h also CVP and the blood gases) follow the scenario's postnatal age (`model_definition.age`, through `rangesFor()` and `NEONATE_PAP_BY_AGE`), and while the duct is open SvO2 is judged at the right heart, because the pulmonary artery then also carries oxygenated ductal blood. The measurement loop, the `RANGES` tables, and `selectProfile()`/`flagOf()` are shared via `scripts/_probe.mjs` so the generic builder (`build_patient.mjs`) measures identically.
 
 ### Run examples
 
@@ -10482,12 +10482,13 @@ range a regurgitant jet is timed over at 1→3 and 1→2 m/s), `fo_grad_mean` an
 ### FILE: explain-engine/docs/TermTransitionReference.md
 
 ```markdown
-# Term neonate in transition: reference values at 12 h and 24 h
+# Term neonate in transition: reference values at 1 h, 12 h and 24 h
 
-Reference values for `term_neonate_12h` and `term_neonate_24h`: the **same baby as `term_neonate_72h`, 60 h and
-48 h younger**. It is a
+Reference values for `term_neonate_1h`, `term_neonate_12h` and `term_neonate_24h`: the **same baby as
+`term_neonate_72h`, 71, 60 and 48 h younger**. It is a
 healthy term neonate of about 3.5 kg after an uncomplicated vaginal birth, breathing room air, dressed at
 room temperature, with breastfeeding started. The machine-readable sets are
+[`term_neonate_1h.json`](../scripts/reference/term_neonate_1h.json),
 [`term_neonate_12h.json`](../scripts/reference/term_neonate_12h.json) and
 [`term_neonate_24h.json`](../scripts/reference/term_neonate_24h.json). Check a scenario with
 `node scripts/probe_term_reference.mjs term_neonate_24h --ref scripts/reference/term_neonate_24h.json`.
@@ -10495,7 +10496,7 @@ Compiled 2026-11-05 from PubMed, the engine's `reference-value-papers` and NeoCa
 
 ## How the targets are made
 
-**The rule (user decision, 2026-11-05):** a 12 h or 24 h target is the 72 h target times the change between that age
+**The rule (user decision, 2026-11-05):** a 1 h, 12 h or 24 h target is the 72 h target times the change between that age
 and ~72 h measured *within one longitudinal study*, in the same cohort with the same method. The 72 h baby is
 calibrated to its own sources (Groves MRI output, van Zadelhoff BP, ...). Absolute 12 h values from other cohorts
 and methods would mix their offsets into the change: echo LV output 290 against MRI 196 looks like +48 %, while
@@ -10518,6 +10519,14 @@ within Agata the change is +13 %. So:
 **Groves 2011**, the 72 h output source, scanned at a median of 11 days, with ranges by corrected gestational
 age, so it gives no 12 h change. **Jhaveri 2023** (MRI at 31.8 ± 14 h, LV output 177 mL/kg/min) is a
 same-method cross-check: by MRI, the output on day 1–2 is not clearly above Groves' term values.
+
+**Two exceptions at 1 h (user decisions, 2026-11-06, as on 2026-10-25):**
+- **PA pressure:** PAP:SAP ~0.9 (Skinner 1991: bidirectional ductal flow goes with ratios of 0.88–1.22), not Kang's
+  2 h ratio. Kang's absolute ductal-gradient PA values rest on his own arm BP, which sat above other cohorts, and are
+  suprasystemic against Taiwo's 1 h BP.
+- **Blood gases:** textbook pH 7.32, pCO2 36, BE −5 (grade C). The longitudinal source, Koch & Wendel 1968 (arterial
+  gases in the same normal newborns through the first week, [doi](https://doi.org/10.1159/000240100)), has no
+  abstract or full text available. Replace these rows when its numbers are read.
 
 **Methods behind the 72 h base, and what that means for the 12 h changes.** The 72 h baby is MRI-based
 for its heart and central flows; the rest comes from other methods, because MRI does not measure it.
@@ -10553,6 +10562,18 @@ artery also carries oxygenated aortic blood and reads ~4 points higher at a shun
 - **A**: within-study pair, healthy term babies, at the two ages
 - **B**: within-study pair with interpolation, an age proxy, or two studies that disagree
 - **C**: no pair (72 h kept), derived, or carried
+
+## The duct at 1 h
+
+- **Size:** Agata 1994: 5.1 ± 0.9 mm at 1 h; Kang 2016: 4.60 ± 0.59 at 2 h. The pulmonary-end protrusion has started
+  in only 30 % at 1 h (Hiraishi 1987), so the duct is wide and unrestrictive.
+- **Direction:** bidirectional in every baby at 1–2 h (Agata 1994, Kang 2016), left-to-right dominant. The
+  right-to-left part comes in early systole (Rudolph). Target: right-to-left for 5–30 % of the cycle (van Laere 2018:
+  under 30 % = bidirectional / growing).
+- **Velocity:** low in a wide duct. Mandorla 1990: 1.5 ± 0.7 m/s at the first exam; Ha 2018: 1.43 (1.07–1.78) over
+  0–12 h.
+- **Shunt volume:** net left-to-right 70 (60–80) mL/kg/min (user decision, 2026-11-06). Drayton 1987 measured 62
+  (43–82) shortly after birth; the within-study LV output excess gives ~65 (Agata 1991) to ~81 (Agata 1994).
 
 ## The duct at 12 h
 
@@ -10614,6 +10635,46 @@ minimum as `pda_v_ed`, so a dip would show there.
 ## Blood volume and haematocrit
 
 The 12 h baby is the same baby as the 72 h scenario (user decision, 2026-11-05). Its red cell mass (~42 mL/kg) is held. After a placental transfusion, plasma leaves within ~2 h and Hct peaks. Plasma then slowly returns, and Hct drifts down: 58 → 56 → 54 % at 2 h, 24 h and day 5 (Nelle 1993, 3-min clamping), and 63 → 59 % at 2 h and 24 h (Linderkamp 1992). Interpolated, Hct is ~57.1 % at 12 h and ~55.0 % at 72 h, a ratio of 1.038. The 12 h targets are the 72 h ones scaled by it: Hct 51.4 %, Hb 17.6 g/dL, blood volume ~82 mL/kg. Blood volume is lowest in the first hours and rises slightly by day 3, by ~4 mL/kg, not 8. An earlier derivation (1-min delayed clamping, Hct 57 %, 77 mL/kg) compared two clamping strategies, not one baby at two ages, and was dropped.
+
+## The 1 h scenario
+
+`model_definitions/term_neonate_1h.json`, generated by `node scripts/_make_term_transition.mjs --age 1 --write` from
+`term_neonate_72h` (built 2026-11-09), with the same generator and re-anchoring as the 12 h and 24 h scenarios, and
+six levers more.
+
+| Lever | 1 h | Why |
+|---|---|---|
+| Duct | 4.85 mm (aortic end 5.3 mm) | Agata 5.1 at 1 h, Kang 4.6 at 2 h: wide and unrestrictive |
+| Pulmonary resistance (and `Shunts.ips_res` alike) | ×1.6 | net left-to-right shunt ~70 (grid ×1.4 / ×1.6) |
+| `Heart.rv_delay` | −35 ms (the RV activates first) | early-systolic right-to-left, then left-to-right (Rudolph); without it the right-to-left part fell in late systole |
+| RV contractility (`el_max`) | ×1.5 | RV EF 47 against the near-systemic PA |
+| Heart rate reference | ×1.13 | HR 133 (Agata ×1.225, Tveiten ×1.04) |
+| Blood volume / haemoglobin | ×1.039 / ÷1.039 | the same red cell mass in the plasma of the placental transfusion (Nelle) |
+| Lactate / unmeasured anions | 2.2 / +1.8 mmol/L | the acidosis of birth: BE −5 (textbook exception), lactate GLOW |
+| Chemoreflex pCO2 while settling / minute volume reference | 36 / ×1.08 | the 1 h pCO2 (textbook exception) |
+| Alveolar unstressed volume | ×0.85 | lung liquid not yet cleared (Lee 1999); compliance unchanged |
+| `Kidneys.kf` / `resp_q` | ×0.6 / 0.908 | GFR (Smeets, nearest), RQ (Zoppi 6 h) |
+| Baroreflex target while settling | MAP 52.1 | Taiwo ×0.898 |
+
+**The duct at 1 h in the model:**
+- Net 69.6 mL/kg/min left-to-right, right-to-left for 9.2 % of the beat.
+- One beat: a right-to-left jet of ~0.95 m/s just after the RV starts ejecting (~180–220 ms after atrial
+  activation), then left-to-right through late systole and diastole, peak ~0.65 m/s.
+- `probe_pda`: "bidirectional", and the signature (systolic right-to-left / diastolic left-to-right) is confirmed.
+- Across the three ages the duct goes from wide and bidirectional (1 h) to a closing left-to-right jet of 1.9 m/s
+  (12 h) and 2.4 m/s (24 h).
+
+**Result.** All numeric targets are in range except four accepted deviations (user, 2026-11-09; notes in the JSON):
+- **Accepted:** LV EF 69.3 (volume load of the shunt), urine 0.99 (before the diuresis), left-to-right peak velocity 0.64 (a wide duct), coronary flow 32.1 (both ventricles working harder).
+- HR 133.9, BP 72.0/42.1 (MAP 52.1), PA 69.0/42.0 (mean 51.0), CVP 1.64 (Siassi 1980, exception)
+- LV output 262.2, RV output 202.1, RV EF 47.5, SVC 77.0, descending aorta 104.7
+- pH 7.333, pCO2 38.1, BE -5.03, lactate 2.19, SpO2 97.1, right-heart SvO2 76.4
+- Hct 47.4, blood volume 87.0, FRC 27.2, GFR 21.9
+
+**Checks (2026-11-09):**
+- **Drift:** loaded, it holds for 10 min (MAP 52.1, HR 133.9, PA mean 51.0, pH 7.333, BE −5.03 → −5.04), with the usual first-minute HR transient (~144).
+- **Respiratory battery:** 24/24, class `term_1h`: the term targets with the 1 h gases (pH 7.27–7.37, pCO2 31–41).
+- **`probe_vitals`:** clean. Its age row below 6 h holds this page's 1 h PAP, CVP and gas ranges.
 
 ## The 12 h scenario
 
@@ -10693,114 +10754,114 @@ in range: PA systolic/diastolic (51/26 vs 44/20), LV output (225 vs 207), SVC (8
 
 ### Hemodynamics
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| Heart rate | bpm | 121.5 ± 17.1 (93.73–149.35) | ×1.03 | 118.5 ± 16.67 (91.36–145.58) | ×1 | B / B | 118 ± 16.6 (91–145) |
-| Systolic BP | mmHg | 71.7 (58.13–86.22) | ×0.969 | 73.2 (59.38–88.07) | ×0.99 | A / A | 74 (60–89) |
-| Diastolic BP | mmHg | 43.5 (29.3–57.65) | ×0.945 | 44.3 (29.88–58.79) | ×0.964 | A / A | 46 (31–61) |
-| Mean arterial pressure | mmHg | 55.4 (42.99–68.78) | ×0.955 | 56.5 (43.84–70.15) | ×0.974 | A / A | 58 (45–72) |
-| Pulse pressure | mmHg | 28.1 | ×1 | 28.8 | ×1.03 | B / B | 28 |
-| Central venous pressure | mmHg | 2–8 | kept | 2–8 | kept | C / C | 2–8 |
-| Pulmonary artery pressure, systolic | mmHg | 52.51 ± 9.07 (34.4–70.7) | ×1.46 | 43.83 ± 7.9 (28–59.6) | ×1.22 | A / A | 36 ± 6.48 |
-| Pulmonary artery pressure, mean | mmHg | 40.94 ± 9.32 (22.3–59.6) | ×1.62 | 34.39 ± 9.89 (14.6–54.2) | ×1.36 | A / A | 25.25 ± 8.29 |
-| Pulmonary artery pressure, diastolic | mmHg | 23.43 ± 7.37 (8.7–38.2) | ×1.77 | 19.7 ± 8.51 (2.7–36.7) | ×1.49 | A / A | 13.25 ± 6.18 |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| Heart rate | bpm | 133.3 ± 18.76 (102.83–163.85) | ×1.13 | 121.5 ± 17.1 (93.73–149.35) | ×1.03 | 118.5 ± 16.67 (91.36–145.58) | ×1 | B / B / B | 118 ± 16.6 (91–145) |
+| Systolic BP | mmHg | 69.2 (56.13–83.26) | ×0.935 | 71.7 (58.13–86.22) | ×0.969 | 73.2 (59.38–88.07) | ×0.99 | A / A / A | 74 (60–89) |
+| Diastolic BP | mmHg | 39.9 (26.9–52.94) | ×0.868 | 43.5 (29.3–57.65) | ×0.945 | 44.3 (29.88–58.79) | ×0.964 | A / A / A | 46 (31–61) |
+| Mean arterial pressure | mmHg | 52.1 (40.42–64.67) | ×0.898 | 55.4 (42.99–68.78) | ×0.955 | 56.5 (43.84–70.15) | ×0.974 | A / A / A | 58 (45–72) |
+| Pulse pressure | mmHg | 29 | ×1.03 | 28.1 | ×1 | 28.8 | ×1.03 | B / B / B | 28 |
+| Central venous pressure | mmHg | 1.6 (-3–4) | kept | 2–8 | kept | 2–8 | kept | C / C / C | 2–8 |
+| Pulmonary artery pressure, systolic | mmHg | 62.3 (60.9–76.6) | exception | 52.51 ± 9.07 (34.4–70.7) | ×1.46 | 43.83 ± 7.9 (28–59.6) | ×1.22 | B / A / A | 36 ± 6.48 |
+| Pulmonary artery pressure, mean | mmHg | 46.9 (45.8–63.6) | exception | 40.94 ± 9.32 (22.3–59.6) | ×1.62 | 34.39 ± 9.89 (14.6–54.2) | ×1.36 | B / A / A | 25.25 ± 8.29 |
+| Pulmonary artery pressure, diastolic | mmHg | ref. only | derived | 23.43 ± 7.37 (8.7–38.2) | ×1.77 | 19.7 ± 8.51 (2.7–36.7) | ×1.49 | C / A / A | 13.25 ± 6.18 |
 
 ### Heart
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| LV end-diastolic volume | mL/kg | 2.5 ± 0.3 (1.9–3.1) | kept | 2.5 ± 0.3 (1.9–3.1) | kept | C / C | 2.5 ± 0.3 (1.9–3.1) |
-| LV end-systolic volume | mL/kg | 0.9 ± 0.2 (0.5–1.3) | kept | 0.9 ± 0.2 (0.5–1.3) | kept | C / C | 0.9 ± 0.2 (0.5–1.3) |
-| LV stroke volume | mL/kg | 1.712 ± 0.11 (1.5–2.03) | ×1.07 | 1.68 ± 0.11 (1.47–1.99) | ×1.05 | B / B | 1.6 ± 0.1 (1.4–1.9) |
-| LV ejection fraction | % | 62.1 ± 3.34 (55.44–68.71) | ×0.983 | 62.7 ± 3.37 (55.92–69.31) | ×0.992 | A / A | 63.2 ± 3.4 (56.4–69.9) |
-| RV end-diastolic volume | mL/kg | 3.1 ± 0.3 (2.5–3.7) | kept | 3.1 ± 0.3 (2.5–3.7) | kept | C / C | 3.1 ± 0.3 (2.5–3.7) |
-| RV end-systolic volume | mL/kg | 1.5 ± 0.2 (1.1–1.9) | kept | 1.5 ± 0.2 (1.1–1.9) | kept | C / C | 1.5 ± 0.2 (1.1–1.9) |
-| RV stroke volume | mL/kg | 1.6 ± 0.2 (1.2–2) | kept | 1.6 ± 0.2 (1.2–2) | kept | C / C | 1.6 ± 0.2 (1.2–2) |
-| RV ejection fraction | % | 52.5 ± 3.3 (45.9–59.1) | kept | 52.5 ± 3.3 (45.9–59.1) | kept | C / C | 52.5 ± 3.3 (45.9–59.1) |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| LV end-diastolic volume | mL/kg | 2.5 ± 0.3 (1.9–3.1) | kept | 2.5 ± 0.3 (1.9–3.1) | kept | 2.5 ± 0.3 (1.9–3.1) | kept | C / C / C | 2.5 ± 0.3 (1.9–3.1) |
+| LV end-systolic volume | mL/kg | 0.9 ± 0.2 (0.5–1.3) | kept | 0.9 ± 0.2 (0.5–1.3) | kept | 0.9 ± 0.2 (0.5–1.3) | kept | C / C / C | 0.9 ± 0.2 (0.5–1.3) |
+| LV stroke volume | mL/kg | 1.782 ± 0.11 (1.56–2.12) | ×1.11 | 1.712 ± 0.11 (1.5–2.03) | ×1.07 | 1.68 ± 0.11 (1.47–1.99) | ×1.05 | B / B / B | 1.6 ± 0.1 (1.4–1.9) |
+| LV ejection fraction | % | 61.6 ± 3.31 (54.97–68.13) | ×0.975 | 62.1 ± 3.34 (55.44–68.71) | ×0.983 | 62.7 ± 3.37 (55.92–69.31) | ×0.992 | B / A / A | 63.2 ± 3.4 (56.4–69.9) |
+| RV end-diastolic volume | mL/kg | 3.1 ± 0.3 (2.5–3.7) | kept | 3.1 ± 0.3 (2.5–3.7) | kept | 3.1 ± 0.3 (2.5–3.7) | kept | C / C / C | 3.1 ± 0.3 (2.5–3.7) |
+| RV end-systolic volume | mL/kg | 1.5 ± 0.2 (1.1–1.9) | kept | 1.5 ± 0.2 (1.1–1.9) | kept | 1.5 ± 0.2 (1.1–1.9) | kept | C / C / C | 1.5 ± 0.2 (1.1–1.9) |
+| RV stroke volume | mL/kg | 1.6 ± 0.2 (1.2–2) | kept | 1.6 ± 0.2 (1.2–2) | kept | 1.6 ± 0.2 (1.2–2) | kept | C / C / C | 1.6 ± 0.2 (1.2–2) |
+| RV ejection fraction | % | 52.5 ± 3.3 (45.9–59.1) | kept | 52.5 ± 3.3 (45.9–59.1) | kept | 52.5 ± 3.3 (45.9–59.1) | kept | C / C / C | 52.5 ± 3.3 (45.9–59.1) |
 
 ### Regional and coronary flows
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| Left ventricular output | mL/kg/min | 221.5 (122–320.9) | ×1.13 | 206.6 (113.86–299.41) | ×1.05 | B / B | 196 (108–284) |
-| Right ventricular output | mL/kg/min | 199 (100–298) | kept | 199 (100–298) | kept | C / C | 199 (100–298) |
-| SVC flow | mL/kg/min | 84.7 (28.56–140.76) | ×1.02 | 85.6 (28.88–142.36) | ×1.03 | B / B | 83 (28–138) |
-| Descending aorta flow | mL/kg/min | 99 (57–141) | kept | 99 (57–141) | kept | C / C | 99 (57–141) |
-| Cerebral blood flow | mL/kg/min | 21.8 (7.51–72) | ×0.766 | 27.9 (9.59–92) | ×0.979 | B / B | 28.5 (9.8–94) |
-| Intestinal (SMA) flow | mL/kg/min | 29.9 ± 9.03 | ×0.694 | 39.4 ± 11.92 | ×0.917 | B / B | 43 ± 13 |
-| Renal blood flow | mL/kg/min | 23.8 | ×0.847 | 24.3 | ×0.865 | B / B | ref. only |
-| Hepatic arterial / coeliac flow | mL/kg/min | 24.4 | ×0.901 | 28.2 | ×1.04 | B / B | ref. only |
-| Coronary flow (whole heart) | mL/min | 22 (18–28) | kept | 22 (18–28) | kept | C / C | 22 (18–28) |
-| Myocardial O2 use | mL/100 g/min | 14 (10–19) | kept | 14 (10–19) | kept | C / C | 14 (10–19) |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| Left ventricular output | mL/kg/min | 261.6 (144.15–379.05) | ×1.33 | 221.5 (122–320.9) | ×1.13 | 206.6 (113.86–299.41) | ×1.05 | B / B / B | 196 (108–284) |
+| Right ventricular output | mL/kg/min | 199 (100–298) | kept | 199 (100–298) | kept | 199 (100–298) | kept | C / C / C | 199 (100–298) |
+| SVC flow | mL/kg/min | 79.5 (26.82–132.19) | ×0.958 | 84.7 (28.56–140.76) | ×1.02 | 85.6 (28.88–142.36) | ×1.03 | B / B / B | 83 (28–138) |
+| Descending aorta flow | mL/kg/min | 99 (57–141) | kept | 99 (57–141) | kept | 99 (57–141) | kept | C / C / C | 99 (57–141) |
+| Cerebral blood flow | mL/kg/min | 20.6 (7.09–68) | ×0.723 | 21.8 (7.51–72) | ×0.766 | 27.9 (9.59–92) | ×0.979 | B / B / B | 28.5 (9.8–94) |
+| Intestinal (SMA) flow | mL/kg/min | 29.6 ± 8.94 | ×0.688 | 29.9 ± 9.03 | ×0.694 | 39.4 ± 11.92 | ×0.917 | B / B / B | 43 ± 13 |
+| Renal blood flow | mL/kg/min | 25.1 | ×0.892 | 23.8 | ×0.847 | 24.3 | ×0.865 | B / B / B | ref. only |
+| Hepatic arterial / coeliac flow | mL/kg/min | 22.1 | ×0.817 | 24.4 | ×0.901 | 28.2 | ×1.04 | B / B / B | ref. only |
+| Coronary flow (whole heart) | mL/min | 22 (18–28) | kept | 22 (18–28) | kept | 22 (18–28) | kept | C / C / C | 22 (18–28) |
+| Myocardial O2 use | mL/100 g/min | 14 (10–19) | kept | 14 (10–19) | kept | 14 (10–19) | kept | C / C / C | 14 (10–19) |
 
 ### Lungs and breathing
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| Respiratory rate | /min | 44 (32–57) | kept | 44 (32–57) | kept | C / C | 44 (32–57) |
-| Tidal volume | mL/kg | 5.57 ± 1.06 | kept | 5.57 ± 1.06 | kept | C / C | 5.57 ± 1.06 |
-| Minute ventilation | mL/kg/min | 215 ± 51.7 | kept | 215 ± 51.7 | kept | C / C | 215 ± 51.7 |
-| Inspiratory time fraction (Ti/Ttot) | - | 0.4 | kept | 0.4 | kept | C / C | 0.4 |
-| Peak tidal inspiratory flow | L/min/kg | 0.83 ± 0.2 | kept | 0.83 ± 0.2 | kept | C / C | 0.83 ± 0.2 |
-| Peak tidal expiratory flow | L/min/kg | 0.64 ± 0.19 | kept | 0.64 ± 0.19 | kept | C / C | 0.64 ± 0.19 |
-| Respiratory system compliance | mL/cmH2O | 3.6 (3.2–4) | kept | 3.6 (3.2–4) | kept | C / C | 3.6 (3.2–4) |
-| Respiratory system resistance | cmH2O/L/s | 52 ± 5.6 | kept | 52 ± 5.6 | kept | C / C | 52 ± 5.6 |
-| Functional residual capacity | mL/kg | 25.9 (22.71–30.54) | ×0.954 | 27.1 (23.8–32) | ×1 | B / B | 27.1 (23.8–32) |
-| Anatomic dead space | mL/kg | 2.2 | kept | 2.2 | kept | C / C | 2.2 |
-| Pleural (oesophageal) pressure swing | cmH2O | 7.3 ± 1.4 | kept | 7.3 ± 1.4 | kept | C / C | 7.3 ± 1.4 |
-| Ventilatory response to CO2 | mL/kg/min per mmHg | 38.7 (12–67) | kept | 38.7 (12–67) | kept | C / C | 38.7 (12–67) |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| Respiratory rate | /min | 44 (32–57) | kept | 44 (32–57) | kept | 44 (32–57) | kept | C / C / C | 44 (32–57) |
+| Tidal volume | mL/kg | 5.57 ± 1.06 | kept | 5.57 ± 1.06 | kept | 5.57 ± 1.06 | kept | C / C / C | 5.57 ± 1.06 |
+| Minute ventilation | mL/kg/min | 215 ± 51.7 | kept | 215 ± 51.7 | kept | 215 ± 51.7 | kept | C / C / C | 215 ± 51.7 |
+| Inspiratory time fraction (Ti/Ttot) | - | 0.4 | kept | 0.4 | kept | 0.4 | kept | C / C / C | 0.4 |
+| Peak tidal inspiratory flow | L/min/kg | 0.83 ± 0.2 | kept | 0.83 ± 0.2 | kept | 0.83 ± 0.2 | kept | C / C / C | 0.83 ± 0.2 |
+| Peak tidal expiratory flow | L/min/kg | 0.64 ± 0.19 | kept | 0.64 ± 0.19 | kept | 0.64 ± 0.19 | kept | C / C / C | 0.64 ± 0.19 |
+| Respiratory system compliance | mL/cmH2O | 3.6 (3.2–4) | kept | 3.6 (3.2–4) | kept | 3.6 (3.2–4) | kept | C / C / C | 3.6 (3.2–4) |
+| Respiratory system resistance | cmH2O/L/s | 52 ± 5.6 | kept | 52 ± 5.6 | kept | 52 ± 5.6 | kept | C / C / C | 52 ± 5.6 |
+| Functional residual capacity | mL/kg | 25.1 (22.08–29.69) | ×0.928 | 25.9 (22.71–30.54) | ×0.954 | 27.1 (23.8–32) | ×1 | B / B / B | 27.1 (23.8–32) |
+| Anatomic dead space | mL/kg | 2.2 | kept | 2.2 | kept | 2.2 | kept | C / C / C | 2.2 |
+| Pleural (oesophageal) pressure swing | cmH2O | 7.3 ± 1.4 | kept | 7.3 ± 1.4 | kept | 7.3 ± 1.4 | kept | C / C / C | 7.3 ± 1.4 |
+| Ventilatory response to CO2 | mL/kg/min per mmHg | 38.7 (12–67) | kept | 38.7 (12–67) | kept | 38.7 (12–67) | kept | C / C / C | 38.7 (12–67) |
 
 ### Gases
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| SpO2 (pre-ductal) | % | 97.3 ± 1.4 | kept | 97.3 ± 1.4 | kept | C / C | 97.3 ± 1.4 |
-| pH | - | 7.395 ± 0.037 (7.312–7.473) | kept | 7.395 ± 0.037 (7.312–7.473) | kept | C / C | 7.395 ± 0.037 (7.312–7.473) |
-| pCO2 | mmHg | 38.7 ± 5.1 (28.5–48.7) | kept | 38.7 ± 5.1 (28.5–48.7) | kept | C / C | 38.7 ± 5.1 (28.5–48.7) |
-| HCO3 | mmol/L | 23.4 | kept | 23.4 | kept | C / C | 23.4 |
-| Base excess | mmol/L | -4–2 | kept | -4–2 | kept | C / C | -4–2 |
-| PaO2 | mmHg | 60–90 | kept | 60–90 | kept | C / C | 60–90 |
-| End-tidal CO2 | mmHg | ref. only | kept | ref. only | kept | C / C | ref. only |
-| Mixed venous O2 saturation (right heart, before the duct) | % | 76 (70–80) | kept | 76 (70–80) | kept | C / C | – |
-| Pulmonary artery O2 saturation (includes the ductal admixture) | % | ref. only | kept | ref. only | kept | C / C | 76 (70–80) |
-| SpO2 post-ductal | % | ref. only | kept | ref. only | kept | C / C | – |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| SpO2 (pre-ductal) | % | 97.3 ± 1.4 | kept | 97.3 ± 1.4 | kept | 97.3 ± 1.4 | kept | C / C / C | 97.3 ± 1.4 |
+| pH | - | 7.32 (7.27–7.37) | exception | 7.395 ± 0.037 (7.312–7.473) | kept | 7.395 ± 0.037 (7.312–7.473) | kept | C / C / C | 7.395 ± 0.037 (7.312–7.473) |
+| pCO2 | mmHg | 36 (31–41) | exception | 38.7 ± 5.1 (28.5–48.7) | kept | 38.7 ± 5.1 (28.5–48.7) | kept | C / C / C | 38.7 ± 5.1 (28.5–48.7) |
+| HCO3 | mmol/L | 18 (16–20) | exception | 23.4 | kept | 23.4 | kept | C / C / C | 23.4 |
+| Base excess | mmol/L | -5 (-7–-3) | exception | -4–2 | kept | -4–2 | kept | C / C / C | -4–2 |
+| PaO2 | mmHg | 60–90 | kept | 60–90 | kept | 60–90 | kept | C / C / C | 60–90 |
+| End-tidal CO2 | mmHg | ref. only | kept | ref. only | kept | ref. only | kept | C / C / C | ref. only |
+| Mixed venous O2 saturation (right heart, before the duct) | % | 76 (70–80) | kept | 76 (70–80) | kept | 76 (70–80) | kept | C / C / C | – |
+| Pulmonary artery O2 saturation (includes the ductal admixture) | % | ref. only | kept | ref. only | kept | ref. only | kept | C / C / C | 76 (70–80) |
+| SpO2 post-ductal | % | ref. only | kept | ref. only | kept | ref. only | kept | C / C / C | – |
 
 ### Metabolism
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| Oxygen consumption | mL/kg/min | 8.4 ± 1.51 (6.3–9.5) | kept | 8.4 ± 1.51 (6.3–9.5) | kept | C / C | 8.4 ± 1.51 (6.3–9.5) |
-| Core temperature | degC | 37 (36.5–37.5) | kept | 37 (36.5–37.5) | kept | C / C | 37 (36.5–37.5) |
-| Plasma glucose | mmol/L | 4 ± 0.7 | kept | 4 ± 0.7 | kept | C / C | 4 ± 0.7 |
-| Lactate | mmol/L | 2 (1.14–4.71) | ×1.43 | 1.8 (1.03–4.24) | ×1.29 | B / B | 1.4 (0.8–3.3) |
-| Respiratory quotient | - | 0.889 (0.84–0.94) | ×1.05 | 0.864 (0.81–0.92) | ×1.02 | B / B | 0.85 (0.8–0.9) |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| Oxygen consumption | mL/kg/min | 8.4 ± 1.51 (6.3–9.5) | kept | 8.4 ± 1.51 (6.3–9.5) | kept | 8.4 ± 1.51 (6.3–9.5) | kept | C / C / C | 8.4 ± 1.51 (6.3–9.5) |
+| Core temperature | degC | 37 (36.5–37.5) | kept | 37 (36.5–37.5) | kept | 37 (36.5–37.5) | kept | C / C / C | 37 (36.5–37.5) |
+| Plasma glucose | mmol/L | 4 ± 0.7 | kept | 4 ± 0.7 | kept | 4 ± 0.7 | kept | C / C / C | 4 ± 0.7 |
+| Lactate | mmol/L | 2.2 (1.26–5.19) | ×1.57 | 2 (1.14–4.71) | ×1.43 | 1.8 (1.03–4.24) | ×1.29 | B / B / B | 1.4 (0.8–3.3) |
+| Respiratory quotient | - | 0.908 (0.85–0.96) | ×1.07 | 0.889 (0.84–0.94) | ×1.05 | 0.864 (0.81–0.92) | ×1.02 | B / B / B | 0.85 (0.8–0.9) |
 
 ### Blood
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| Hemoglobin | g/dL | 17.6 (13.3–22) | ×1.04 | 17.3 (13.03–21.59) | ×1.02 | B / B | 17 (12.8–21.2) |
-| Hematocrit | % | 51.4 (38.4–64.9) | ×1.04 | 50.4 (37.67–63.64) | ×1.02 | B / B | 49.5 (37–62.5) |
-| Blood volume | mL/kg | 82 (77–87) | ×0.963 | 83.5 (78.57–88.39) | ×0.982 | B / B | 80–90 |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| Hemoglobin | g/dL | 16.4 (12.33–20.43) | ×0.964 | 17.6 (13.3–22) | ×1.04 | 17.3 (13.03–21.59) | ×1.02 | B / B / B | 17 (12.8–21.2) |
+| Hematocrit | % | 47.7 (35.65–60.23) | ×0.964 | 51.4 (38.4–64.9) | ×1.04 | 50.4 (37.67–63.64) | ×1.02 | B / B / B | 49.5 (37–62.5) |
+| Blood volume | mL/kg | 88.2 (83.02–93.4) | ×1.04 | 82 (77–87) | ×0.963 | 83.5 (78.57–88.39) | ×0.982 | B / B / B | 80–90 |
 
 ### Kidneys
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| GFR | mL/min/1.73m2 | 19.6 (13.07–26.13) | ×0.653 | 19.6 (13.07–26.13) | ×0.653 | A / A | 30 (20–40) |
-| Urine output | mL/kg/h | 1–3 | kept | 1–3 | kept | C / C | 1–3 |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| GFR | mL/min/1.73m2 | 19.6 (13.07–26.13) | ×0.653 | 19.6 (13.07–26.13) | ×0.653 | 19.6 (13.07–26.13) | ×0.653 | C / A / A | 30 (20–40) |
+| Urine output | mL/kg/h | 1–3 | kept | 1–3 | kept | 1–3 | kept | C / C / C | 1–3 |
 
 ### Shunts
 
-| Variable | Unit | 12 h | × change | 24 h | × change | Grade 12 / 24 h | 72 h |
-|---|---|---|---|---|---|---|---|
-| Ductal net left-to-right flow | mL/kg/min | 35 (25–47) | derived | 20 (10–35) | derived | B / B | 4 |
-| Foramen ovale | mL/kg/min | ref. only | kept | ref. only | kept | C / C | ref. only |
-| Ductal diameter | mm | 2.47 ± 0.49 (1.49–3.45) |  | 1.89 ± 0.41 (1.07–2.71) |  | A / A | – |
-| Ductal right-to-left time | % of steps | 0–10 |  | 0–5 |  | A / A | – |
-| Ductal peak L->R velocity | m/s | 1.7 (1.1–2.3) |  | 2.15 (1.5–2.55) |  | A/B / A/B | – |
-| Ductal end-diastolic L->R velocity | m/s | 0.8–2 |  | 0.8–2.3 |  | C / C | – |
-| Ductal peak / end-diastolic velocity | - | 1–2.2 |  | 1–2.2 |  | C / C | – |
+| Variable | Unit | 1 h | × | 12 h | × | 24 h | × | Grade 1 / 12 / 24 h | 72 h |
+|---|---|---|---|---|---|---|---|---|---|
+| Ductal net left-to-right flow | mL/kg/min | 70 (60–80) | derived | 35 (25–47) | derived | 20 (10–35) | derived | B / B / B | 4 |
+| Foramen ovale | mL/kg/min | ref. only | kept | ref. only | kept | ref. only | kept | C / C / C | ref. only |
+| Ductal diameter | mm | 4.85 (3.4–6.9) |  | 2.47 ± 0.49 (1.49–3.45) |  | 1.89 ± 0.41 (1.07–2.71) |  | A/B / A / A | – |
+| Ductal right-to-left time | % of steps | 5–30 |  | 0–10 |  | 0–5 |  | A/B / A / A | – |
+| Ductal peak L->R velocity | m/s | 1.4 (0.8–2.2) |  | 1.7 (1.1–2.3) |  | 2.15 (1.5–2.55) |  | B / A/B / A/B | – |
+| Ductal end-diastolic L->R velocity | m/s | ref. only |  | 0.8–2 |  | 0.8–2.3 |  | C / C / C | – |
+| Ductal peak / end-diastolic velocity | - | ref. only |  | 1–2.2 |  | 1–2.2 |  | C / C / C | – |
 
 ## Sources
 
@@ -10812,6 +10873,8 @@ in range: PA systolic/diastolic (51/26 vs 44/20), LV output (225 vs 207), SVC (8
 - `carmichael2025`: Carmichael TG et al. The application of magnetic susceptibility separation for measuring cerebral oxygenation in preterm neonates. Pediatr Res 2025;98:715-22 ([doi](https://doi.org/10.1038/s41390-025-03966-6))
 - `cohen1991`: Cohen G, Xu C, Henderson-Smart D. Ventilatory response of the sleeping newborn to CO2 during normoxic rebreathing. J Appl Physiol 1991;71:168-74 ([doi](https://doi.org/10.1152/jappl.1991.71.1.168))
 - `cousineau2005`: Cousineau J et al. Clin Biochem 2005;38:905-7 ([doi](https://doi.org/10.1016/j.clinbiochem.2005.07.006))
+- `drayton1987`: Drayton MR, Skidmore R. Ductus arteriosus blood flow during first 48 hours of life. Arch Dis Child 1987;62:1030-4 ([doi](https://doi.org/10.1136/adc.62.10.1030))
+- `dudenhausen1997`: Dudenhausen JW et al. cord blood gases ([doi](https://doi.org/10.1016/s0020-7292(97)02890-7))
 - `fleming2011`: Fleming S et al. Lancet 2011;377:1011-8 ([doi](https://doi.org/10.1016/S0140-6736(10)62226-X))
 - `gerhardt1987`: Gerhardt T, Reifenberg L, Hehre D, Feller R, Bancalari E. Pulmonary mechanics in normal infants and young children during first 5 years of life. Pediatr Pulmonol 1987;3:309-16 ([doi](https://doi.org/10.1002/ppul.1950030506))
 - `glow2020`: Harris DL et al. Glucose profiles in healthy term infants in the first 5 days (GLOW). J Pediatr 2020;223:34-41 ([doi](https://doi.org/10.1016/j.jpeds.2020.02.079))
@@ -10820,10 +10883,12 @@ in range: PA systolic/diastolic (51/26 vs 44/20), LV output (225 vs 207), SVC (8
 - `ha2018`: Ha KS et al. J Korean Med Sci 2018;33:e155 ([doi](https://doi.org/10.3346/jkms.2018.33.e155))
 - `hannover2018`: Healthy term neonates during quiet sleep, Hannover. Acta Paediatr 2019;108:231-8 ([doi](https://doi.org/10.1111/apa.14470))
 - `he2011`: He SR et al. Chin Med J 2011;124:2284-9, PMID 21933558
+- `hiraishi1987`: Hiraishi S et al. Two-dimensional Doppler echocardiographic assessment of closure of the ductus arteriosus in normal newborn infants. J Pediatr 1987;111:755 ([doi](https://doi.org/10.1016/s0022-3476(87)80263-9))
 - `hiraishi1991`: Hiraishi S et al. Interatrial shunt flow profiles in newborn infants. Br Heart J 1991;65:41-5 ([doi](https://doi.org/10.1136/hrt.65.1.41))
 - `jhaveri2023`: Jhaveri S et al. J Cardiovasc Magn Reson 2023;25:26 ([doi](https://doi.org/10.1186/s12968-023-00932-1))
 - `kang2016`: Kang C et al. Pulmonary artery pressure and ductus arteriosus closure in term neonates. Medicine 2016;95:e2599 ([doi](https://doi.org/10.1097/MD.0000000000002599))
 - `katier2006`: Katier N et al. Pediatr Pulmonol 2006;41:1058-64 ([doi](https://doi.org/10.1002/ppul.20492))
+- `koch1968`: Koch G, Wendel H. Adjustment of arterial blood gases and acid base balance in the normal newborn infant during the first week of life. Biol Neonat 1968;12:136-61 (not read: no abstract or full text available) ([doi](https://doi.org/10.1159/000240100))
 - `lee1999`: Lee S et al. Functional residual capacity after vaginal and caesarean delivery. Pediatr Pulmonol 1999;27:318-21 ([doi](https://doi.org/10.1002/(sici)1099-0496(199905)27:5<318::aid-ppul4>3.0.co;2-e))
 - `lee2009`: Lee A et al. Superior vena cava flow in healthy term infants. Arch Dis Child Fetal Neonatal Ed 2010 ([doi](https://doi.org/10.1136/adc.2009.176883))
 - `linderkamp1992`: Linderkamp O et al. The effect of early and late cord-clamping on blood viscosity and other hemorheological parameters in full-term neonates. Acta Paediatr 1992;81:745-50 ([doi](https://doi.org/10.1111/j.1651-2227.1992.tb12095.x))
@@ -10842,6 +10907,8 @@ in range: PA systolic/diastolic (51/26 vs 44/20), LV output (225 vs 207), SVC (8
 - `schmalisch2001`: Schmalisch G et al. Eur Respir J 2001;17:108-14 ([doi](https://doi.org/10.1183/09031936.01.17101080))
 - `schmalisch2005`: Schmalisch G et al. BMC Pediatr 2005;5:36 ([doi](https://doi.org/10.1186/1471-2431-5-36))
 - `shiraishi1991`: Shiraishi H, Yanagisawa M. Bidirectional flow through the ductus arteriosus in normal newborns. Pediatr Cardiol 1991;12:201 ([doi](https://doi.org/10.1007/BF02310566))
+- `siassi1980`: Siassi B et al. Central venous pressure in preterm infants. Biol Neonate 1980;37:285-90 ([doi](https://doi.org/10.1159/000241288))
+- `skinner1991`: Skinner JR et al. Doppler echocardiographic estimates of pulmonary artery pressure in the first days of life. Arch Dis Child 1991;66:386-90 ([doi](https://doi.org/10.1136/adc.66.4_spec_no.386))
 - `smeets2022`: Smeets NJL et al. J Am Soc Nephrol 2022;33:1277-92 ([doi](https://doi.org/10.1681/ASN.2021101326))
 - `smolich1996`: Smolich JJ, Berger PJ, Walker AM. Interrelation between ventricular function, myocardial blood flow, and O2 consumption changes at birth in lambs. Am J Physiol 1996;270:H741-9 ([doi](https://doi.org/10.1152/ajpheart.1996.270.2.H741))
 - `stocks1994`: Stocks J et al. Eur Respir J 1994;7:11-6 ([doi](https://doi.org/10.1183/09031936.94.07010011))
@@ -15734,6 +15801,7 @@ Available scenarios are listed in `public/model_definitions/index.json`.
 ```json
 [
   "term_neonate_12h",
+  "term_neonate_1h",
   "term_neonate_24h",
   "term_neonate_72h",
   "tof",
