@@ -14,4 +14,4 @@ What is special about the neonate:
 
 Find these on the right: **LV stroke volume**, **LV output**, **SvO₂** (mixed venous saturation: falls when delivery falls behind demand), **lactate**, and the oxygen delivery to the **brain** and the **lower body** (ml O₂/min; the lower body is an estimate from renal flow). This is a healthy term baby, 3 days old, 3.5 kg. Remember the numbers.
 
-All treatment targets are also under **Interventions** (fluids, blood, contractility, diastolic function, SVR, PVR, duct, foramen ovale). There you can also start **VA-ECMO**, and **intubate and ventilate**: the baby is then sedated and stops breathing by itself, and the **Ventilator** tab above the diagram shows the SLE6000, where you can change the settings.
+All treatment targets are also under **Interventions** (fluids, blood, contractility, diastolic function, SVR, PVR, duct, foramen ovale). There you can also start **VA- or VV-ECMO**, and **intubate and ventilate**: the baby is then sedated and stops breathing by itself, and the **Ventilator** tab above the diagram shows the SLE6000, where you can change the settings.

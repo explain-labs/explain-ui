@@ -144,13 +144,32 @@ const INTERVENTIONS: Record<string, Intervention> = {
     kind: "button",
     label: "Start VA-ECMO",
     icon: "pi pi-play",
-    help: "Drainage right atrium, return aortic arch; 2500 rpm (~135 ml/kg/min), sweep gas 0.5 l/min with 60 % O₂.",
+    help: "Drainage right atrium, return aortic arch; 2500 rpm (~135 ml/kg/min), sweep gas 0.5 l/min with 60 % O₂. Supports the circulation and oxygenation.",
     requires: ["Ecls"],
     ops: [
       { kind: "set", path: "Ecls.cannulation", value: "VA" },
       { kind: "set", path: "Ecls.gas_fio2", value: 0.6, it: 1 },
       { kind: "set", path: "Ecls.gas_flow", value: 0.5, it: 1 },
       { kind: "set", path: "Ecls.pump_rpm", value: 2500, it: 1 },
+      { kind: "set", path: "Ecls.ecls_clamped", value: false },
+      { kind: "set", path: "Ecls.ecls_running", value: true },
+    ],
+  },
+  // VV-ECMO through the double-lumen cannula in the right atrium. Headless in severe PPHN
+  // (1 h baby, PVR x5): 3000 rpm ~137 ml/kg/min, SaO2 pre/post 60/37 -> 91/85 %, SvO2 31 -> 84 %,
+  // MAP, LV output and PAP unchanged: VV supports oxygenation, not the circulation
+  ecmo_vv_start: {
+    id: "ecmo_vv_start",
+    kind: "button",
+    label: "Start VV-ECMO",
+    icon: "pi pi-play",
+    help: "Double-lumen cannula in the right atrium; 3000 rpm (~135 ml/kg/min), sweep gas 0.5 l/min with 100 % O₂. Oxygenates; does not support the circulation.",
+    requires: ["Ecls"],
+    ops: [
+      { kind: "set", path: "Ecls.cannulation", value: "VV-DL" },
+      { kind: "set", path: "Ecls.gas_fio2", value: 1.0, it: 1 },
+      { kind: "set", path: "Ecls.gas_flow", value: 0.5, it: 1 },
+      { kind: "set", path: "Ecls.pump_rpm", value: 3000, it: 1 },
       { kind: "set", path: "Ecls.ecls_clamped", value: false },
       { kind: "set", path: "Ecls.ecls_running", value: true },
     ],
@@ -197,7 +216,7 @@ export default defineLesson({
   scenario: "term_neonate_72h",
   controls: [
     "saline", "transfusion", "contractility", "diastolic_function", "svr", "pvr", "ductus", "foramen_ovale",
-    "ventilate", "extubate", "ecmo_start", "ecmo_rpm", "ecmo_stop",
+    "ventilate", "extubate", "ecmo_start", "ecmo_vv_start", "ecmo_rpm", "ecmo_stop",
   ],
   ventilatorStopsBreathing: true,
   interventions: INTERVENTIONS,
