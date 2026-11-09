@@ -194,10 +194,26 @@ export default defineLesson({
         // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
         num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
         num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
+      ],
+    },
+    {
+      // arterial blood gas with electrolytes, from the ascending aorta (pre-ductal)
+      key: "labs",
+      title: "Labs (arterial)",
+      parameters: [
+        num("pH", "AA.ph", "", 2),
+        num("pCO₂", "AA.pco2", "kPa", 1, 0.1333),
+        num("pO₂", "AA.po2", "kPa", 1, 0.1333),
+        num("HCO₃⁻", "AA.hco3", "mmol/l", 1),
+        num("BE", "AA.be", "mmol/l", 1),
+        num("SaO₂", "AA.so2", "%"),
         num("Hb", "AA.solutes.hemoglobin", "mmol/l", 1),
         num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
-        num("pH", "AA.ph", "", 2),
-        num("BE", "AA.be", "mmol/l", 1),
+        num("Glucose", "AA.solutes.glucose", "mmol/l", 1),
+        num("Na⁺", "AA.solutes.na", "mmol/l"),
+        num("K⁺", "AA.solutes.k", "mmol/l", 1),
+        num("Cl⁻", "AA.solutes.cl", "mmol/l"),
+        num("Ca²⁺ (ionised)", "AA.solutes.ca", "mmol/l", 2),
       ],
     },
     {
