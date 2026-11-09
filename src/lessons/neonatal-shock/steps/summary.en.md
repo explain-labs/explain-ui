@@ -1,7 +1,8 @@
 | Phenotype | What fails | Clues | Primary target |
 |---|---|---|---|
 | Hypovolaemic | Preload | Tachycardia, low CVP, falling SvO₂; BP late | Volume (blood if bleeding) |
-| Distributive | SVR, leak | Low MAP and low diastolic pressure, high output, normal SvO₂ | Vasopressor; careful volume |
+| Septic, cold | Contractility, leak (SVR high) | Near-normal MAP, narrow pulse pressure, low output, low SvO₂ | Inotrope (adrenaline); careful volume |
+| Septic, warm (distributive) | SVR, leak | Low MAP and low diastolic pressure, high output, normal SvO₂ | Vasopressor (noradrenaline); careful volume |
 | Cardiogenic, systolic | Contractility | High CVP/EDP, small SV, poor response to fluid | Inotrope, afterload, cause |
 | Cardiogenic, diastolic | Filling | High EDP, small EDV, fluid raises EDP | Careful volume, rate, lusitropy |
 | PPHN | PVR (RV afterload) | Pre/post SpO₂ gap, R→L shunts | Lower PVR, keep SVR > PVR, the duct as pop-off |

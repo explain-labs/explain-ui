@@ -25,6 +25,17 @@ const TERM = fresh("term_neonate_72h");
 // the bleed case: a subgaleal haemorrhage presents in the first hours to day of life,
 // so a 12 h baby with the duct still half open (left-to-right)
 const NEWBORN = fresh("term_neonate_12h");
+
+// cold septic shock: myocardial depression, vasoconstriction and capillary leak. Headless on
+// term_neonate_72h (+4 min): MAP 56 -> 52 with LVO 201 -> 107, SvO2 78 -> 64 %, lower-body DO2
+// -45 %; a 10 ml/kg bolus leaks away; noradrenaline 0.3 MAP 62 / LVO +15 %, adrenaline 0.1
+// MAP 66 / LVO +37 %, SvO2 72 %
+const COLD_SEPSIS: Op[] = [
+  { kind: "scale", group: "heart_el_max", factor: 0.5 },
+  { kind: "scale", group: "systemic_resistances", factor: 1.5 },
+  { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
+  { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
+];
 const TRANSITION = fresh("term_neonate_1h");
 
 const call = (fn: string, ...args: unknown[]): Op => ({ kind: "call", fn, args });
@@ -337,8 +348,52 @@ export default defineLesson({
       ],
     },
     {
+      id: "septic-cold",
+      title: "Septic shock: cold",
+      onEnter: TERM,
+      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Monitor.svo2", "Monitor.do2_lb"],
+      actions: [
+        {
+          id: "cold-sepsis",
+          label: "Cold septic shock: weak heart, vasoconstriction, capillary leak",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: COLD_SEPSIS,
+        },
+        wait(2),
+        {
+          id: "bolus",
+          label: "Bolus NaCl 0.9 % 10 ml/kg",
+          icon: "pi pi-plus",
+          ops: [bolus(10)],
+          duration: 60,
+        },
+        {
+          id: "noradrenaline",
+          label: "Noradrenaline 0.3 mcg/kg/min",
+          icon: "pi pi-plus",
+          ops: [infusion("noradrenaline", 0.3)],
+        },
+        {
+          // back to the cold shock without drugs, computed at once, to try the other drug
+          id: "replay",
+          label: "Repeat the cold sepsis (reset, sepsis, wait 4 min)",
+          icon: "pi pi-replay",
+          severity: "secondary",
+          ops: [...TERM, ...COLD_SEPSIS, { kind: "calculate", seconds: 240 }],
+        },
+        {
+          id: "adrenaline",
+          label: "Adrenaline 0.1 mcg/kg/min",
+          icon: "pi pi-plus",
+          ops: [infusion("adrenaline", 0.1)],
+        },
+        again(TERM),
+      ],
+    },
+    {
       id: "distributive",
-      title: "Distributive shock and capillary leak",
+      title: "Septic shock: warm",
       onEnter: TERM,
       highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Circulation.total_blood_volume", "Interstitium.isf_volume_ml_kg"],
       actions: [
