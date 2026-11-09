@@ -44,7 +44,17 @@ const TRANSITION = fresh("term_neonate_1h");
 const call = (fn: string, ...args: unknown[]): Op => ({ kind: "call", fn, args });
 const bolus = (mlPerKg: number, seconds = 60): Op =>
   call("Fluids.add_volume", ML(mlPerKg), seconds, "normal_saline", "VLB");
-const infusion = (drug: string, rate: number): Op => call("Drugs.set_infusion", drug, rate);
+
+// target buttons: change a lever relative to where it is now (the point is the target, not a drug)
+const target = (id: string, label: string, group: string, factor: number, icon = "pi pi-arrow-up"): LessonAction => ({
+  id,
+  label,
+  icon,
+  ops: [{ kind: "scale", group, factor, relative: true }],
+});
+const SVR_UP = (f: number) => target("svr-up", `Increase SVR (×${f})`, "systemic_resistances", f);
+const CONTRACTILITY_UP = target("contractility-up", "Increase contractility (×2)", "heart_el_max", 2);
+const DIASTOLIC_UP = target("diastolic-up", "Improve diastolic function (×2)", "heart_el_min", 0.5);
 
 // shared buttons
 const wait = (minutes: number): LessonAction => ({
@@ -371,12 +381,7 @@ export default defineLesson({
           ops: [bolus(10)],
           duration: 60,
         },
-        {
-          id: "noradrenaline",
-          label: "Noradrenaline 0.3 mcg/kg/min",
-          icon: "pi pi-plus",
-          ops: [infusion("noradrenaline", 0.3)],
-        },
+        SVR_UP(1.5),
         {
           // back to the cold shock without drugs, computed at once, to try the other drug
           id: "replay",
@@ -385,12 +390,7 @@ export default defineLesson({
           severity: "secondary",
           ops: [...TERM, ...COLD_SEPSIS, { kind: "calculate", seconds: 300 }, bolus(10), { kind: "calculate", seconds: 120 }],
         },
-        {
-          id: "adrenaline",
-          label: "Adrenaline 0.1 mcg/kg/min",
-          icon: "pi pi-plus",
-          ops: [infusion("adrenaline", 0.1)],
-        },
+        CONTRACTILITY_UP,
         again(TERM),
       ],
     },
@@ -419,12 +419,7 @@ export default defineLesson({
           duration: 60,
         },
         wait(2),
-        {
-          id: "noradrenaline",
-          label: "Noradrenaline 0.3 mcg/kg/min",
-          icon: "pi pi-plus",
-          ops: [infusion("noradrenaline", 0.3)],
-        },
+        SVR_UP(2),
         again(TERM),
       ],
     },
@@ -448,12 +443,7 @@ export default defineLesson({
           ops: [bolus(10)],
           duration: 60,
         },
-        {
-          id: "adrenaline",
-          label: "Adrenaline 0.1 mcg/kg/min",
-          icon: "pi pi-plus",
-          ops: [infusion("adrenaline", 0.1)],
-        },
+        CONTRACTILITY_UP,
         again(TERM),
       ],
     },
@@ -477,6 +467,7 @@ export default defineLesson({
           ops: [bolus(10)],
           duration: 60,
         },
+        DIASTOLIC_UP,
         {
           id: "hr-160",
           label: "Heart rate 160",
@@ -508,12 +499,7 @@ export default defineLesson({
           severity: "danger",
           ops: [{ kind: "scale", group: "pulmonary_resistances", factor: 3 }],
         },
-        {
-          id: "noradrenaline",
-          label: "Noradrenaline 0.3 mcg/kg/min",
-          icon: "pi pi-plus",
-          ops: [infusion("noradrenaline", 0.3)],
-        },
+        SVR_UP(1.5),
         {
           id: "lower-pvr",
           label: "Lower PVR (oxygen / iNO): PVR ×1.5",

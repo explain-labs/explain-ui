@@ -16,7 +16,9 @@ export type Op =
   | { kind: "call"; fn: string; args?: unknown[]; at?: number }
   // set a ModelScaler group to an absolute factor (1 = baseline) — useExplain().scale,
   // the lever of Common tasks' scale tasks, e.g. "lung_compliance"'s elastance groups
-  | { kind: "scale"; group: string | string[]; factor: number }
+  // `relative`: multiply the group's current factor (read back from the model)
+  // instead of setting it, e.g. "increase contractility ×2" on top of a shock
+  | { kind: "scale"; group: string | string[]; factor: number; relative?: boolean }
   // drive a registered intervention (see interventions.ts) to on/off, or a
   // slider to a raw value
   | { kind: "control"; id: string; state: "on" | "off" | number }

@@ -20,12 +20,12 @@ Now give **Bolus NaCl 0.9 % 20 ml/kg**, then press **Fast-forward 2 min**. Watch
 
 With a leak, a bolus stays in the circulation only briefly. Here it is gone within a few minutes (the leak is exaggerated so it fits the session). In the patient this becomes oedema, worse lung compliance and a positive fluid balance.
 
-Now start **Noradrenaline 0.3 mcg/kg/min**.
+Now treat the target that failed: **Increase SVR (×2)** (what a vasopressor such as noradrenaline does).
 
-[[action:noradrenaline]]
+[[action:svr-up]]
 
-> The pressure rises, but not to normal. Why does a vasopressor fit this phenotype better than more fluid?
+> What happens to the pressure, the LV output and SvO₂? Why does this target fit here better than more fluid?
 
 [[reveal]]
 
-The targets were **SVR** and **leak**: restore tone, give volume carefully. Noradrenaline alone does not fully normalise the pressure, and a higher dose adds little in the model.
+The pressure returns to normal (about 56) and the LV output falls back from its hyperdynamic level (about 260 → 180) while SvO₂ stays fine: tone restored, no extra volume needed. The targets were **SVR** and **leak**: restore tone, give volume carefully. Compare with the cold shock, where the same lever made things worse.

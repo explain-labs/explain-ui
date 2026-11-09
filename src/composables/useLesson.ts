@@ -16,6 +16,7 @@ import {
 import type { CentreTab, Lesson, LessonAction, LessonStep, Op } from "@/lessons/types";
 import { renderMarkdown } from "@/utils/markdown";
 import { splitActionMarkers, type StepBlock } from "@/lessons/actionMarkers";
+import { currentScaleFactor } from "@/services/commonTasks";
 import { evaluate, samplePaths } from "@explain/papers/evaluate.js";
 
 // Runtime for one lesson page: loads the lesson's starting state, tracks the
@@ -451,7 +452,10 @@ export function useLesson(lesson: Lesson) {
         explain.call(op.fn, (op.args ?? []) as any[], op.at ?? 0);
         break;
       case "scale":
-        for (const g of Array.isArray(op.group) ? op.group : [op.group]) explain.scale(g, op.factor);
+        for (const g of Array.isArray(op.group) ? op.group : [op.group]) {
+          const now = op.relative ? currentScaleFactor({ kind: "scale", group: g }, modelState.value) ?? 1 : 1;
+          explain.scale(g, op.relative ? now * op.factor : op.factor);
+        }
         break;
       case "control":
         applyControl(op.id, op.state);

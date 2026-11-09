@@ -105,7 +105,7 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 |---|---|
 | `{ kind: "set", path, value, it?, at? }` | `setProp(path, value, it=1, at=0)`: numbers tween over `it` s of model time, booleans/strings swap |
 | `{ kind: "call", fn, args?, at? }` | `call(fn, args, at)`, e.g. `fn: "Drugs.set_infusion", args: ["pge1", 0.05]` |
-| `{ kind: "scale", group, factor }` | `scale(group, factor)` for each group: an absolute ModelScaler factor (1 = baseline). This is the lever of Common tasks' scale tasks, e.g. `["left_lung_elastances", "right_lung_elastances"]` for lung compliance (elastance ×2 = compliance ÷2) |
+| `{ kind: "scale", group, factor }` | `scale(group, factor)` for each group: an absolute ModelScaler factor (1 = baseline). This is the lever of Common tasks' scale tasks, e.g. `["left_lung_elastances", "right_lung_elastances"]` for lung compliance (elastance ×2 = compliance ÷2). With `relative: true` the factor multiplies the group's current one (read back from the model), e.g. "increase contractility ×2" on top of a shock |
 | `{ kind: "control", id, state }` | Drive an intervention: `"on"`/`"off"` for toggles, a raw number for sliders |
 | `{ kind: "calculate", seconds }` | Fast-forward model time synchronously. The op list waits until the worker reports the calculation done (3 min timeout); meanwhile, and during a `loadScenario`, the step header shows "Computing…", the clicked button a spinner, and all action buttons are disabled |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |

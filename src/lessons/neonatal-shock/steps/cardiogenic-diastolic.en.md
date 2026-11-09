@@ -18,7 +18,17 @@ Give **Bolus NaCl 0.9 % 10 ml/kg**.
 
 A stiff ventricle turns a little extra volume into a lot of extra pressure: **the filling pressure rises steeply**, and the lungs pay the price.
 
-Now try **Heart rate 160**, and then **Heart rate 100**.
+Now treat the target: **Improve diastolic function (×2)** (half the stiffness).
+
+[[action:diastolic-up]]
+
+> What happens to the EDP, the CVP and the LV output?
+
+[[reveal]]
+
+The ventricle fills at a lower pressure: LV EDP about 20 → 16, CVP about 13 → 9, and the output rises (about 150 → 200). In practice this target is hard to reach with drugs (lusitropy: milrinone, levosimendan; treat the cause, e.g. ischaemia), so rate and volume matter most.
+
+Now the heart rate: try **Heart rate 160**, and then **Heart rate 100**.
 
 [[action:hr-160,hr-100]]
 

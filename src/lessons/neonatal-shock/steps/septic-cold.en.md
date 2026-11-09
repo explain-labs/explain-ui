@@ -20,24 +20,24 @@ Give **Bolus NaCl 0.9 % 10 ml/kg**.
 
 A little: the heart rate falls somewhat and the output rises about 10 %, but the leak takes the fluid away, the weak heart cannot use the preload, and the saline deepens the acidosis (BE falls by about 3).
 
-Now a drug. Start with **Noradrenaline 0.3 mcg/kg/min**, and fast-forward a few minutes if you like.
+Now treat a **target**. First the pressure: **Increase SVR (×1.5)** (what a vasopressor does). Fast-forward a few minutes if you like.
 
-[[action:noradrenaline]]
+[[action:svr-up]]
 
-> The pressure rises. Does the flow? And the lactate?
+> The pressure rises. Does the flow? And SvO₂ and the lactate?
 
 [[reveal]]
 
-Noradrenaline raises the pressure (about 64), the LV output only partly (about 125), SvO₂ to about 52 %, and the **lactate does not fall**: it adds afterload to a heart that cannot cope with it.
+The pressure rises a little, but the LV output **falls** (about 100 → 70), SvO₂ drops further (about 33 %) and the **lactate keeps rising** (about 6). More afterload for a heart that cannot cope with it: a better number, a sicker baby.
 
-Now the other drug from the same starting point. Press **Repeat the cold sepsis** (reset, 5 minutes of sepsis, the bolus and 2 more minutes, computed in one go: about 45 seconds), then start **Adrenaline 0.1 mcg/kg/min**.
+Now the other target from the same starting point. Press **Repeat the cold sepsis** (reset, 5 minutes of sepsis, the bolus and 2 more minutes, computed in one go: about 45 seconds), then **Increase contractility (×2)** (what an inotrope does).
 
 [[action:replay]]
 
-[[action:adrenaline]]
+[[action:contractility-up]]
 
-> Compare with noradrenaline after a few minutes: pressure, LV output, SvO₂, lactate.
+> Compare with the SVR: pressure, LV output, SvO₂, lactate.
 
 [[reveal]]
 
-Adrenaline raises the pressure (about 72) **and** the flow (LV output about 160, SvO₂ about 63 %), and the **lactate starts to fall**. It acts on the target that failed: **contractility**. That is why cold shock is treated with an inotrope (adrenaline; dobutamine or milrinone, not in the model) and warm shock with a vasopressor (noradrenaline), as in the next step.
+Pressure **and** flow rise (MAP about 60, LV output about 140, SvO₂ about 57 %), and the **lactate starts to fall**. This is the target that failed: **contractility**. In practice: an inotrope (adrenaline, dobutamine, milrinone), not a pure vasopressor. In warm shock, in the next step, it is the other way round.

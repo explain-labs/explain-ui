@@ -10,15 +10,15 @@ Press **PPHN: PVR ×3**.
 
 **Differential cyanosis**: deoxygenated blood goes right-to-left through the duct into the descending aorta. Watch **DO₂ lower body**: it is fed by that post-ductal blood. Left ventricular output falls, because less blood passes through the lungs to the left atrium.
 
-Start **Noradrenaline 0.3 mcg/kg/min**.
+Support the systemic side: **Increase SVR (×1.5)** (what a vasopressor does).
 
-[[action:noradrenaline]]
+[[action:svr-up]]
 
 > What happens to the duct flow and the post-ductal saturation?
 
 [[reveal]]
 
-The direction of the shunt depends on the **ratio of SVR to PVR**. Supporting systemic pressure reduces the right-to-left shunt. Systemic vasodilators do the opposite.
+The direction of the shunt depends on the **ratio of SVR to PVR**. Raising SVR cuts the right-to-left duct flow (about −63 → −20 ml/kg/min) and the post-ductal saturation rises a little (71 → 77 %). Systemic vasodilators do the opposite.
 
 Now treat the cause: **Lower PVR** (stands for oxygen, ventilation and iNO).
 

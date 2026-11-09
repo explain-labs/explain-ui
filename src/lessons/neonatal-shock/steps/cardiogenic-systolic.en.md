@@ -18,12 +18,12 @@ The reflex answer to shock is a bolus. Try it: **Bolus NaCl 0.9 % 10 ml/kg**.
 
 A weak ventricle sits on the **flat part of its Frank-Starling curve**: more preload brings mostly more pressure (congestion, oedema) and little flow.
 
-Now start **Adrenaline 0.1 mcg/kg/min**.
+Now treat the target that failed: **Increase contractility (×2)** (what an inotrope does).
 
-[[action:adrenaline]]
+[[action:contractility-up]]
 
 > What changes now?
 
 [[reveal]]
 
-The target was **contractility**. An inotrope moves the whole Starling curve up. In practice you would also think of milrinone (inotropy plus afterload reduction; not in the model), of afterload, and of treating the cause (glucose, calcium, temperature, arrhythmia).
+The LV output rises (about 150 → 210) and the CVP falls (about 12 → 8): the whole Starling curve moves up. The target was **contractility**. In practice: adrenaline, dobutamine or milrinone (also lowers afterload), and treating the cause (glucose, calcium, temperature, arrhythmia).
