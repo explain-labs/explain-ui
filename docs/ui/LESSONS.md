@@ -71,7 +71,7 @@ export default defineLesson({
 | `id` | Also the markdown file stem |
 | `title` | Step title (and the tooltip on the header step dot) |
 | `image?` | `{ file, caption? }`: a file in `img/`, shown under the text |
-| `actions?` | Buttons: `{ id, label, icon?, severity?, ops }` |
+| `actions?` | Buttons: `{ id, label, icon?, severity?, ops, duration? }`. With `duration` (model seconds, e.g. a bleed over 120 s) the button fills as a progress bar from the click until that much model time has passed; fast-forward jumps it, pause freezes it, a rebuild clears it |
 | `highlight?` | Numeric paths (a card's first `props` entry) to ring amber on this step |
 | `diagramHighlight?` | Diagram component/connector names (e.g. `DA`, `FO`, `VSD`, `RV_AA`) to point at with a pulsing amber outline and caption. Names missing from the scenario are skipped |
 | `diagramLabels?` | Caption per highlighted name, overriding the shared names in `src/lessons/diagramLabels.ts`. `""` highlights without a caption |

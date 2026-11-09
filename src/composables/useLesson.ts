@@ -13,7 +13,7 @@ import {
   type SliderIntervention,
   type ToggleIntervention,
 } from "@/lessons/interventions";
-import type { CentreTab, Lesson, LessonStep, Op } from "@/lessons/types";
+import type { CentreTab, Lesson, LessonAction, LessonStep, Op } from "@/lessons/types";
 import { renderMarkdown } from "@/utils/markdown";
 import { evaluate, samplePaths } from "@explain/papers/evaluate.js";
 
@@ -231,6 +231,38 @@ export function useLesson(lesson: Lesson) {
     const v = valueOf(c.read);
     if (v === undefined) return 0;
     return Math.round(Math.max(0, Math.min(1, (v - p.from) / span)) * 100);
+  }
+
+  // ----- timed actions ------------------------------------------------------------
+  // An action with a `duration` (model seconds) fills its button from the click
+  // until that much model time has passed. Model time comes from the slow rows
+  // while running and from the state snapshot when paused, so fast-forward
+  // (`calculate`) jumps the fill and a pause freezes it.
+  function modelTime(): number | undefined {
+    if (isRunning.value) {
+      const t = latestRow()?.time;
+      if (typeof t === "number") return t;
+    }
+    const t = (modelState.value as any)?.model_time_total;
+    return typeof t === "number" ? t : undefined;
+  }
+  const timed = ref<Record<string, { start: number; seconds: number }>>({});
+  const actionKey = (actionId: string) => `${step.value.id}/${actionId}`;
+  function runAction(a: LessonAction) {
+    const t0 = modelTime();
+    if (a.duration && a.duration > 0 && t0 !== undefined)
+      timed.value = { ...timed.value, [actionKey(a.id)]: { start: t0, seconds: a.duration } };
+    applyOps(a.ops);
+  }
+  // 0–100 while a timed action plays out, undefined otherwise (and once done)
+  function actionTimeProgress(actionId: string): number | undefined {
+    const tm = timed.value[actionKey(actionId)];
+    if (!tm) return undefined;
+    const now = modelTime();
+    if (now === undefined) return 0;
+    const f = (now - tm.start) / tm.seconds;
+    if (f >= 1) return undefined;
+    return Math.round(Math.max(0, f) * 100);
   }
 
   // on/off of a toggle: whichever of its two values the current value is nearer
@@ -500,6 +532,7 @@ export function useLesson(lesson: Lesson) {
     if (!ready) {
       staleRows = slowValues.value;
       pending.value = {};
+      timed.value = {}; // a rebuild ends whatever was playing out
       needBaselines = true;
       return;
     }
@@ -556,6 +589,8 @@ export function useLesson(lesson: Lesson) {
     progress,
     applyControl: (id: string, state: ToggleState | number) => applyOps([{ kind: "control", id, state }]),
     applyOps,
+    runAction,
+    actionTimeProgress,
     restart,
     toggleRun,
     runs,

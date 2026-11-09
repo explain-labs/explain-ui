@@ -40,6 +40,9 @@ export interface LessonAction {
   icon?: string; // PrimeIcons class, e.g. "pi pi-times"
   severity?: "primary" | "secondary" | "success" | "info" | "warn" | "danger" | "contrast";
   ops: Op[];
+  // model seconds the action takes to play out (e.g. a bleed over 120 s): after a
+  // click the button fills as model time passes, so fast-forward and pause show
+  duration?: number;
 }
 
 // One numeric card in the lesson's readout. Same display rules as a scenario

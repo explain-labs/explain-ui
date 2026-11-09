@@ -24,11 +24,14 @@ const anyRunning = computed(() =>
   Object.values(rt.runs.value).some((r) => ["loading", "settling", "sampling"].includes(r.status)),
 );
 
-// Progress (0–100) to show inside an action button: the first control it
-// drives that is currently moving in the button's own direction ("off" ops
-// light up while closing, others while opening), so a close and an open
-// button for the same control don't both fill. Undefined when idle.
+// Progress (0–100) to show inside an action button: a timed action (`duration`)
+// playing out in model time, else the first control it drives that is
+// currently moving in the button's own direction ("off" ops light up while
+// closing, others while opening), so a close and an open button for the same
+// control don't both fill. Undefined when idle.
 function actionProgress(a: LessonAction): number | undefined {
+  const timed = rt.actionTimeProgress(a.id);
+  if (timed !== undefined) return timed;
   for (const op of a.ops) {
     if (op.kind !== "control" || !rt.isPending(op.id)) continue;
     if ((op.state === "off") !== rt.isClosing(op.id)) continue;
@@ -83,7 +86,7 @@ function actionProgress(a: LessonAction): number | undefined {
           size="small"
           class="action-btn relative overflow-hidden"
           :disabled="!rt.modelReady.value"
-          @click="rt.applyOps(a.ops)"
+          @click="rt.runAction(a)"
         >
           <span
             v-if="actionProgress(a) !== undefined"

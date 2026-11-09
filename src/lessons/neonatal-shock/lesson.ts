@@ -136,6 +136,7 @@ export default defineLesson({
           icon: "pi pi-exclamation-triangle",
           severity: "danger",
           ops: [call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD")],
+          duration: 120,
         },
         wait(2),
         {
@@ -143,6 +144,7 @@ export default defineLesson({
           label: "Bolus NaCl 0.9 % 20 ml/kg",
           icon: "pi pi-plus",
           ops: [bolus(20)],
+          duration: 60,
         },
         again(TERM),
       ],
@@ -169,6 +171,7 @@ export default defineLesson({
           label: "Bolus NaCl 0.9 % 20 ml/kg",
           icon: "pi pi-plus",
           ops: [bolus(20)],
+          duration: 60,
         },
         wait(2),
         {
@@ -198,6 +201,7 @@ export default defineLesson({
           label: "Bolus NaCl 0.9 % 10 ml/kg",
           icon: "pi pi-plus",
           ops: [bolus(10)],
+          duration: 60,
         },
         {
           id: "adrenaline",
@@ -226,6 +230,7 @@ export default defineLesson({
           label: "Bolus NaCl 0.9 % 10 ml/kg",
           icon: "pi pi-plus",
           ops: [bolus(10)],
+          duration: 60,
         },
         {
           id: "hr-160",
