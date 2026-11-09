@@ -18,4 +18,10 @@ Now give **Bolus NaCl 0.9 % 20 ml/kg**.
 
 > What happens to the CVP, the stroke volume and the heart rate? And to the **BE**?
 
-The target was **preload**: the volume came back, and so did stroke volume. The fall in BE is the **hyperchloraemic acidosis** of saline. For a large haemorrhage the right fluid is blood.
+The target was **preload**: the volume came back, and so did stroke volume. The fall in BE is the **hyperchloraemic acidosis** of saline. And look at the **Hb**: it fell from 10 to about 7 mmol/l. The heart now pumps more blood with less oxygen in it.
+
+Press **Start this case again**, bleed again, and this time press **Transfuse packed red cells 20 ml/kg**.
+
+> Compare with the saline bolus a few minutes later: Hb, BE, LV output, heart rate and DO₂.
+
+After the transfusion the Hb is back to normal and there is no acidosis. The heart delivers *more* oxygen while pumping almost 30 % *less* (LV output about 175 against 225 ml/kg/min after saline). In a large haemorrhage, blood replaces both volume and oxygen-carrying capacity; crystalloid only replaces volume.

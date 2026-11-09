@@ -103,6 +103,7 @@ export default defineLesson({
         // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
         num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
         num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
+        num("Hb", "AA.solutes.hemoglobin", "mmol/l", 1),
         num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
         num("pH", "AA.ph", "", 2),
         num("BE", "AA.be", "mmol/l", 1),
@@ -144,6 +145,13 @@ export default defineLesson({
           label: "Bolus NaCl 0.9 % 20 ml/kg",
           icon: "pi pi-plus",
           ops: [bolus(20)],
+          duration: 60,
+        },
+        {
+          id: "transfuse",
+          label: "Transfuse packed red cells 20 ml/kg",
+          icon: "pi pi-plus",
+          ops: [call("Fluids.add_volume", ML(20), 60, "packed_cells", "VLB")],
           duration: 60,
         },
         again(TERM),
