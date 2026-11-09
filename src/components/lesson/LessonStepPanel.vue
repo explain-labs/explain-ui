@@ -4,6 +4,7 @@ import Button from "primevue/button";
 import Tag from "primevue/tag";
 import { computed } from "vue";
 import ComparisonTable from "@/components/lesson/ComparisonTable.vue";
+import LessonActionButton from "@/components/lesson/LessonActionButton.vue";
 import { LessonKey } from "@/composables/useLesson";
 import { t, UI } from "@/lessons/i18n";
 import type { LessonAction } from "@/lessons/types";
@@ -24,22 +25,21 @@ const anyRunning = computed(() =>
   Object.values(rt.runs.value).some((r) => ["loading", "settling", "sampling"].includes(r.status)),
 );
 
-// Progress (0–100) to show inside an action button: a timed action (`duration`)
-// playing out in model time, else the first control it drives that is
-// currently moving in the button's own direction ("off" ops light up while
-// closing, others while opening), so a close and an open button for the same
-// control don't both fill. Undefined when idle.
-function actionProgress(a: LessonAction): number | undefined {
-  const timed = rt.actionTimeProgress(a.id);
-  if (timed !== undefined) return timed;
-  for (const op of a.ops) {
-    if (op.kind !== "control" || !rt.isPending(op.id)) continue;
-    if ((op.state === "off") !== rt.isClosing(op.id)) continue;
-    const p = rt.progress(op.id);
-    if (p !== undefined) return p;
-  }
-  return undefined;
+// action buttons: those placed in the text by a `[[action:id]]` marker render
+// there; the rest stay in the row under the text
+const actionsById = computed(
+  () => new Map((rt.step.value.actions ?? []).map((a) => [a.id, a] as [string, LessonAction])),
+);
+function blockActions(ids: string[]): LessonAction[] {
+  return ids.flatMap((id) => {
+    const a = actionsById.value.get(id);
+    if (!a) console.warn(`lesson step "${rt.step.value.id}": [[action:${id}]] names no action of this step`);
+    return a ? [a] : [];
+  });
 }
+const restActions = computed(() =>
+  (rt.step.value.actions ?? []).filter((a) => !rt.inlineActionIds.value.has(a.id)),
+);
 </script>
 
 <template>
@@ -53,7 +53,12 @@ function actionProgress(a: LessonAction): number | undefined {
     <h2 class="text-xl font-semibold leading-tight">{{ t(rt.step.value.title, rt.lang.value) }}</h2>
 
     <div class="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-3">
-      <div class="md-body leading-relaxed" v-html="rt.stepHtml.value"></div>
+      <template v-for="(b, i) in rt.stepBlocks.value" :key="i">
+        <div v-if="b.kind === 'html'" class="md-body leading-relaxed" v-html="b.html"></div>
+        <div v-else class="flex flex-wrap gap-2 my-1">
+          <LessonActionButton v-for="a in blockActions(b.ids)" :key="a.id" :action="a" />
+        </div>
+      </template>
 
       <figure v-if="rt.stepImageUrl.value" class="flex flex-col gap-1">
         <img
@@ -76,30 +81,8 @@ function actionProgress(a: LessonAction): number | undefined {
         @run="rt.runExperiment(experiment.id)"
       />
 
-      <div v-if="rt.step.value.actions?.length" class="flex flex-wrap gap-2">
-        <!-- while the control this button drives is moving, the button itself
-             fills up as a progress bar and shows the percentage -->
-        <Button
-          v-for="a in rt.step.value.actions"
-          :key="a.id"
-          :severity="a.severity ?? 'primary'"
-          size="small"
-          class="action-btn relative overflow-hidden"
-          :disabled="!rt.modelReady.value"
-          @click="rt.runAction(a)"
-        >
-          <span
-            v-if="actionProgress(a) !== undefined"
-            class="action-fill"
-            :style="{ width: `${actionProgress(a)}%` }"
-          ></span>
-          <i v-if="actionProgress(a) !== undefined" class="pi pi-spin pi-spinner relative"></i>
-          <i v-else-if="a.icon" :class="a.icon" class="relative"></i>
-          <span class="relative">{{ t(a.label, rt.lang.value) }}</span>
-          <span v-if="actionProgress(a) !== undefined" class="relative tabular-nums opacity-90">
-            {{ actionProgress(a) }}%
-          </span>
-        </Button>
+      <div v-if="restActions.length" class="flex flex-wrap gap-2">
+        <LessonActionButton v-for="a in restActions" :key="a.id" :action="a" />
       </div>
     </div>
 
@@ -149,15 +132,6 @@ function actionProgress(a: LessonAction): number | undefined {
 .refs a {
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-/* progress fill inside an action button: a darker band growing left→right,
-   eased over the ~1 Hz value updates */
-.action-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: rgb(0 0 0 / 0.28);
-  transition: width 1s linear;
-  pointer-events: none;
 }
 /* Markdown styling (Tailwind preflight strips list markers and heading sizes).
    Mirrors DocViewer's .md-body block with slightly roomier text for reading. */

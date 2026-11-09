@@ -15,6 +15,7 @@ import {
 } from "@/lessons/interventions";
 import type { CentreTab, Lesson, LessonAction, LessonStep, Op } from "@/lessons/types";
 import { renderMarkdown } from "@/utils/markdown";
+import { splitActionMarkers, type StepBlock } from "@/lessons/actionMarkers";
 import { evaluate, samplePaths } from "@explain/papers/evaluate.js";
 
 // Runtime for one lesson page: loads the lesson's starting state, tracks the
@@ -88,8 +89,17 @@ export function useLesson(lesson: Lesson) {
   const ownFolder = lessonFolder(lesson.id);
   const stepFolder = (s: LessonStep) => s.source ?? ownFolder;
 
-  // rendered markdown for the current step + language
-  const stepHtml = ref("");
+  // rendered markdown for the current step + language, cut into blocks at
+  // action markers: a line `[[action:bleed]]` (or `[[action:bolus,transfuse]]`)
+  // puts those action buttons right there in the text, so a learner presses a
+  // button where the text names it. Actions without a marker stay at the bottom.
+  const stepBlocks = ref<StepBlock[]>([]);
+  const stepHtml = computed(() =>
+    stepBlocks.value.map((b) => (b.kind === "html" ? b.html : "")).join(""),
+  );
+  const inlineActionIds = computed(
+    () => new Set(stepBlocks.value.flatMap((b) => (b.kind === "actions" ? b.ids : []))),
+  );
   let mdToken = 0;
   watch(
     [step, lang],
@@ -98,7 +108,10 @@ export function useLesson(lesson: Lesson) {
       const folder = stepFolder(s);
       const raw = await loadStepMarkdown(folder, s.id, l);
       if (token !== mdToken) return; // a newer step/lang won the race
-      stepHtml.value = renderMarkdown(raw, { resolveImage: (src) => imageUrl(folder, src) });
+      const render = (md: string) => renderMarkdown(md, { resolveImage: (src) => imageUrl(folder, src) });
+      stepBlocks.value = splitActionMarkers(raw).map((b) =>
+        b.kind === "md" ? { kind: "html", html: render(b.md) } : b,
+      );
     },
     { immediate: true },
   );
@@ -565,6 +578,8 @@ export function useLesson(lesson: Lesson) {
     stepIndex,
     step,
     stepHtml,
+    stepBlocks,
+    inlineActionIds,
     stepImageUrl,
     diagramHighlight,
     monitorHighlight,

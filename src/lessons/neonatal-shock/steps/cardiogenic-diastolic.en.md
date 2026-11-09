@@ -2,15 +2,21 @@ Now a ventricle that contracts well but **cannot fill**: a **stiff ventricle**. 
 
 Press **Stiff ventricles**.
 
+[[action:stiffen]]
+
 > The stroke volume falls, but the EDP stays high. Compare this with the weak heart: what is the difference?
 
 Give **Bolus NaCl 0.9 % 10 ml/kg**.
+
+[[action:bolus]]
 
 > What happens to the EDP? How much extra output do you get?
 
 A stiff ventricle turns a little extra volume into a lot of extra pressure: **the filling pressure rises steeply**, and the lungs pay the price.
 
 Now try **Heart rate 160**, and then **Heart rate 100**.
+
+[[action:hr-160,hr-100]]
 
 > In this model a faster heart rate *helps*. Why?
 
