@@ -1,0 +1,25 @@
+A new scenario: a term baby **one hour after birth**. PVR is still high, and the duct and foramen ovale are open with **bidirectional** flow.
+
+Press **PPHN: PVR ×3**.
+
+> Compare the pre- and post-ductal saturations. Which way do the duct and the foramen ovale flow now?
+
+**Differential cyanosis**: deoxygenated blood goes right-to-left through the duct into the descending aorta. Left ventricular output falls, because less blood passes through the lungs to the left atrium.
+
+Start **Noradrenaline 0.3 mcg/kg/min**.
+
+> What happens to the duct flow and the post-ductal saturation?
+
+The direction of the shunt depends on the **ratio of SVR to PVR**. Supporting systemic pressure reduces the right-to-left shunt. Systemic vasodilators do the opposite.
+
+Now treat the cause: **Lower PVR** (stands for oxygen, ventilation and iNO).
+
+> What happens to the saturations, the LV output and the duct?
+
+**Is the open duct good or bad in PPHN?** Press **Severe PPHN: PVR ×5**, and then **Close the duct**. Fast-forward a couple of minutes.
+
+> At first the closed duct even looks better. Why? Then look at RV output, CVP and MAP.
+
+As long as the right ventricle copes, a right-to-left duct mostly costs saturation. Once the RV reaches its limit, the duct is its **pop-off valve**: closing it makes the RV fail. That is why in severe PPHN with RV failure the duct is sometimes kept open with **PGE1**.
+
+You can also move the duct yourself under **Interventions**.

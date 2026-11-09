@@ -39,7 +39,8 @@ const { lang, modelReady, isRunning, error, step } = rt;
 
 const leftTab = ref<"lesson" | "interventions" | "patient">("lesson");
 const isPaper = lesson.kind === "paper";
-if (isPaper) preferLang("en");
+const preferred = lesson.lang ?? (isPaper ? "en" : undefined);
+if (preferred) preferLang(preferred);
 // paper companions read like a paper: a wider text column
 const gridCols = lesson.layout?.reading
   ? "lg:grid-cols-[minmax(380px,1.35fr)_minmax(0,1.45fr)_minmax(340px,1.1fr)]"

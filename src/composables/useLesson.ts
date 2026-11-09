@@ -316,7 +316,7 @@ export function useLesson(lesson: Lesson) {
   async function applyOp(op: Op) {
     switch (op.kind) {
       case "loadScenario":
-        await loadScenario(op.scenario);
+        await loadScenario(op.scenario, op.fresh);
         break;
       case "experiment":
         await runExperiment(op.id);

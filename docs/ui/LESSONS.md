@@ -55,6 +55,7 @@ export default defineLesson({
 |---|---|
 | `id`, `title`, `subtitle?` | Identity and header text (`L10n`: a string, or `{ nl, en }`) |
 | `scenario` | Bundled scenario to start from. A lesson account's `stateId` (curated cloud state) overrides it; the account's `scenario` field does **not** |
+| `lang?` | Language the page opens in when the reader has not chosen one (default `nl`; paper companions `en`) |
 | `autoRun?` | Start the realtime loop once the model is built (default `true`) |
 | `runOnAction?` | Start the loop when an op is applied while paused (default `true`) |
 | `controls` | Intervention ids, in display order. A control whose `requires` models are missing from the scenario is hidden |
@@ -105,7 +106,7 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 | `{ kind: "calculate", seconds }` | Fast-forward model time synchronously |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |
 | `{ kind: "restart" }` | Rebuild the starting state and return to step 1 |
-| `{ kind: "loadScenario", scenario }` | Load another bundled scenario; the rest of the op list waits for the rebuild |
+| `{ kind: "loadScenario", scenario, fresh? }` | Load another bundled scenario; the rest of the op list waits for the rebuild. `fresh: true` rebuilds even when that scenario is already loaded (a clean patient per case, as in `neonatal-shock`) |
 | `{ kind: "experiment", id }` | Run a paper companion's experiment (see below) |
 
 ## Paper companions (`kind: "paper"`, `/paper/<id>`)

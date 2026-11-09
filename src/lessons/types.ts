@@ -1,4 +1,4 @@
-import type { L10n } from "@/lessons/i18n";
+import type { L10n, Lang } from "@/lessons/i18n";
 import type { LaneId } from "@/render/monitorLanes";
 import type { TaskCategory } from "@/services/commonTasks";
 
@@ -26,8 +26,9 @@ export type Op =
   // rebuild the lesson's starting state and return to the first step
   | { kind: "restart" }
   // switch to another bundled scenario (the page waits for the rebuild; later
-  // ops in the same list are applied once the model is ready)
-  | { kind: "loadScenario"; scenario: string }
+  // ops in the same list are applied once the model is ready). `fresh` rebuilds
+  // even when that scenario is already loaded: a clean patient for a new case
+  | { kind: "loadScenario"; scenario: string; fresh?: boolean }
   // run one of the lesson's experiments (see `Lesson.experiments`): load its
   // scenario if needed, apply its ops, settle, sample and fill its result table
   | { kind: "experiment"; id: string };
@@ -159,6 +160,7 @@ export interface Lesson {
   experiments?: ExperimentSpec; // the paper's experiments file (paper companions)
   references?: LessonReference[]; // cited as [n] in the step text
   scenario: string; // bundled scenario stem in model_definitions/
+  lang?: Lang; // language to open in when the reader has not chosen one (default nl; papers en)
   autoRun?: boolean; // start the realtime loop once the model is built (default true)
   runOnAction?: boolean; // start the loop when an op is applied while paused (default true)
   controls: string[]; // intervention ids from interventions.ts, in display order
