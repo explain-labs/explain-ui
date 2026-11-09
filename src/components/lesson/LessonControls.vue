@@ -38,7 +38,7 @@ function applyDisplay(c: SliderIntervention, display: number | null | undefined)
   const clamped = Math.max(c.min, Math.min(c.max, display));
   const current = rt.sliderValue(c);
   if (current !== undefined && Math.abs(current - clamped) < 1e-9) return;
-  rt.applyControl(c.id, clamped / rt.sliderFactor(c));
+  rt.applyControl(c.id, rt.sliderRaw(c, clamped));
 }
 
 // typed values are applied on Enter or blur, not per keystroke

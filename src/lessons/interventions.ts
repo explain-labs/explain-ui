@@ -42,6 +42,9 @@ export interface SliderIntervention extends InterventionBase {
   step: number;
   unit?: string;
   factor?: number; // display = raw × factor (default 1)
+  // display = factor / raw instead, for a quantity shown as the inverse of its
+  // lever (diastolic function as a % of normal from the stiffness factor)
+  invert?: boolean;
   // display = raw / (value at this path) × 100 — a percentage of a model max,
   // e.g. "Shunts.diameter_fo_max". Overrides `factor`.
   percentOf?: string;

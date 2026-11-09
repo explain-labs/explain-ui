@@ -211,15 +211,17 @@ export function useLesson(lesson: Lesson) {
   }
 
   // ----- controls ---------------------------------------------------------------
+  // the lesson's own interventions first, then the shared registry
+  const lookup = (id: string): Intervention | undefined => lesson.interventions?.[id] ?? getIntervention(id);
   const readPaths = lesson.controls
-    .map((id) => getIntervention(id))
+    .map((id) => lookup(id))
     .flatMap((c) => (c && c.kind !== "button" ? [c.read] : []));
 
   const controls = computed<Intervention[]>(() => {
     const models = (modelState.value as any)?.models ?? {};
     return lesson.controls
       .map((id) => {
-        const c = getIntervention(id);
+        const c = lookup(id);
         if (!c) console.warn(`lesson "${lesson.id}": unknown intervention "${id}"`);
         return c;
       })
@@ -246,7 +248,7 @@ export function useLesson(lesson: Lesson) {
     if (!isRunning.value) for (const p of Object.values(pending.value)) p.until += now - lastSettle;
     lastSettle = now;
     for (const [id, p] of Object.entries(pending.value)) {
-      const c = getIntervention(id);
+      const c = lookup(id);
       const v = c && c.kind !== "button" ? valueOf(c.read) : undefined;
       const tol = 1e-3 * Math.max(1, Math.abs(p.target));
       if ((v !== undefined && Math.abs(v - p.target) <= tol) || Date.now() > p.until) clearPending(id);
@@ -263,7 +265,7 @@ export function useLesson(lesson: Lesson) {
   // its start and target (tweens are linear in model time). Undefined when idle.
   function progress(id: string): number | undefined {
     const p = pending.value[id];
-    const c = getIntervention(id);
+    const c = lookup(id);
     if (!p || !c || c.kind === "button" || p.from === undefined) return undefined;
     const span = p.target - p.from;
     if (Math.abs(span) < 1e-9) return 100;
@@ -334,16 +336,24 @@ export function useLesson(lesson: Lesson) {
     return c.factor ?? 1;
   }
 
+  // raw model value ↔ display units (raw × factor, or factor / raw when inverted)
+  function toDisplay(c: SliderIntervention, raw: number): number {
+    return c.invert ? sliderFactor(c) / raw : raw * sliderFactor(c);
+  }
+  function sliderRaw(c: SliderIntervention, display: number): number {
+    return c.invert ? sliderFactor(c) / display : display / sliderFactor(c);
+  }
+
   // slider position in display units: the target while tweening, else current
   function sliderValue(c: SliderIntervention): number | undefined {
     const raw = pending.value[c.id]?.target ?? valueOf(c.read);
-    return raw === undefined ? undefined : raw * sliderFactor(c);
+    return raw === undefined ? undefined : toDisplay(c, raw);
   }
 
   // the value right now in display units (differs from sliderValue mid-tween)
   function sliderActual(c: SliderIntervention): number | undefined {
     const raw = valueOf(c.read);
-    return raw === undefined ? undefined : raw * sliderFactor(c);
+    return raw === undefined ? undefined : toDisplay(c, raw);
   }
 
   // is the pending change of this control a closing (value going down)?
@@ -356,7 +366,7 @@ export function useLesson(lesson: Lesson) {
 
   // ----- ops --------------------------------------------------------------------
   function applyControl(id: string, state: ToggleState | number) {
-    const c = getIntervention(id);
+    const c = lookup(id);
     if (!c) {
       console.warn(`lesson "${lesson.id}": unknown intervention "${id}"`);
       return;
@@ -668,6 +678,7 @@ export function useLesson(lesson: Lesson) {
     sliderValue,
     sliderActual,
     sliderFactor,
+    sliderRaw,
     isClosing,
     isPending,
     anyPending: computed(() => Object.keys(pending.value).length > 0),

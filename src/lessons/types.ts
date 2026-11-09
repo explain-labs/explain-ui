@@ -1,6 +1,7 @@
 import type { L10n, Lang } from "@/lessons/i18n";
 import type { LaneId } from "@/render/monitorLanes";
 import type { TaskCategory } from "@/services/commonTasks";
+import type { Intervention } from "@/lessons/interventions";
 
 // what the lesson page's centre column can show
 export type CentreTab = "diagram" | "sle6000";
@@ -166,7 +167,10 @@ export interface Lesson {
   lang?: Lang; // language to open in when the reader has not chosen one (default nl; papers en)
   autoRun?: boolean; // start the realtime loop once the model is built (default true)
   runOnAction?: boolean; // start the loop when an op is applied while paused (default true)
-  controls: string[]; // intervention ids from interventions.ts, in display order
+  controls: string[]; // intervention ids (interventions.ts or `interventions` below), in display order
+  // lesson-specific interventions, looked up before the shared registry (e.g. a
+  // bolus sized for this lesson's patient)
+  interventions?: Record<string, Intervention>;
   numerics: LessonNumericGroup[];
   monitorLanes?: LaneId[]; // default: ecg, spo2_pre, spo2_post, abp
   layout?: LessonLayout;

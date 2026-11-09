@@ -1,4 +1,5 @@
 import { defineLesson, type LessonAction, type LessonNumeric, type Op } from "@/lessons/types";
+import type { Intervention } from "@/lessons/interventions";
 import { introSteps } from "@/lessons/_shared/intro";
 
 // Neonatal shock by treatment target: four building blocks (hypovolaemic, distributive with
@@ -64,13 +65,71 @@ const num = (
 });
 const perKg = (label: string, path: string, unit: string, rounding = 0) => num(label, path, unit, rounding, 1000, true);
 
+// The treatment targets as standing controls (Interventions tab), usable on every
+// step. The scale sliders show % of normal: the ModelScaler group factor
+// (1 = the scenario as loaded) read back from the first model of its group, the
+// same lever as Common tasks. Diastolic function is the inverse of the stiffness
+// factor (50 % = twice as stiff).
+const scaleSlider = (
+  id: string,
+  label: string,
+  group: string,
+  read: string,
+  min: number,
+  max: number,
+  help: string,
+  invert = false,
+): Intervention => ({
+  id,
+  kind: "slider",
+  label,
+  help,
+  read,
+  min,
+  max,
+  step: 5,
+  unit: "%",
+  factor: 100,
+  invert,
+  toOps: (raw) => [{ kind: "scale", group, factor: raw }],
+});
+const INTERVENTIONS: Record<string, Intervention> = {
+  saline: {
+    id: "saline",
+    kind: "button",
+    label: "Fluid bolus: NaCl 0.9 % 20 ml/kg",
+    icon: "pi pi-plus",
+    help: `${ML(20)} ml over 1 min of model time.`,
+    requires: ["Fluids"],
+    ops: [bolus(20)],
+  },
+  transfusion: {
+    id: "transfusion",
+    kind: "button",
+    label: "Transfusion: packed red cells 20 ml/kg",
+    icon: "pi pi-plus",
+    help: `${ML(20)} ml over 1 min of model time (a fresh unit, Hb 12 mmol/l, SO₂ 60 %).`,
+    requires: ["Fluids"],
+    ops: [call("Fluids.add_volume", ML(20), 60, "packed_cells", "VLB")],
+  },
+  contractility: scaleSlider("contractility", "Contractility", "heart_el_max", "LV.el_max_factor_scaling_ps", 20, 300,
+    "Both ventricles and atria. 100 % = normal."),
+  diastolic_function: scaleSlider("diastolic_function", "Diastolic function", "heart_el_min", "LV.el_min_factor_scaling_ps", 20, 200,
+    "Inverse of the passive diastolic stiffness. 100 % = normal, 50 % = twice as stiff.", true),
+  svr: scaleSlider("svr", "Systemic vascular resistance", "systemic_resistances", "AA.r_factor_scaling_ps", 20, 500,
+    "All systemic vessels. 100 % = normal."),
+  pvr: scaleSlider("pvr", "Pulmonary vascular resistance", "pulmonary_resistances", "PA.r_factor_scaling_ps", 20, 1000,
+    "All pulmonary vessels. 100 % = normal."),
+};
+
 export default defineLesson({
   id: "neonatal-shock",
   title: "Neonatal shock",
   subtitle: "Treat the target, not the label",
   lang: "en",
   scenario: "term_neonate_72h",
-  controls: ["ductus"],
+  controls: ["saline", "transfusion", "contractility", "diastolic_function", "svr", "pvr", "ductus", "foramen_ovale"],
+  interventions: INTERVENTIONS,
   layout: {
     tasks: { categories: ["vascular_tone", "cardiac_performance", "rate_rhythm", "shunts", "blood_acidbase"] },
   },
