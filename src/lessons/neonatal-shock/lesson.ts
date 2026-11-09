@@ -26,15 +26,18 @@ const TERM = fresh("term_neonate_72h");
 // so a 12 h baby with the duct still half open (left-to-right)
 const NEWBORN = fresh("term_neonate_12h");
 
-// cold septic shock: myocardial depression, vasoconstriction and capillary leak. Headless on
-// term_neonate_72h (+4 min): MAP 56 -> 52 with LVO 201 -> 107, SvO2 78 -> 64 %, lower-body DO2
-// -45 %; a 10 ml/kg bolus leaks away; noradrenaline 0.3 MAP 62 / LVO +15 %, adrenaline 0.1
-// MAP 66 / LVO +37 %, SvO2 72 %
+// decompensated cold septic shock: myocardial depression, vasoconstriction, capillary leak, raised
+// O2 demand (fever, VO2 x1.5) and a fifth of the blood volume lost to hours of leak and poor intake.
+// Headless on term_neonate_72h (+8 min): HR 194, MAP 49 (54/46), LVO 87, SvO2 39 %, lactate 5.0
+// and rising, BE -6. After a 10 ml/kg bolus: noradrenaline 0.3 (+6 min) MAP 64, LVO 124, SvO2 52 %,
+// lactate 5.1; adrenaline 0.1 MAP 72, LVO 162, SvO2 63 %, lactate 3.6 and falling
 const COLD_SEPSIS: Op[] = [
-  { kind: "scale", group: "heart_el_max", factor: 0.5 },
+  { kind: "scale", group: "heart_el_max", factor: 0.3 },
   { kind: "scale", group: "systemic_resistances", factor: 1.5 },
+  { kind: "scale", group: "blood_volume", factor: 0.8 },
   { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
   { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
+  { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
 ];
 const TRANSITION = fresh("term_neonate_1h");
 
@@ -355,12 +358,12 @@ export default defineLesson({
       actions: [
         {
           id: "cold-sepsis",
-          label: "Cold septic shock: weak heart, vasoconstriction, capillary leak",
+          label: "Cold septic shock",
           icon: "pi pi-exclamation-triangle",
           severity: "danger",
           ops: COLD_SEPSIS,
         },
-        wait(2),
+        wait(5),
         {
           id: "bolus",
           label: "Bolus NaCl 0.9 % 10 ml/kg",
@@ -377,10 +380,10 @@ export default defineLesson({
         {
           // back to the cold shock without drugs, computed at once, to try the other drug
           id: "replay",
-          label: "Repeat the cold sepsis (reset, sepsis, wait 4 min)",
+          label: "Repeat the cold sepsis (reset, sepsis 5 min, bolus, 2 min)",
           icon: "pi pi-replay",
           severity: "secondary",
-          ops: [...TERM, ...COLD_SEPSIS, { kind: "calculate", seconds: 240 }],
+          ops: [...TERM, ...COLD_SEPSIS, { kind: "calculate", seconds: 300 }, bolus(10), { kind: "calculate", seconds: 120 }],
         },
         {
           id: "adrenaline",
