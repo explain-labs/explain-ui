@@ -179,6 +179,31 @@ export function useLesson(lesson: Lesson) {
     }
     return stateValue(path);
   }
+  // any value (booleans, strings too), from the slow rows while running, else the snapshot
+  function rawOf(path: string): unknown {
+    if (isRunning.value) {
+      const row = latestRow();
+      if (row && path in row) return row[path];
+    }
+    const segs = path.split(".");
+    let cur: any = (modelState.value as any)?.models?.[segs[0]];
+    for (let i = 1; i < segs.length && cur != null; i++) cur = cur[segs[i]];
+    return cur;
+  }
+
+  // ventilatorStopsBreathing: intubated and ventilated → no own breathing (sedated);
+  // reacts to the change itself, however the ventilator was switched
+  const ventilatedViaTube = computed<boolean | undefined>(() => {
+    if (!lesson.ventilatorStopsBreathing || !modelReady.value) return undefined;
+    const on = rawOf("Ventilator.is_enabled");
+    if (typeof on !== "boolean") return undefined;
+    return on && rawOf("Ventilator.interface") === "ett";
+  });
+  watch(ventilatedViaTube, (v, was) => {
+    if (v === undefined || v === was) return;
+    explain.call("Breathing.switch_breathing", [!v], 0);
+  });
+
   // modelState is only a snapshot; refresh it whenever the loop stops
   watch(isRunning, (running) => {
     if (!running && modelReady.value) explain.refreshState();
@@ -213,9 +238,11 @@ export function useLesson(lesson: Lesson) {
   // ----- controls ---------------------------------------------------------------
   // the lesson's own interventions first, then the shared registry
   const lookup = (id: string): Intervention | undefined => lesson.interventions?.[id] ?? getIntervention(id);
-  const readPaths = lesson.controls
-    .map((id) => lookup(id))
-    .flatMap((c) => (c && c.kind !== "button" ? [c.read] : []));
+  const VENT_PATHS = ["Ventilator.is_enabled", "Ventilator.interface"];
+  const readPaths = [
+    ...lesson.controls.map((id) => lookup(id)).flatMap((c) => (c && c.kind !== "button" ? [c.read] : [])),
+    ...(lesson.ventilatorStopsBreathing ? VENT_PATHS : []),
+  ];
 
   const controls = computed<Intervention[]>(() => {
     const models = (modelState.value as any)?.models ?? {};

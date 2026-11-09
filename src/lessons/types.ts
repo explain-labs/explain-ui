@@ -168,6 +168,12 @@ export interface Lesson {
   autoRun?: boolean; // start the realtime loop once the model is built (default true)
   runOnAction?: boolean; // start the loop when an op is applied while paused (default true)
   controls: string[]; // intervention ids (interventions.ts or `interventions` below), in display order
+  // invasive ventilation stops spontaneous breathing (a sedated, intubated child):
+  // while Ventilator.is_enabled with interface "ett" the lesson keeps
+  // Breathing off, and turns it back on when that ends. However the ventilator
+  // was started (an action, an intervention, the SLE6000 screen). Non-invasive
+  // CPAP (prongs/mask) keeps the child breathing.
+  ventilatorStopsBreathing?: boolean;
   // lesson-specific interventions, looked up before the shared registry (e.g. a
   // bolus sized for this lesson's patient)
   interventions?: Record<string, Intervention>;

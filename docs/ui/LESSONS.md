@@ -61,6 +61,8 @@ export default defineLesson({
 | `autoRun?` | Start the realtime loop once the model is built (default `true`) |
 | `runOnAction?` | Start the loop when an op is applied while paused (default `true`) |
 | `controls` | Intervention ids, in display order. A control whose `requires` models are missing from the scenario is hidden |
+| `interventions?` | The lesson's own interventions (same shapes as `interventions.ts`), looked up before the shared registry, e.g. a bolus sized for this lesson's patient. A slider may set `invert` (display = factor / raw) |
+| `ventilatorStopsBreathing?` | While the ventilator runs with a tube (`Ventilator.is_enabled`, `interface` "ett") the lesson switches spontaneous breathing off (a sedated, intubated child) and back on when that ends, however the ventilator was started. Non-invasive CPAP keeps the child breathing. Used by `neonatal-shock` |
 | `numerics` | Groups of numeric cards: `{ key, title, collapsed?, parameters: [{ label, props, unit?, factor?, rounding?, weight_based? }] }`. These are the same display rules as `configuration.monitors` (see [Numerics](./Numerics.md)) |
 | `monitorLanes?` | Bedside-monitor lanes (`ecg`, `spo2_pre`, `spo2_post`, `abp`, `resp`, `co2`). Default is the first four |
 | `layout?` | Page layout beyond the default; see [Layout](#layout) |
