@@ -11,7 +11,7 @@ import MultiSelect from "primevue/multiselect";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { useExplain } from "@/composables/useExplain";
 import { useDiagramStore } from "@/stores/diagram";
-import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS, ECLS_DIAGRAM, PLACENTA_DIAGRAM, pumpSpinRate } from "@/render/diagramConstants";
+import { PICTOS as PICTO_OPTIONS, PATH_TYPES as PATH_TYPE_OPTIONS, ECLS_DIAGRAM, PLACENTA_DIAGRAM, pumpSpinRate, SAT_HI, SAT_LO } from "@/render/diagramConstants";
 // type-only import is erased at build; the renderer (and PixiJS) is loaded
 // lazily below so Pixi lands in its own async chunk, not the main bundle.
 import type { DiagramRenderer as DiagramRendererT } from "@/render/DiagramRenderer";
@@ -47,8 +47,9 @@ const connectMode = ref(false);
 const gridOn = ref(false);
 const gridSize = ref(20);
 const globalScale = ref(1);
-const to2Lo = ref(3.0);
-const to2Hi = ref(8.8);
+// O2 saturation tint window, shown in % (stored as fractions in settings.sat_lo / sat_hi)
+const satLoPct = ref(SAT_LO * 100);
+const satHiPct = ref(SAT_HI * 100);
 const addModel = ref<string | null>(null);
 const addPicto = ref("container.png");
 const selectedName = ref<string | null>(null);
@@ -199,8 +200,8 @@ async function mountRenderer(diagram: any) {
   gridOn.value = diagram?.settings?.grid === true;
   if (diagram?.settings?.gridSize > 0) gridSize.value = diagram.settings.gridSize;
   if (diagram?.settings?.scaling > 0) globalScale.value = diagram.settings.scaling;
-  if (diagram?.settings?.to2_lo > 0) to2Lo.value = diagram.settings.to2_lo;
-  if (diagram?.settings?.to2_hi > 0) to2Hi.value = diagram.settings.to2_hi;
+  if (diagram?.settings?.sat_lo >= 0) satLoPct.value = diagram.settings.sat_lo * 100;
+  if (diagram?.settings?.sat_hi > 0) satHiPct.value = diagram.settings.sat_hi * 100;
   if (props.highlight) applyHighlight();
   adapter.seedFromModels((modelState.value as any)?.models);
   applyEclsView();
@@ -290,11 +291,10 @@ function changeGridSize(size: number | null) {
 function changeScaling(v: number | null) {
   if (v && v > 0) adapter?.setScaling(v);
 }
-// to2 (O2 content) tint window. Lower-Hb circuits (adult) need a lower upper
-// bound so arterial blood swings red instead of pegging the circuit blue.
-// Persists into settings.to2_lo / to2_hi (picked up on export).
-function changeTo2Range() {
-  if (to2Hi.value > to2Lo.value) adapter?.setTo2Range(to2Lo.value, to2Hi.value);
+// O2 saturation tint window (%). Persists into settings.sat_lo / sat_hi as
+// fractions (picked up on export).
+function changeSatRange() {
+  if (satHiPct.value > satLoPct.value) adapter?.setSatRange(satLoPct.value / 100, satHiPct.value / 100);
 }
 function exportJson() {
   if (!adapter) return;
@@ -406,7 +406,7 @@ function download(text: string, name: string) {
           @update:model-value="patch({ general: { z_index: selZ } })"
         />
       </label>
-      <label v-tooltip.top="'Tint by oxygenation (to2). When off, the fixed sprite colour is used.'">
+      <label v-tooltip.top="'Tint by O₂ saturation. When off, the fixed sprite colour is used.'">
         <Checkbox v-model="selTinting" binary @update:model-value="setTinting" />
         O₂
       </label>
@@ -593,33 +593,35 @@ function download(text: string, name: string) {
       </label>
       <span class="mx-1 opacity-40">|</span>
       <label
-        v-tooltip.top="'O₂ tint window (to2 content units): the venous→arterial gradient maps across [lo, hi]. Lower the upper bound for low-Hb circuits (e.g. adult) so arterial blood reads red. Saved as settings.to2_lo / to2_hi.'"
+        v-tooltip.top="'O₂ tint window (saturation, %): the venous→arterial gradient maps across [lo, hi]. Saved as settings.sat_lo / sat_hi.'"
         class="flex items-center gap-1 text-sm opacity-85"
       >
-        O₂ lo
+        SO₂ lo
         <InputNumber
-          v-model="to2Lo"
-          :step="0.1"
+          v-model="satLoPct"
+          :step="1"
           :min="0"
-          :max-fraction-digits="2"
+          :max="100"
+          :max-fraction-digits="0"
           size="small"
           class="gridsize w-16"
-          @update:model-value="changeTo2Range"
+          @update:model-value="changeSatRange"
         />
       </label>
       <label
-        v-tooltip.top="'Upper bound of the O₂ tint window (to2 at which blood reads fully oxygenated / red)'"
+        v-tooltip.top="'Upper bound of the O₂ tint window (saturation % at which blood reads fully oxygenated / red)'"
         class="flex items-center gap-1 text-sm opacity-85"
       >
         hi
         <InputNumber
-          v-model="to2Hi"
-          :step="0.1"
+          v-model="satHiPct"
+          :step="1"
           :min="0"
-          :max-fraction-digits="2"
+          :max="100"
+          :max-fraction-digits="0"
           size="small"
           class="gridsize w-16"
-          @update:model-value="changeTo2Range"
+          @update:model-value="changeSatRange"
         />
       </label>
       </span>

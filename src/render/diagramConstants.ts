@@ -97,10 +97,15 @@ export function pumpSpinRate(rpm: number, mode: number): number {
   return PUMP_SPIN_MAX * (1 - Math.exp(-rpm / PUMP_SPIN_RPM_REF));
 }
 
-// ---- O2-content colour ramp (compartment tint) ------------------------------
-// Default to2 window; a diagram may override it with settings.to2_lo/to2_hi.
-export const TO2_LO = 3.0;
-export const TO2_HI = 8.8;
+// ---- O2-saturation colour ramp (compartment tint) ---------------------------
+// The tint is the blood's O2 saturation as a fraction (the engine's
+// AnimationPacker packs to2 / Hb). Default window; a diagram may override it
+// with settings.sat_lo / sat_hi. 0.30-0.98 reproduces the old neonatal
+// O2-content window (3-9.8 mmol/l at Hb 10 mmol/l), so a healthy baby looks the
+// same; what changes is that haemodilution (a saline bolus, a bleed) no longer
+// turns the blood blue, and the window no longer depends on the Hb level.
+export const SAT_LO = 0.3;
+export const SAT_HI = 0.98;
 export const DEOX_RGB = [0x16, 0x48, 0xb0]; // dark blue (deoxygenated)
 export const OX_RGB = [0xe2, 0x3a, 0x66]; // pink-red (oxygenated)
 // Bias (>1) keeps the gradient blue across the venous range and swings to
@@ -109,11 +114,11 @@ export const OX_RGB = [0xe2, 0x3a, 0x66]; // pink-red (oxygenated)
 // midpoint, i.e. magenta.
 export const RAMP_GAMMA = 4.0;
 
-// Map blood O2 content (to2) onto the deox→ox ramp, returning unrounded rgb so
-// callers can smooth it over frames before packing to a tint int.
-export function rgbFromTo2(to2: number, lo: number, hi: number): [number, number, number] {
-  if (Number.isNaN(to2)) return [0x66, 0x66, 0x66];
-  let t = (to2 - lo) / (hi - lo || 1e-6);
+// Map blood O2 saturation (fraction) onto the deox→ox ramp, returning unrounded
+// rgb so callers can smooth it over frames before packing to a tint int.
+export function rgbFromSat(sat: number, lo: number, hi: number): [number, number, number] {
+  if (Number.isNaN(sat)) return [0x66, 0x66, 0x66];
+  let t = (sat - lo) / (hi - lo || 1e-6);
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   t = Math.pow(t, RAMP_GAMMA);
   return [
@@ -123,13 +128,13 @@ export function rgbFromTo2(to2: number, lo: number, hi: number): [number, number
   ];
 }
 
-// The ramp as a CSS linear-gradient (low → high to2), sampled so the legend
-// shows the real gamma curve rather than a straight two-stop blend.
-export function to2RampCss(stops = 12, direction = "to right"): string {
+// The ramp as a CSS linear-gradient (low → high saturation), sampled so the
+// legend shows the real gamma curve rather than a straight two-stop blend.
+export function satRampCss(stops = 12, direction = "to right"): string {
   const parts: string[] = [];
   for (let i = 0; i <= stops; i++) {
     const f = i / stops;
-    const [r, g, b] = rgbFromTo2(TO2_LO + (TO2_HI - TO2_LO) * f, TO2_LO, TO2_HI);
+    const [r, g, b] = rgbFromSat(SAT_LO + (SAT_HI - SAT_LO) * f, SAT_LO, SAT_HI);
     parts.push(`rgb(${Math.round(r)} ${Math.round(g)} ${Math.round(b)}) ${(f * 100).toFixed(0)}%`);
   }
   return `linear-gradient(${direction}, ${parts.join(", ")})`;
