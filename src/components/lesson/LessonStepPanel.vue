@@ -53,8 +53,19 @@ const restActions = computed(() =>
     <h2 class="text-xl font-semibold leading-tight">{{ t(rt.step.value.title, rt.lang.value) }}</h2>
 
     <div class="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-3">
-      <template v-for="(b, i) in rt.stepBlocks.value" :key="i">
+      <template v-for="(b, i) in rt.visibleBlocks.value" :key="`${rt.step.value.id}-${i}`">
         <div v-if="b.kind === 'html'" class="md-body leading-relaxed" v-html="b.html"></div>
+        <!-- a reveal point: an unopened one shows Continue, opened ones nothing -->
+        <div v-else-if="b.kind === 'reveal'" v-show="b.pending" class="flex items-center gap-3 my-1">
+          <Button
+            :label="t(UI.reveal, rt.lang.value)"
+            icon="pi pi-angle-double-down"
+            size="small"
+            severity="secondary"
+            @click="rt.revealNext"
+          />
+          <span class="text-xs opacity-60 italic">{{ t(UI.revealHint, rt.lang.value) }}</span>
+        </div>
         <div v-else class="flex flex-wrap gap-2 my-1">
           <LessonActionButton v-for="a in blockActions(b.ids)" :key="a.id" :action="a" />
         </div>

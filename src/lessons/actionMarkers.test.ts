@@ -15,6 +15,13 @@ describe("splitActionMarkers", () => {
   it("leaves text without markers whole", () => {
     expect(splitActionMarkers("Just text.\n")).toEqual([{ kind: "md", md: "Just text.\n" }]);
   });
+  it("marks reveal points", () => {
+    expect(splitActionMarkers("> Why?\n[[reveal]]\nBecause.")).toEqual([
+      { kind: "md", md: "> Why?" },
+      { kind: "reveal" },
+      { kind: "md", md: "Because." },
+    ]);
+  });
   it("ignores a marker inside a line", () => {
     const md = "See [[action:bleed]] here.";
     expect(splitActionMarkers(md)).toEqual([{ kind: "md", md }]);

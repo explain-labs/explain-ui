@@ -97,6 +97,30 @@ export function useLesson(lesson: Lesson) {
   const stepHtml = computed(() =>
     stepBlocks.value.map((b) => (b.kind === "html" ? b.html : "")).join(""),
   );
+  // `[[reveal]]` points opened so far, per step id (kept when the learner goes
+  // back and forth; a page reload starts over)
+  const revealed = ref<Record<string, number>>({});
+  const revealedCount = computed(() => revealed.value[step.value.id] ?? 0);
+  function revealNext() {
+    const id = step.value.id;
+    revealed.value = { ...revealed.value, [id]: (revealed.value[id] ?? 0) + 1 };
+  }
+  // the blocks shown now: everything up to the first unopened reveal point
+  // (included, so the panel can draw its Continue button there)
+  const visibleBlocks = computed(() => {
+    const out: StepBlock[] = [];
+    let opened = 0;
+    for (const b of stepBlocks.value) {
+      if (b.kind !== "reveal") {
+        out.push(b);
+        continue;
+      }
+      const pending = opened++ >= revealedCount.value;
+      out.push({ kind: "reveal", pending });
+      if (pending) break;
+    }
+    return out;
+  });
   const inlineActionIds = computed(
     () => new Set(stepBlocks.value.flatMap((b) => (b.kind === "actions" ? b.ids : []))),
   );
@@ -109,7 +133,7 @@ export function useLesson(lesson: Lesson) {
       const raw = await loadStepMarkdown(folder, s.id, l);
       if (token !== mdToken) return; // a newer step/lang won the race
       const render = (md: string) => renderMarkdown(md, { resolveImage: (src) => imageUrl(folder, src) });
-      stepBlocks.value = splitActionMarkers(raw).map((b) =>
+      stepBlocks.value = splitActionMarkers(raw).map((b): StepBlock =>
         b.kind === "md" ? { kind: "html", html: render(b.md) } : b,
       );
     },
@@ -579,6 +603,8 @@ export function useLesson(lesson: Lesson) {
     step,
     stepHtml,
     stepBlocks,
+    visibleBlocks,
+    revealNext,
     inlineActionIds,
     stepImageUrl,
     diagramHighlight,

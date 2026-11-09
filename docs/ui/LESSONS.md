@@ -9,7 +9,7 @@ Lessons are **files in this repo**, bundled with the app. The working example is
 | File | Role |
 |---|---|
 | `src/lessons/<id>/lesson.ts` | The lesson definition: `export default defineLesson({...})` |
-| `src/lessons/<id>/steps/<step>.<nl\|en>.md` | Step text, one markdown file per step per language. A line `[[action:<id>]]` (or `[[action:a,b]]`) puts those action buttons at that point in the text; actions without a marker stay in the row under it |
+| `src/lessons/<id>/steps/<step>.<nl\|en>.md` | Step text, one markdown file per step per language. A line `[[action:<id>]]` (or `[[action:a,b]]`) puts those action buttons at that point in the text; actions without a marker stay in the row under it. A line `[[reveal]]` hides the rest of the text behind a **Continue** button (put it after a question, so learners think before they read on); opened points are remembered per step until a page reload |
 | `src/lessons/actionMarkers.ts` | `splitActionMarkers`: cuts step markdown at those marker lines (tested in `actionMarkers.test.ts`) |
 | `src/components/lesson/LessonActionButton.vue` | One action button, with its progress fill (timed actions, moving controls) |
 | `src/lessons/<id>/img/*` | Images, used as a step `image` or from markdown as `![alt](img/file.svg)` |
