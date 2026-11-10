@@ -520,6 +520,9 @@ export function useLesson(lesson: Lesson) {
       case "restart":
         restart();
         break;
+      case "reenter":
+        for (const o of step.value.onEnter ?? []) await applyOp(o);
+        break;
     }
   }
 

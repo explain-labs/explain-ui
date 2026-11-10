@@ -28,6 +28,8 @@ export type Op =
   | { kind: "pause" }
   // rebuild the lesson's starting state and return to the first step
   | { kind: "restart" }
+  // re-apply the current step's onEnter (a fresh patient for the case on screen)
+  | { kind: "reenter" }
   // switch to another bundled scenario (the page waits for the rebuild; later
   // ops in the same list are applied once the model is ready). `fresh` rebuilds
   // even when that scenario is already loaded: a clean patient for a new case
@@ -176,6 +178,9 @@ export interface Lesson {
   // was started (an action, an intervention, the SLE6000 screen). Non-invasive
   // CPAP (prongs/mask) keeps the child breathing.
   ventilatorStopsBreathing?: boolean;
+  // a button bar at the top of the Interventions tab: fast-forward (minutes) and/or "Start this case
+  // again" (re-applies the current step's onEnter; hidden on steps without one)
+  controlsToolbar?: { fastForward?: number; restart?: boolean };
   // lesson-specific interventions, looked up before the shared registry (e.g. a
   // bolus sized for this lesson's patient)
   interventions?: Record<string, Intervention>;

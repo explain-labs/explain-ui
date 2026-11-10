@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, ref } from "vue";
+import { computed, inject, ref } from "vue";
 import SelectButton from "primevue/selectbutton";
 import Slider from "primevue/slider";
 import InputNumber from "primevue/inputnumber";
@@ -7,6 +7,8 @@ import Button from "primevue/button";
 import { LessonKey } from "@/composables/useLesson";
 import { t, UI } from "@/lessons/i18n";
 import type { Intervention, SliderIntervention } from "@/lessons/interventions";
+import type { LessonAction } from "@/lessons/types";
+import LessonActionButton from "@/components/lesson/LessonActionButton.vue";
 
 // The lesson's intervention controls (from the interventions registry). Always
 // usable; controls the current step names in `controls` get a spotlight ring.
@@ -27,6 +29,19 @@ function toggleOptions(c: Intervention) {
 function onToggle(c: Intervention, v: "on" | "off" | null) {
   if (v) rt.applyControl(c.id, v); // SelectButton emits null when re-clicking the active option
 }
+
+// toolbar at the top (lesson.controlsToolbar): fast-forward and "Start this case again", as lesson
+// actions so they get the same busy/computing state as the step buttons
+const toolbar = computed<LessonAction[]>(() => {
+  const tb = rt.lesson.controlsToolbar;
+  if (!tb) return [];
+  const out: LessonAction[] = [];
+  if (tb.fastForward)
+    out.push({ id: "tb-ff", label: `Fast-forward ${tb.fastForward} min`, icon: "pi pi-forward", severity: "secondary", ops: [{ kind: "calculate", seconds: tb.fastForward * 60 }] });
+  if (tb.restart && rt.step.value.onEnter?.length)
+    out.push({ id: "tb-restart", label: "Start this case again", icon: "pi pi-refresh", severity: "secondary", ops: [{ kind: "reenter" }] });
+  return out;
+});
 
 // ----- sliders ------------------------------------------------------------------
 const fmt = (c: SliderIntervention, v: number | undefined) =>
@@ -78,6 +93,9 @@ function inputValue(c: SliderIntervention): number | null {
 
 <template>
   <section class="flex flex-col gap-2">
+    <div v-if="toolbar.length" class="flex flex-wrap gap-2 pb-1">
+      <LessonActionButton v-for="a in toolbar" :key="a.id" :action="a" />
+    </div>
     <div
       v-for="c in rt.controls.value"
       :key="c.id"

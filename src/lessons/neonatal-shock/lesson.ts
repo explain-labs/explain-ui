@@ -275,6 +275,7 @@ export default defineLesson({
     "ventilate", "extubate", "ecmo_start", "ecmo_vv_start", "ecmo_rpm", "ecmo_stop",
   ],
   ventilatorStopsBreathing: true,
+  controlsToolbar: { fastForward: 2, restart: true },
   interventions: INTERVENTIONS,
   layout: {
     centre: ["diagram", "sle6000"],
