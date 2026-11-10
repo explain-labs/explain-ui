@@ -9,6 +9,12 @@ export type LaneId = "ecg" | "spo2_pre" | "spo2_post" | "abp" | "resp" | "co2";
 
 export type LaneDef = MonitorLane & { slow: string[] };
 
+// a fixed y-scale for a lane (with optional reference lines), set by a host (lesson) instead of autoscaling
+export interface LaneRange {
+  range: [number, number];
+  grid?: number[];
+}
+
 // format a slow-stream value (times `scale`), "—" when absent
 const f = (n: Record<string, number>, p: string, d: number, scale = 1) => {
   const v = n[p];

@@ -252,6 +252,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             min-height="220px"
             :show-window-select="false"
             :highlight="rt.monitorHighlight.value"
+            :ranges="lesson.monitorRanges"
           />
           <LessonChart v-if="step.chart" :chart="step.chart" />
           <NumericReadoutPanel

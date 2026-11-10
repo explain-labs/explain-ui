@@ -1,5 +1,5 @@
 import type { L10n, Lang } from "@/lessons/i18n";
-import type { LaneId } from "@/render/monitorLanes";
+import type { LaneId, LaneRange } from "@/render/monitorLanes";
 import type { TaskCategory } from "@/services/commonTasks";
 import type { Intervention } from "@/lessons/interventions";
 
@@ -181,6 +181,8 @@ export interface Lesson {
   interventions?: Record<string, Intervention>;
   numerics: LessonNumericGroup[];
   monitorLanes?: LaneId[]; // default: ecg, spo2_pre, spo2_post, abp
+  // fixed y-scales per lane instead of autoscaling (e.g. ABP, so pulse-pressure changes show)
+  monitorRanges?: Partial<Record<LaneId, LaneRange>>;
   layout?: LessonLayout;
   steps: LessonStep[];
 }

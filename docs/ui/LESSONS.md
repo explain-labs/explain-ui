@@ -65,6 +65,7 @@ export default defineLesson({
 | `ventilatorStopsBreathing?` | While the ventilator runs with a tube (`Ventilator.is_enabled`, `interface` "ett") the lesson switches spontaneous breathing off (a sedated, intubated child) and back on when that ends, however the ventilator was started. Non-invasive CPAP keeps the child breathing. Used by `neonatal-shock` |
 | `numerics` | Groups of numeric cards: `{ key, title, collapsed?, parameters: [{ label, props, unit?, factor?, rounding?, weight_based? }] }`. These are the same display rules as `configuration.monitors` (see [Numerics](./Numerics.md)) |
 | `monitorLanes?` | Bedside-monitor lanes (`ecg`, `spo2_pre`, `spo2_post`, `abp`, `resp`, `co2`). Default is the first four |
+| `monitorRanges?` | Fixed y-scales per lane instead of autoscaling, `{ abp: { range: [20, 100], grid: [40, 60, 80] } }`: faint reference lines with labels at the `grid` values. With autoscaling a narrow pulse pressure looked as tall as a normal one |
 | `layout?` | Page layout beyond the default; see [Layout](#layout) |
 | `steps` | The step sequence |
 
