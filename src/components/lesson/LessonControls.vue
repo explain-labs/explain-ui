@@ -41,6 +41,25 @@ function applyDisplay(c: SliderIntervention, display: number | null | undefined)
   rt.applyControl(c.id, rt.sliderRaw(c, clamped));
 }
 
+// PrimeVue's Slider emits `slideend` only at the end of a drag; a click on the track or the arrow
+// keys only emit `change`. So `change` is applied too, debounced (a drag emits it per move), and the
+// position the learner is moving to is kept as a draft so the handle doesn't jump back meanwhile.
+const sliderDraft = ref<Record<string, number>>({});
+const sliderTimers: Record<string, number> = {};
+function onSliderMove(id: string, v: number, apply: (v: number) => void) {
+  sliderDraft.value = { ...sliderDraft.value, [id]: v };
+  window.clearTimeout(sliderTimers[id]);
+  sliderTimers[id] = window.setTimeout(() => commitSlider(id, v, apply), 250);
+}
+function commitSlider(id: string, v: number, apply: (v: number) => void) {
+  window.clearTimeout(sliderTimers[id]);
+  apply(v);
+  const next = { ...sliderDraft.value };
+  delete next[id];
+  sliderDraft.value = next;
+}
+const first = (e: any) => (Array.isArray(e?.value ?? e) ? (e.value ?? e)[0] : (e?.value ?? e));
+
 // typed values are applied on Enter or blur, not per keystroke
 const drafts = ref<Record<string, number | null>>({});
 function commitDraft(c: SliderIntervention) {
@@ -99,13 +118,14 @@ function inputValue(c: SliderIntervention): number | null {
 
       <div v-else-if="c.kind === 'slider'" class="flex items-center gap-3">
         <Slider
-          :model-value="rt.sliderValue(c) ?? c.min"
+          :model-value="sliderDraft[c.id] ?? rt.sliderValue(c) ?? c.min"
           :min="c.min"
           :max="c.max"
           :step="c.step"
           class="flex-1"
           :disabled="!rt.modelReady.value"
-          @slideend="(e: any) => applyDisplay(c, Array.isArray(e.value) ? e.value[0] : e.value)"
+          @change="(v: any) => onSliderMove(c.id, first(v), (x) => applyDisplay(c, x))"
+          @slideend="(e: any) => commitSlider(c.id, first(e), (x) => applyDisplay(c, x))"
         />
         <InputNumber
           :model-value="inputValue(c)"
@@ -126,13 +146,14 @@ function inputValue(c: SliderIntervention): number | null {
       <div v-else-if="c.kind === 'relslider'" class="flex flex-col gap-0.5">
         <div class="flex items-center gap-3">
           <Slider
-            :model-value="rt.relPosition(c)"
+            :model-value="sliderDraft[c.id] ?? rt.relPosition(c)"
             :min="-1"
             :max="1"
             :step="0.05"
             class="flex-1 relslider"
             :disabled="!rt.modelReady.value"
-            @slideend="(e: any) => rt.applyRel(c, Array.isArray(e.value) ? e.value[0] : e.value)"
+            @change="(v: any) => onSliderMove(c.id, first(v), (x) => rt.applyRel(c, x))"
+            @slideend="(e: any) => commitSlider(c.id, first(e), (x) => rt.applyRel(c, x))"
           />
           <span class="w-12 text-right text-sm tabular-nums font-semibold">{{ rt.relLabel(c) }}</span>
         </div>
