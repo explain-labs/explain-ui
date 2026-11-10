@@ -309,6 +309,7 @@ export default defineLesson({
         // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
         num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
         num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
+        num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
       ],
     },
     {
