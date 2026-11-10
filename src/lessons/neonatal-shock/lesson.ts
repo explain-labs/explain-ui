@@ -338,6 +338,8 @@ export default defineLesson({
       parameters: [
         perKg("Blood volume", "Circulation.total_blood_volume", "ml/kg"),
         num("Interstitial fluid", "Interstitium.isf_volume_ml_kg", "ml/kg"),
+        // as the scenario's own monitor card ("Diurese": Kidneys.urine_flow x60, per kg)
+        num("Diuresis", "Kidneys.urine_flow", "ml/kg/h", 1, 60, true),
       ],
     },
   ],
