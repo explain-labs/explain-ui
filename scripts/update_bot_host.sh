@@ -24,6 +24,11 @@
 #   ./scripts/update_bot_host.sh            # pull + deploy docs; restart only if api.py changed
 #   ./scripts/update_bot_host.sh --restart  # also force a restart (e.g. after a docs-only change)
 #
+# The api.py sync is one-way (repo -> live) and will REFUSE to run if the live
+# file is newer than this checkout's copy, rather than discard edits made
+# directly on the host. Reconcile and commit, or set FORCE_WRAPPER=1 if this
+# copy is the authoritative one.
+#
 set -euo pipefail
 
 REPO_DIR="${EXPLAIN_REPO:-$HOME/claude-bots/explain/explain-repo}"
@@ -58,6 +63,42 @@ cp "$REPO_DIR/knowledge-pack/explain-CLAUDE-section.md" "$WORKDIR/CLAUDE.md"
 echo "==> 3/4 sync API wrapper  (bot-host/api.py -> $GLUE_DIR/api.py)"
 if [ -f "$REPO_DIR/bot-host/api.py" ]; then
   if [ ! -f "$GLUE_DIR/api.py" ] || ! cmp -s "$REPO_DIR/bot-host/api.py" "$GLUE_DIR/api.py"; then
+    # Guard against clobbering a hand-edited live file (added 2026-11-10).
+    #
+    # This step is a one-way repo -> live copy, so if someone edits the live
+    # api.py directly and never brings the change back here, the next run of
+    # this script silently discards their work and restarts the service with
+    # the older code. That is not hypothetical: between 2026-10-05 and
+    # 2026-11-10 the live file was 34 lines ahead of this one (session
+    # rotation, turn-stats logging, the is_error raise, the ask_explain
+    # rename) while this copy was ahead on the term_neonate_72h baseline
+    # default — a two-way divergence in which a copy in *either* direction
+    # would have lost something. The stale api.py.bak.* next to the live file
+    # is the receipt from the last time this ran.
+    #
+    # mtime is a weak signal, but it is the one available here, and it is
+    # right in the case that matters: a live file newer than this one means
+    # edits happened downstream of the last sync. Reconcile by hand, then
+    # re-run. FORCE_WRAPPER=1 overrides when you know this copy is correct.
+    #
+    # Known limitation: `-nt` is strictly-newer, so two files written in the
+    # same second compare equal and the guard does not fire. That is the right
+    # trade-off here (equal mtime means they were synced together) but it does
+    # mean this is a safety net, not a proof — the content diff is still worth
+    # a look before any forced install.
+    if [ -f "$GLUE_DIR/api.py" ] \
+       && [ "$GLUE_DIR/api.py" -nt "$REPO_DIR/bot-host/api.py" ] \
+       && [ -z "${FORCE_WRAPPER:-}" ]; then
+      echo "    REFUSING to overwrite the live wrapper: $GLUE_DIR/api.py is NEWER" >&2
+      echo "    than $REPO_DIR/bot-host/api.py, so it carries edits this checkout" >&2
+      echo "    does not have. Copying now would discard them." >&2
+      echo "" >&2
+      echo "    Inspect:   diff $REPO_DIR/bot-host/api.py $GLUE_DIR/api.py" >&2
+      echo "    Reconcile: bring the live changes into bot-host/api.py and commit," >&2
+      echo "               then re-run this script (it becomes a no-op)." >&2
+      echo "    Override:  FORCE_WRAPPER=1 $0 $*   # only if this copy is authoritative" >&2
+      exit 1
+    fi
     # validate before installing so a bad file never reaches the live service
     "$VENV_PY" -m py_compile "$REPO_DIR/bot-host/api.py"
     [ -f "$GLUE_DIR/api.py" ] && cp "$GLUE_DIR/api.py" "$GLUE_DIR/api.py.bak.$(date +%s)"
