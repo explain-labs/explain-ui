@@ -124,7 +124,6 @@ const caseStep = (id: string, title: string, enter: Op[], start: Op[], ffMinutes
   id,
   title,
   onEnter: enter,
-  highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Monitor.svo2", "Lactate.arterial_lactate"],
   actions: [
     {
       id: "start",
@@ -355,7 +354,6 @@ export default defineLesson({
     {
       id: "intro",
       title: "Shock is an oxygen-delivery problem",
-      highlight: ["Monitor.svo2", "Monitor.flows.lvo", "Heart.lv_sv"],
     },
     ...introSteps(),
     caseStep("case-1", "Case 1: a baby after a vacuum delivery", NEWBORN, [call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD")], 2, 120),
@@ -363,7 +361,6 @@ export default defineLesson({
       id: "hypovolaemic",
       title: "Case 1 explained: hypovolaemic shock",
       onEnter: NEWBORN,
-      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2", "Monitor.do2_br", "Monitor.do2_lb", "Monitor.flows.da_flow"],
       actions: [
         {
           id: "bleed",
@@ -404,7 +401,6 @@ export default defineLesson({
       id: "septic-cold",
       title: "Case 2 explained: cold septic shock",
       onEnter: TERM,
-      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Monitor.svo2", "Monitor.do2_lb"],
       actions: [
         {
           id: "cold-sepsis",
@@ -439,7 +435,6 @@ export default defineLesson({
       id: "distributive",
       title: "Case 3 explained: warm septic shock",
       onEnter: TERM,
-      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Kidneys.urine_flow", "Circulation.total_blood_volume", "Interstitium.isf_volume_ml_kg"],
       actions: [
         {
           id: "sepsis",
@@ -466,7 +461,6 @@ export default defineLesson({
       id: "cardiogenic-systolic",
       title: "Case 4 explained: cardiogenic shock, the weak heart",
       onEnter: TERM,
-      highlight: ["Heart.lv_sv", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2"],
       actions: [
         {
           id: "depress",
@@ -492,7 +486,6 @@ export default defineLesson({
       id: "cardiogenic-diastolic",
       title: "Case 5 explained: cardiogenic shock, the stiff heart",
       onEnter: TERM,
-      highlight: ["Heart.lv_sv", "Monitor.flows.lvo", "Monitor.minmax.cvp_pres_mean"],
       actions: [
         {
           id: "stiffen",
@@ -529,8 +522,6 @@ export default defineLesson({
       id: "pphn",
       title: "Case 6 explained: PPHN, the right ventricle and the duct",
       onEnter: TRANSITION,
-      highlight: ["Monitor.flows.da_flow", "Monitor.fo_flow", "Monitor.minmax.pap_pres_max", "Monitor.do2_lb"],
-      monitorHighlight: ["spo2_pre", "spo2_post"],
       diagramHighlight: ["DA", "FO"],
       controls: ["ductus"],
       actions: [
@@ -571,8 +562,6 @@ export default defineLesson({
       id: "hlhs-overcirculation",
       title: "Case 7 explained: HLHS, pulmonary overcirculation",
       onEnter: HLHS,
-      highlight: ["Monitor.flows.da_flow", "Monitor.flows.rvo", "Monitor.do2_lb", "Lactate.arterial_lactate"],
-      monitorHighlight: ["spo2_pre", "abp"],
       diagramHighlight: ["DA", "FO"],
       actions: [
         {
