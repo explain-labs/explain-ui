@@ -1,4 +1,4 @@
-A term baby, **3 days old**, born after a **difficult delivery**: a long second stage, thick meconium, Apgar 2-4-6, cord pH 6.95. The first days went reasonably, but now the baby looks **grey** and perfuses poorly. The liver edge is 3 cm below the costal margin.
+A term baby, **14 days old** (the model uses the physiology of the 3-day-old). Last week the older brother had a fever and a runny nose, and the mother had diarrhoea. Since yesterday the baby feeds poorly, **sweats and tires during feeds**, and breathes fast. Now the baby looks **grey**, the heart rate is high, you hear a **gallop rhythm**, and the liver edge is 3 cm below the costal margin. Temperature 37.9 °C.
 
 Press **Start the case**, and fast-forward if you like.
 

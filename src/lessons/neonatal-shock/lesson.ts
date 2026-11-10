@@ -450,7 +450,7 @@ export default defineLesson({
         again(TERM),
       ],
     },
-    caseStep("case-4", "Case 4: a baby after a difficult birth", TERM, [{ kind: "scale", group: "heart_el_max", factor: 0.4 }], 2),
+    caseStep("case-4", "Case 4: a 2-week-old who stopped feeding", TERM, [{ kind: "scale", group: "heart_el_max", factor: 0.4 }], 2),
     {
       id: "cardiogenic-systolic",
       title: "Case 4 explained: cardiogenic shock, the weak heart",

@@ -1,6 +1,6 @@
-**Case 4 was cardiogenic shock with a weak heart** (post-asphyxial myocardial dysfunction). The baby has been reset; now step by step.
+**Case 4 was cardiogenic shock with a weak heart**: an **enteroviral myocarditis** (the family's fever, cold and diarrhoea were the clue; enteroviruses such as Coxsackie B and echovirus cause severe neonatal myocarditis in the first weeks of life). The baby has been reset; now step by step.
 
-A baby after **perinatal asphyxia**, or with **myocarditis**: the ventricles contract poorly.
+The inflamed myocardium contracts poorly; the same picture is seen after **perinatal asphyxia** or with a **cardiomyopathy**.
 
 Press **Myocardial depression**.
 
