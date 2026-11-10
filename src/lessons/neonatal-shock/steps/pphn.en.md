@@ -1,4 +1,4 @@
-**Case 6 was PPHN.** The baby has been reset; now step by step.
+**Case 5 was PPHN.** The baby has been reset; now step by step.
 
 A new scenario: a term baby **one hour after birth**. PVR is still high, and the duct and foramen ovale are open with **bidirectional** flow.
 

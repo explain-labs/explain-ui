@@ -1,4 +1,4 @@
-**Case 4 was cardiogenic shock with a weak heart**: an **enteroviral myocarditis** (the family's fever, cold and diarrhoea were the clue; enteroviruses such as Coxsackie B and echovirus cause severe neonatal myocarditis in the first weeks of life). The baby has been reset; now step by step.
+**Case 3 was cardiogenic shock with a weak heart**: an **enteroviral myocarditis** (the family's fever, cold and diarrhoea were the clue; enteroviruses such as Coxsackie B and echovirus cause severe neonatal myocarditis in the first weeks of life). The baby has been reset; now step by step.
 
 The inflamed myocardium contracts poorly; the same picture is seen after **perinatal asphyxia** or with a **cardiomyopathy**.
 

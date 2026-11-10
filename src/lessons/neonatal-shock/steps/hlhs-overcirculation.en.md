@@ -1,4 +1,4 @@
-**Case 7 was pulmonary overcirculation in HLHS.** The baby has been reset; now step by step.
+**Case 6 was pulmonary overcirculation in HLHS.** The baby has been reset; now step by step.
 
 In HLHS the left heart cannot pump. The **right ventricle is the only pump**: it fills the lungs and, through the **duct**, the whole body (the arch and coronaries backwards). All blood from the lungs returns across the **atrial septum** and mixes with the body's venous blood. Lungs and body are **parallel circulations**, and the split between them (Qp:Qs) is set by the ratio of **PVR to SVR**.
 

@@ -42,4 +42,4 @@ Now the other target from the same starting point. Press **Repeat the cold sepsi
 
 [[reveal]]
 
-Pressure **and** flow rise (MAP about 60, LV output about 140, SvO₂ about 57 %), and the **lactate starts to fall**. This is the target that failed: **contractility**. In practice: an inotrope (adrenaline, dobutamine, milrinone), not a pure vasopressor. In warm shock, in the next step, it is the other way round.
+Pressure **and** flow rise (MAP about 60, LV output about 140, SvO₂ about 57 %), and the **lactate starts to fall**. This is the target that failed: **contractility**. In practice: an inotrope (adrenaline, dobutamine, milrinone), not a pure vasopressor. In warm shock, the last case of this lesson, it is the other way round.

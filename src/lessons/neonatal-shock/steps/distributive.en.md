@@ -1,4 +1,4 @@
-**Case 3 was warm septic shock**, the distributive type. The baby has been reset; now step by step.
+**Case 7 was warm septic shock**, the distributive type. The baby has been reset; now step by step.
 
 The other phenotype: **warm** septic shock. The arterioles dilate deeply (**SVR falls**), the capillaries **leak**, the fever raises the oxygen demand, and leak and poor intake have cost about a fifth of the blood volume.
 
