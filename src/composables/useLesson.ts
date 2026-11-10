@@ -241,7 +241,7 @@ export function useLesson(lesson: Lesson) {
   const lookup = (id: string): Intervention | undefined => lesson.interventions?.[id] ?? getIntervention(id);
   const VENT_PATHS = ["Ventilator.is_enabled", "Ventilator.interface"];
   const readPaths = [
-    ...lesson.controls.map((id) => lookup(id)).flatMap((c) => (c && c.kind !== "button" ? [c.read] : [])),
+    ...lesson.controls.map((id) => lookup(id)).flatMap((c) => (c && (c.kind === "toggle" || c.kind === "slider") ? [c.read] : [])),
     ...(lesson.ventilatorStopsBreathing ? VENT_PATHS : []),
   ];
 
@@ -277,7 +277,7 @@ export function useLesson(lesson: Lesson) {
     lastSettle = now;
     for (const [id, p] of Object.entries(pending.value)) {
       const c = lookup(id);
-      const v = c && c.kind !== "button" ? valueOf(c.read) : undefined;
+      const v = c && (c.kind === "toggle" || c.kind === "slider") ? valueOf(c.read) : undefined;
       const tol = 1e-3 * Math.max(1, Math.abs(p.target));
       if ((v !== undefined && Math.abs(v - p.target) <= tol) || Date.now() > p.until) clearPending(id);
     }
@@ -294,7 +294,7 @@ export function useLesson(lesson: Lesson) {
   function progress(id: string): number | undefined {
     const p = pending.value[id];
     const c = lookup(id);
-    if (!p || !c || c.kind === "button" || p.from === undefined) return undefined;
+    if (!p || !c || c.kind === "button" || c.kind === "updown" || p.from === undefined) return undefined;
     const span = p.target - p.from;
     if (Math.abs(span) < 1e-9) return 100;
     const v = valueOf(c.read);
@@ -427,6 +427,9 @@ export function useLesson(lesson: Lesson) {
       for (const op of c.toOps ? c.toOps(target) : [{ kind: "set", path: c.read, value: target, it } as Op])
         applyOp(op);
       setPending(id, { from, target, until: Date.now() + (it + 3) * 1000 });
+    } else if (c.kind === "updown") {
+      // "off" = down, anything else = up
+      for (const op of state === "off" ? c.down : c.up) applyOp(op);
     } else {
       for (const op of c.ops) applyOp(op);
     }

@@ -14,7 +14,7 @@ Lessons are **files in this repo**, bundled with the app. The working example is
 | `src/components/lesson/LessonActionButton.vue` | One action button, with its progress fill (timed actions, moving controls) |
 | `src/lessons/<id>/img/*` | Images, used as a step `image` or from markdown as `![alt](img/file.svg)` |
 | `src/lessons/types.ts` | Schema: `Lesson`, `LessonStep`, `LessonAction`, `LessonNumeric`, `Op` |
-| `src/lessons/interventions.ts` | Intervention registry (`INTERVENTIONS`): the controls lessons can offer |
+| `src/lessons/interventions.ts` | Intervention registry (`INTERVENTIONS`): the controls lessons can offer. Kinds: `toggle`, `slider`, `button`, and `updown` (a −/+ pair without a value; each press applies its `down`/`up` ops, typically a relative scale, so the control gives nothing away) |
 | `src/lessons/index.ts` | Registry: `getLesson`, `hasLesson`, `listLessons`, `loadStepMarkdown`, `imageUrl` (Vite globs) |
 | `src/lessons/i18n.ts` | `Lang`, `L10n`, `t()`, `useLessonLang()` (persisted in localStorage), UI strings |
 | `src/composables/useLesson.ts` | Runtime: load, step navigation, `applyOps`, control state |

@@ -64,7 +64,15 @@ export interface ButtonIntervention extends InterventionBase {
   ops: Op[];
 }
 
-export type Intervention = ToggleIntervention | SliderIntervention | ButtonIntervention;
+// Up/down pair without a value: each press applies `up` or `down`, typically a relative change (scale
+// op with relative: true), so the control shows nothing a learner could read the diagnosis from.
+export interface UpDownIntervention extends InterventionBase {
+  kind: "updown";
+  up: Op[];
+  down: Op[];
+}
+
+export type Intervention = ToggleIntervention | SliderIntervention | ButtonIntervention | UpDownIntervention;
 
 export const INTERVENTIONS: Record<string, Intervention> = {
   // 100% = the duct's maximum diameter (Pda.diameter_*_max); diameter_relative

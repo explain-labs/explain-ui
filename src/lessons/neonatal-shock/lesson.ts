@@ -117,33 +117,18 @@ const caseStep = (id: string, title: string, enter: Op[], start: Op[], ffMinutes
   ],
 });
 
-// The treatment targets as standing controls (Interventions tab), usable on every
-// step. The scale sliders show % of normal: the ModelScaler group factor
-// (1 = the scenario as loaded) read back from the first model of its group, the
-// same lever as Common tasks. Diastolic function is the inverse of the stiffness
-// factor (50 % = twice as stiff).
-const scaleSlider = (
-  id: string,
-  label: string,
-  group: string,
-  read: string,
-  min: number,
-  max: number,
-  help: string,
-  invert = false,
-): Intervention => ({
+// The treatment targets as standing controls (Interventions tab), usable on every step. The four
+// physiological targets are up/down buttons without a value: a slider at "40 %" gave the diagnosis
+// away. Each press multiplies the current lever by STEP (or divides): the ModelScaler group,
+// relative to its current factor, the same lever as Common tasks. Diastolic function up = stiffness down.
+const STEP = 1.5;
+const upDown = (id: string, label: string, group: string, help: string, invert = false): Intervention => ({
   id,
-  kind: "slider",
+  kind: "updown",
   label,
   help,
-  read,
-  min,
-  max,
-  step: 5,
-  unit: "%",
-  factor: 100,
-  invert,
-  toOps: (raw) => [{ kind: "scale", group, factor: raw }],
+  up: [{ kind: "scale", group, factor: invert ? 1 / STEP : STEP, relative: true }],
+  down: [{ kind: "scale", group, factor: invert ? STEP : 1 / STEP, relative: true }],
 });
 const INTERVENTIONS: Record<string, Intervention> = {
   saline: {
@@ -250,14 +235,10 @@ const INTERVENTIONS: Record<string, Intervention> = {
       { kind: "set", path: "Ecls.ecls_clamped", value: true },
     ],
   },
-  contractility: scaleSlider("contractility", "Contractility", "heart_el_max", "LV.el_max_factor_scaling_ps", 20, 300,
-    "Both ventricles and atria. 100 % = normal."),
-  diastolic_function: scaleSlider("diastolic_function", "Diastolic function", "heart_el_min", "LV.el_min_factor_scaling_ps", 20, 200,
-    "Inverse of the passive diastolic stiffness. 100 % = normal, 50 % = twice as stiff.", true),
-  svr: scaleSlider("svr", "Systemic vascular resistance", "systemic_resistances", "AA.r_factor_scaling_ps", 20, 500,
-    "All systemic vessels. 100 % = normal."),
-  pvr: scaleSlider("pvr", "Pulmonary vascular resistance", "pulmonary_resistances", "PA.r_factor_scaling_ps", 20, 1000,
-    "All pulmonary vessels. 100 % = normal."),
+  contractility: upDown("contractility", "Contractility", "heart_el_max", "Both ventricles and atria. Each press ×1.5 or ÷1.5, relative to now."),
+  diastolic_function: upDown("diastolic_function", "Diastolic function", "heart_el_min", "Up = a less stiff ventricle. Each press ×1.5 or ÷1.5, relative to now.", true),
+  svr: upDown("svr", "Systemic vascular resistance", "systemic_resistances", "All systemic vessels. Each press ×1.5 or ÷1.5, relative to now."),
+  pvr: upDown("pvr", "Pulmonary vascular resistance", "pulmonary_resistances", "All pulmonary vessels. Each press ×1.5 or ÷1.5, relative to now."),
 };
 
 export default defineLesson({
