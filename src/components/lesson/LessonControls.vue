@@ -123,9 +123,9 @@ function inputValue(c: SliderIntervention): number | null {
       </div>
 
       <!-- up/down: no value shown, each press changes the target relative to now -->
-      <div v-else-if="c.kind === 'updown'" class="flex items-center gap-2">
+      <div v-else-if="c.kind === 'updown'" class="flex items-center gap-2 updown">
         <Button
-          icon="pi pi-minus"
+          label="−"
           size="small"
           severity="secondary"
           :aria-label="`${t(c.label, rt.lang.value)} down`"
@@ -133,7 +133,7 @@ function inputValue(c: SliderIntervention): number | null {
           @click="rt.applyControl(c.id, 'off')"
         />
         <Button
-          icon="pi pi-plus"
+          label="+"
           size="small"
           severity="secondary"
           :aria-label="`${t(c.label, rt.lang.value)} up`"
@@ -156,3 +156,11 @@ function inputValue(c: SliderIntervention): number | null {
     </div>
   </section>
 </template>
+
+<style scoped>
+.updown :deep(.p-button) {
+  min-width: 2.75rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+</style>
