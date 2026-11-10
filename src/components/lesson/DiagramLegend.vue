@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { t, useLessonLang } from "@/lessons/i18n";
-import { to2RampCss } from "@/render/diagramConstants";
+import { satRampCss } from "@/render/diagramConstants";
 
 // Small collapsible key to the diagram's visual encoding, overlaid on the
 // diagram's bottom-left corner. The colour bar samples the renderer's own
-// to2 ramp, so it shows the same gamma curve (mixed blood stays blue).
+// saturation ramp, so it shows the same gamma curve (mixed blood stays blue).
 const lang = useLessonLang();
-const ramp = to2RampCss();
+const ramp = satRampCss();
 
 const STORAGE_KEY = "explain.lesson.legend";
 function initialOpen(): boolean {
@@ -28,7 +28,7 @@ watch(open, (v) => {
 
 const L = {
   title: { nl: "Legenda", en: "Legend" },
-  colour: { nl: "Zuurstofgehalte", en: "Oxygen content" },
+  colour: { nl: "Zuurstofsaturatie", en: "Oxygen saturation" },
   low: { nl: "laag", en: "low" },
   high: { nl: "hoog", en: "high" },
   size: { nl: "Grootte = bloedvolume", en: "Size = blood volume" },

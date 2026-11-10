@@ -1,6 +1,6 @@
 import { Application, Assets, Sprite, Graphics, Text, Texture } from "pixi.js";
 import { ANIM_TIME_SLOT, animMagOffset, animTintOffset } from "@explain/helpers/RealtimeChannels";
-import { DEOX_RGB, DEVICE_BAND_DEFAULT, TO2_HI, TO2_LO, rgbFromTo2 } from "./diagramConstants";
+import { DEOX_RGB, DEVICE_BAND_DEFAULT, SAT_HI, SAT_LO, rgbFromSat } from "./diagramConstants";
 import type {
   AnimFrame,
   ChartFrame,
@@ -9,7 +9,7 @@ import type {
 } from "./types";
 
 // PixiJS (v8) adapter for the sprite diagram. The VIEWER half of the diagram:
-// compartments are sprites scaled by volume and tinted by oxygenation (to2);
+// compartments are sprites scaled by volume and tinted by O2 saturation;
 // connectors are static paths recolored/faded by flow. Editor interactions are
 // Phase E. Per-frame updates come from the RealtimeBus anim snapshot and never
 // touch Vue reactivity.
@@ -31,16 +31,16 @@ interface CompNode {
   posType: string;
   dgs: number;
   sprite: Sprite;
-  glow: Sprite | null; // soft additive halo behind the disc (tinted by to2)
+  glow: Sprite | null; // soft additive halo behind the disc (tinted by saturation)
   rim: Sprite | null; // enlarged tinted disc behind, reads as a bright edge
-  cr: number; // smoothed tint rgb (damps per-frame to2 flicker)
+  cr: number; // smoothed tint rgb (damps per-frame flicker)
   cg: number;
   cb: number;
   label: Text | null; // caption, follows the sprite
   layout: any;
   lastR: number; // last volume-derived disc radius (so a live rescale can
   // re-apply sprite size immediately, even with the sim paused)
-  lastTo2: number; // last raw to2 (so a live tint-window change re-colours now)
+  lastSat: number; // last raw saturation (so a live tint-window change re-colours now)
   group: string | null; // device group (shown/hidden at runtime), null = always
   spin: number; // live spin rate (rev/s, e.g. a pump), 0 = static
   spinAngle: number; // accumulated spin (rad), added on top of layout rotation
@@ -62,7 +62,7 @@ interface ConnNode {
   pos: number; // normalized phase along the path [0,1)
   dir: number; // sign of the last flow (+1 towards dbcTo), turns the flow arrows
   geom: any; // {type:'straight',x1,y1,x2,y2} | {type:'arc',cx,cy,r,from,to}
-  lastTo2: number; // last raw upstream to2 (for a live tint-window change)
+  lastSat: number; // last raw upstream saturation (for a live tint-window change)
 }
 
 // ---- Flow indicator: a train of small discs that stream along each connector.
@@ -147,9 +147,9 @@ export class DiagramRenderer implements RendererAdapter {
   private speed = 1;
   private flowArrows = false; // settings.flowMarker === "arrow"
   private arrowTex: Texture | null = null;
-  // to2 (O2 content) gradient window for tinting; per-diagram, live-editable
-  private to2Lo = TO2_LO;
-  private to2Hi = TO2_HI;
+  // O2 saturation (fraction) gradient window for tinting; per-diagram, live-editable
+  private satLo = SAT_LO;
+  private satHi = SAT_HI;
   private ro: ResizeObserver | null = null;
   // device groups (e.g. the ECLS circuit): built hidden, shown via
   // setGroupVisible. While any grouped node is visible the ring shrinks up to
@@ -237,8 +237,9 @@ export class DiagramRenderer implements RendererAdapter {
     this.yOffset = numberOr(settings.yOffset, 0);
     this.scaling = numberOr(settings.scaling, 1);
     this.speed = numberOr(settings.speed, 1);
-    this.to2Lo = numberOr(settings.to2_lo, TO2_LO);
-    this.to2Hi = numberOr(settings.to2_hi, TO2_HI);
+    // settings.to2_lo / to2_hi (the old O2-content window) are ignored
+    this.satLo = numberOr(settings.sat_lo, SAT_LO);
+    this.satHi = numberOr(settings.sat_hi, SAT_HI);
     this.gridOn = settings.grid === true;
     this.gridSize = settings.gridSize > 0 ? settings.gridSize : GRID_SIZE_DEFAULT;
     this.deviceBand = settings.deviceBand >= 0 ? settings.deviceBand : DEVICE_BAND_DEFAULT;
@@ -427,18 +428,17 @@ export class DiagramRenderer implements RendererAdapter {
     this.drawSelection();
   }
 
-  /** Set the to2 (O2 content) tint window [lo, hi] live. Compartments/dots map
-   *  their oxygenation onto the deox→ox colour ramp across this window, so a
-   *  lower-Hb circuit (adult) needs a lower `hi` than a neonate to swing arterial
-   *  blood red instead of pegging the whole circuit blue. Re-colours immediately
-   *  (so a paused sim updates) and persists into settings.to2_lo / to2_hi. */
-  setTo2Range(lo: number, hi: number) {
+  /** Set the O2 saturation tint window [lo, hi] (fractions) live. Compartments/
+   *  dots map their saturation onto the deox→ox colour ramp across this window.
+   *  Re-colours immediately (so a paused sim updates) and persists into
+   *  settings.sat_lo / sat_hi. */
+  setSatRange(lo: number, hi: number) {
     if (!(hi > lo)) return; // need a positive window
-    this.to2Lo = lo;
-    this.to2Hi = hi;
+    this.satLo = lo;
+    this.satHi = hi;
     if (this.diagram?.settings) {
-      this.diagram.settings.to2_lo = lo;
-      this.diagram.settings.to2_hi = hi;
+      this.diagram.settings.sat_lo = lo;
+      this.diagram.settings.sat_hi = hi;
     }
     if (!this.ready) return;
     // snap each tinted component/dot to the new window now (don't wait for a
@@ -446,7 +446,7 @@ export class DiagramRenderer implements RendererAdapter {
     for (const name in this.comps) {
       const node = this.comps[name];
       if (!node.layout.general.tinting) continue;
-      const rgb = rgbFromTo2(node.lastTo2, this.to2Lo, this.to2Hi);
+      const rgb = rgbFromSat(node.lastSat, this.satLo, this.satHi);
       node.cr = rgb[0];
       node.cg = rgb[1];
       node.cb = rgb[2];
@@ -456,7 +456,7 @@ export class DiagramRenderer implements RendererAdapter {
     }
     for (const conn of this.conns) {
       if (!conn.layout.general.tinting) continue;
-      const rgb = rgbFromTo2(conn.lastTo2, this.to2Lo, this.to2Hi);
+      const rgb = rgbFromSat(conn.lastSat, this.satLo, this.satHi);
       conn.cr = rgb[0];
       conn.cg = rgb[1];
       conn.cb = rgb[2];
@@ -541,7 +541,7 @@ export class DiagramRenderer implements RendererAdapter {
       label,
       layout,
       lastR: fixedSize(layout) ?? radiusFromVolume(0.15),
-      lastTo2: this.to2Lo, // venous end until the first frame arrives
+      lastSat: this.satLo, // venous end until the first frame arrives
       group: comp.group || null,
       spin: 0,
       spinAngle: 0,
@@ -725,7 +725,7 @@ export class DiagramRenderer implements RendererAdapter {
       pos: 0,
       dir: 1,
       geom,
-      lastTo2: this.to2Lo,
+      lastSat: this.satLo,
     };
     // opt-in caption (e.g. the shunts): connector labels are hidden unless the layout asks for them
     if (comp.label && comp.layout.label?.visible === true) {
@@ -982,7 +982,7 @@ export class DiagramRenderer implements RendererAdapter {
       }
     }
 
-    // compartments: scale by volume, tint by to2 (smoothed), glow by fill
+    // compartments: scale by volume, tint by saturation (smoothed), glow by fill
     for (const name in this.comps) {
       const idx = this.animIndex[name];
       if (idx === undefined) continue;
@@ -992,7 +992,7 @@ export class DiagramRenderer implements RendererAdapter {
     }
 
     // connectors: the path stays a fixed neutral grey; the dot train streams
-    // along it, coloured from the upstream component (tint = dbcFrom's to2).
+    // along it, coloured from the upstream component (tint = dbcFrom's saturation).
     for (const conn of this.conns) {
       const idx = this.animIndex[conn.name];
       if (idx === undefined || !conn.graphics.visible) continue;
@@ -1002,17 +1002,17 @@ export class DiagramRenderer implements RendererAdapter {
     }
   }
 
-  /** Size a compartment by volume and ease its tint toward to2 by `lerp`
+  /** Size a compartment by volume and ease its tint toward `sat` by `lerp`
    *  (1 = snap). Shared by the realtime frames and the state-snapshot seed. */
-  private applyCompartment(node: CompNode, vol: number, to2: number, lerp: number) {
+  private applyCompartment(node: CompNode, vol: number, sat: number, lerp: number) {
     const r = fixedSize(node.layout) ?? radiusFromVolume(vol > 0 ? vol : 0.15);
     node.lastR = r;
     this.setCompartmentScale(node, r);
     if (!node.layout.general.tinting) return;
 
-    // ease the tint toward the target colour to damp per-frame to2 flicker
-    node.lastTo2 = to2;
-    const tgt = rgbFromTo2(node.lastTo2, this.to2Lo, this.to2Hi);
+    // ease the tint toward the target colour to damp per-frame flicker
+    node.lastSat = sat;
+    const tgt = rgbFromSat(node.lastSat, this.satLo, this.satHi);
     node.cr += (tgt[0] - node.cr) * lerp;
     node.cg += (tgt[1] - node.cg) * lerp;
     node.cb += (tgt[2] - node.cb) * lerp;
@@ -1029,8 +1029,8 @@ export class DiagramRenderer implements RendererAdapter {
   /** Size + tint compartments from a full model-state snapshot. Anim frames
    *  only flow while the sim runs, so without this a freshly loaded (or
    *  fast-forwarded) model shows placeholder-sized discs until Play. Mirrors
-   *  AnimationPacker: volume summed over the compartment's models, tint from
-   *  the first of them carrying a to2. */
+   *  AnimationPacker: volume summed over the compartment's models, tint = the
+   *  saturation (to2 / Hb) of the first of them carrying a to2. */
   seedFromModels(models: Record<string, any> | null | undefined) {
     if (!this.ready || !models) return;
     for (const name in this.comps) {
@@ -1042,13 +1042,13 @@ export class DiagramRenderer implements RendererAdapter {
       let vol = 0;
       for (const m of refs) if (typeof m.vol === "number") vol += m.vol;
       const tintRef = refs.find((m: any) => typeof m.to2 === "number");
-      this.applyCompartment(node, vol, tintRef ? tintRef.to2 : 0, 1);
+      this.applyCompartment(node, vol, tintRef ? satOf(tintRef) : 0, 1);
     }
   }
 
   // stream a connector's dot train along its path: phase advances by flow
   // (speed + direction); a smoothed magnitude scales dot size and fades the dots
-  // out near zero flow; colour comes from the upstream component (dbcFrom's to2).
+  // out near zero flow; colour comes from the upstream component (dbcFrom's saturation).
   private advanceDots(conn: ConnNode, flow: number, tint: number) {
     const g = conn.geom;
     const n = conn.dots.length;
@@ -1071,12 +1071,12 @@ export class DiagramRenderer implements RendererAdapter {
       conn.pos = wrap01(conn.pos + (flow * DOT_SPEED * this.speed) / Math.abs(range));
     }
 
-    // colour all dots from the smoothed upstream to2 (or white if untinted),
+    // colour all dots from the smoothed upstream saturation (or white if untinted),
     // lifted toward white so even venous (dark blue) dots stand out on the path
     let col = 0xffffff;
     if (conn.layout.general.tinting) {
-      conn.lastTo2 = tint;
-      const tgt = rgbFromTo2(tint, this.to2Lo, this.to2Hi);
+      conn.lastSat = tint;
+      const tgt = rgbFromSat(tint, this.satLo, this.satHi);
       conn.cr += (tgt[0] - conn.cr) * TINT_LERP;
       conn.cg += (tgt[1] - conn.cg) * TINT_LERP;
       conn.cb += (tgt[2] - conn.cb) * TINT_LERP;
@@ -1764,24 +1764,30 @@ function fixedSize(layout: any): number | null {
   return typeof v === "number" && v > 0 ? v : null;
 }
 
+// O2 saturation (fraction) of a blood model, as AnimationPacker.tintOf packs it:
+// O2 content over haemoglobin (both mmol/l); 0 for blood without Hb
+function satOf(m: any): number {
+  const hb = m?.solutes?.hemoglobin;
+  return typeof m?.to2 === "number" && hb > 0 ? m.to2 / hb : 0;
+}
+
 function radiusFromVolume(vol: number): number {
   const cubic = vol / ((4.0 / 3.0) * Math.PI);
   return Math.cbrt(cubic);
 }
 
-// Anatomical oxygenation ramp (Theme C). Maps blood O2 content (to2) onto a
+// Anatomical oxygenation ramp (Theme C). Maps blood O2 saturation onto a
 // deoxygenated slate-blue → oxygenated brick-red gradient via linear RGB interp.
 //
-// The gradient window [lo, hi] is in to2 (O2 CONTENT) units, not saturation.
-// These module values are the defaults; a diagram overrides them via
-// settings.to2_lo / settings.to2_hi (live-editable, see setTo2Range). The window
-// matters because to2 content scales with Hb: at the same saturation an adult
-// with lower Hb has a lower arterial to2 than a neonate, so a fixed window would
-// peg the whole adult circuit to the venous (blue) end. Tuning the window per
-// diagram restores genuine venous↔arterial colour separation. (The legacy
-// per-diagram `max_to2` hint is unrelated and still ignored.)
-// TO2_LO/TO2_HI, DEOX_RGB/OX_RGB, RAMP_GAMMA and rgbFromTo2 live in
-// diagramConstants.ts (Pixi-free) so the lesson legend draws the same ramp.
+// The tint is a saturation fraction: the engine's AnimationPacker packs
+// to2 / Hb, and satOf() mirrors it for state snapshots. (Until 2026-11 it
+// was O2 content, to2, which fell with haemodilution: a saline bolus turned the
+// diagram blue while the saturations stayed put, and adult circuits needed
+// their own window because content scales with Hb.) The window [lo, hi] is in
+// saturation units: SAT_LO/SAT_HI by default, settings.sat_lo / sat_hi per
+// diagram (live-editable, see setSatRange). SAT_LO/SAT_HI, DEOX_RGB/OX_RGB,
+// RAMP_GAMMA and rgbFromSat live in diagramConstants.ts (Pixi-free) so the
+// lesson legend draws the same ramp.
 const WHITE_RGB = [255, 255, 255];
 const HIGHLIGHT_COLOR = 0xfbbf24; // lesson pointing (amber), distinct from the editor's cyan
 
