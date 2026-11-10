@@ -13,4 +13,4 @@ Three messages:
 2. **Blood pressure is a late and incomplete marker.** Combine heart rate, CVP, SvO₂, lactate, saturation difference and echo.
 3. **The duct cuts both ways.** It is life-saving in duct-dependent lesions: systemic flow (HLHS, critical coarctation, interrupted arch: shock in the first two weeks = think of the duct and start PGE1), pulmonary flow (pulmonary atresia) and as an RV pop-off. A large left-to-right duct, on the other hand, can steal systemic flow, especially in preterms.
 
-Use the **Patient** tab to combine the levers yourself and build your own septic baby.
+Use the **Interventions** tab to combine the levers yourself (for example lower contractility, raise PVR and lower SVR) and build your own septic baby.
