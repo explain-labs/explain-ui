@@ -26,6 +26,12 @@ function ensure() {
     status.value = _model.statusMessage;
   });
   _model.on("model_ready", () => {
+    // a build always stops the worker's realtime loop (ModelEngine.build clears
+    // the clock without posting rt_stop). A `start` sent while the build was
+    // pending (e.g. a lesson step's onEnter reloading the scenario from inside
+    // the previous model_ready) posts rt_start for the old model, which would
+    // leave isRunning stuck at true and the new model never started.
+    isRunning.value = false;
     modelReady.value = true;
     // pull a full state snapshot so control panels can populate
     _model.getModelState();

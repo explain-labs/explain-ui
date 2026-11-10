@@ -1,6 +1,7 @@
-import type { L10n } from "@/lessons/i18n";
-import type { LaneId } from "@/render/monitorLanes";
+import type { L10n, Lang } from "@/lessons/i18n";
+import type { LaneId, LaneRange } from "@/render/monitorLanes";
 import type { TaskCategory } from "@/services/commonTasks";
+import type { Intervention } from "@/lessons/interventions";
 
 // what the lesson page's centre column can show
 export type CentreTab = "diagram" | "sle6000";
@@ -15,7 +16,9 @@ export type Op =
   | { kind: "call"; fn: string; args?: unknown[]; at?: number }
   // set a ModelScaler group to an absolute factor (1 = baseline) — useExplain().scale,
   // the lever of Common tasks' scale tasks, e.g. "lung_compliance"'s elastance groups
-  | { kind: "scale"; group: string | string[]; factor: number }
+  // `relative`: multiply the group's current factor (read back from the model)
+  // instead of setting it, e.g. "increase contractility ×2" on top of a shock
+  | { kind: "scale"; group: string | string[]; factor: number; relative?: boolean }
   // drive a registered intervention (see interventions.ts) to on/off, or a
   // slider to a raw value
   | { kind: "control"; id: string; state: "on" | "off" | number }
@@ -25,9 +28,13 @@ export type Op =
   | { kind: "pause" }
   // rebuild the lesson's starting state and return to the first step
   | { kind: "restart" }
+  // re-apply the current step's onEnter (a fresh patient for the case on screen); withStart: then run
+  // the step's `restartWith` action too (e.g. set off the shock again)
+  | { kind: "reenter"; withStart?: boolean }
   // switch to another bundled scenario (the page waits for the rebuild; later
-  // ops in the same list are applied once the model is ready)
-  | { kind: "loadScenario"; scenario: string }
+  // ops in the same list are applied once the model is ready). `fresh` rebuilds
+  // even when that scenario is already loaded: a clean patient for a new case
+  | { kind: "loadScenario"; scenario: string; fresh?: boolean }
   // run one of the lesson's experiments (see `Lesson.experiments`): load its
   // scenario if needed, apply its ops, settle, sample and fill its result table
   | { kind: "experiment"; id: string };
@@ -39,6 +46,9 @@ export interface LessonAction {
   icon?: string; // PrimeIcons class, e.g. "pi pi-times"
   severity?: "primary" | "secondary" | "success" | "info" | "warn" | "danger" | "contrast";
   ops: Op[];
+  // model seconds the action takes to play out (e.g. a bleed over 120 s): after a
+  // click the button fills as model time passes, so fast-forward and pause show
+  duration?: number;
 }
 
 // One numeric card in the lesson's readout. Same display rules as a scenario
@@ -91,6 +101,8 @@ export interface LessonStep {
   diagramLabels?: Record<string, L10n>;
   monitorHighlight?: LaneId[]; // bedside-monitor lanes to frame
   controls?: string[]; // intervention ids to spotlight (all stay usable)
+  // the action a toolbar restart runs after the fresh patient (the step's shock button)
+  restartWith?: string;
   onEnter?: Op[]; // applied when the learner arrives on this step
   centreTab?: CentreTab; // switch the centre column to this tab on arrival
   // an experiment id from `Lesson.experiments`: shows its comparison table and
@@ -159,11 +171,26 @@ export interface Lesson {
   experiments?: ExperimentSpec; // the paper's experiments file (paper companions)
   references?: LessonReference[]; // cited as [n] in the step text
   scenario: string; // bundled scenario stem in model_definitions/
+  lang?: Lang; // language to open in when the reader has not chosen one (default nl; papers en)
   autoRun?: boolean; // start the realtime loop once the model is built (default true)
   runOnAction?: boolean; // start the loop when an op is applied while paused (default true)
-  controls: string[]; // intervention ids from interventions.ts, in display order
+  controls: string[]; // intervention ids (interventions.ts or `interventions` below), in display order
+  // invasive ventilation stops spontaneous breathing (a sedated, intubated child):
+  // while Ventilator.is_enabled with interface "ett" the lesson keeps
+  // Breathing off, and turns it back on when that ends. However the ventilator
+  // was started (an action, an intervention, the SLE6000 screen). Non-invasive
+  // CPAP (prongs/mask) keeps the child breathing.
+  ventilatorStopsBreathing?: boolean;
+  // a button bar at the top of the Interventions tab: fast-forward (minutes) and/or "Start this case
+  // again" (re-applies the current step's onEnter; hidden on steps without one)
+  controlsToolbar?: { fastForward?: number; restart?: boolean };
+  // lesson-specific interventions, looked up before the shared registry (e.g. a
+  // bolus sized for this lesson's patient)
+  interventions?: Record<string, Intervention>;
   numerics: LessonNumericGroup[];
   monitorLanes?: LaneId[]; // default: ecg, spo2_pre, spo2_post, abp
+  // fixed y-scales per lane instead of autoscaling (e.g. ABP, so pulse-pressure changes show)
+  monitorRanges?: Partial<Record<LaneId, LaneRange>>;
   layout?: LessonLayout;
   steps: LessonStep[];
 }

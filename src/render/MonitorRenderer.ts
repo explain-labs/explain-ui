@@ -14,6 +14,7 @@ export interface MonitorLane {
   unit: string; // numeric unit caption
   fill?: boolean; // fill under the trace (pleth / capnograph)
   fixedRange?: [number, number]; // y-range; omit to autoscale per window
+  grid?: number[]; // faint reference lines (with small labels) at these values; only with fixedRange
   // numeric formatters, given the latest slow-stream sample (dot-path keyed)
   readNumeric: (n: Record<string, number>) => string;
   readSub?: (n: Record<string, number>) => string; // small secondary (e.g. mean)
@@ -258,6 +259,25 @@ export class MonitorRenderer implements RendererAdapter {
     const sy = (v: number) => plotBot - ((v - lo) / range) * (plotBot - plotTop);
 
     const ctx = this.ctx;
+    // reference lines on a fixed scale, so an amplitude (a pulse pressure) can be read off
+    if (lane.fixedRange && lane.grid?.length) {
+      ctx.save();
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.font = "9px system-ui, sans-serif";
+      ctx.lineWidth = 1;
+      for (const g of lane.grid) {
+        if (g <= lo || g >= hi) continue;
+        const y = Math.round(sy(g)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(plotR, y);
+        ctx.stroke();
+        if (plotBot - plotTop > 44) ctx.fillText(String(g), 2, y - 2); // labels only where they fit
+      }
+      ctx.restore();
+    }
     // walk contiguous runs of filled columns (sweep leaves a blank gap)
     let c = 0;
     while (c < this.plotW) {

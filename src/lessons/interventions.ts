@@ -42,6 +42,9 @@ export interface SliderIntervention extends InterventionBase {
   step: number;
   unit?: string;
   factor?: number; // display = raw × factor (default 1)
+  // display = factor / raw instead, for a quantity shown as the inverse of its
+  // lever (diastolic function as a % of normal from the stiffness factor)
+  invert?: boolean;
   // display = raw / (value at this path) × 100 — a percentage of a model max,
   // e.g. "Shunts.diameter_fo_max". Overrides `factor`.
   percentOf?: string;
@@ -61,7 +64,33 @@ export interface ButtonIntervention extends InterventionBase {
   ops: Op[];
 }
 
-export type Intervention = ToggleIntervention | SliderIntervention | ButtonIntervention;
+// Up/down pair without a value: each press applies `up` or `down`, typically a relative change (scale
+// op with relative: true), so the control shows nothing a learner could read the diagnosis from.
+export interface UpDownIntervention extends InterventionBase {
+  kind: "updown";
+  up: Op[];
+  down: Op[];
+}
+
+// Slider centred on "now": shows only the change relative to the state when it was last re-centred
+// (a rebuild, or any lesson action button), never the absolute value.
+// Log scale from /span to xspan; moving it sets the ModelScaler group to base x span^v. `read` is the
+// group's factor on its first model (to take the base from). `invert`: the shown quantity is the
+// inverse of the lever (diastolic function from the stiffness group).
+export interface RelSliderIntervention extends InterventionBase {
+  kind: "relslider";
+  group: string;
+  read: string;
+  span?: number; // default 3
+  invert?: boolean;
+}
+
+export type Intervention =
+  | ToggleIntervention
+  | SliderIntervention
+  | ButtonIntervention
+  | UpDownIntervention
+  | RelSliderIntervention;
 
 export const INTERVENTIONS: Record<string, Intervention> = {
   // 100% = the duct's maximum diameter (Pda.diameter_*_max); diameter_relative

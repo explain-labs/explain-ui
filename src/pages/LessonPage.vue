@@ -39,7 +39,8 @@ const { lang, modelReady, isRunning, error, step } = rt;
 
 const leftTab = ref<"lesson" | "interventions" | "patient">("lesson");
 const isPaper = lesson.kind === "paper";
-if (isPaper) preferLang("en");
+const preferred = lesson.lang ?? (isPaper ? "en" : undefined);
+if (preferred) preferLang(preferred);
 // paper companions read like a paper: a wider text column
 const gridCols = lesson.layout?.reading
   ? "lg:grid-cols-[minmax(380px,1.35fr)_minmax(0,1.45fr)_minmax(340px,1.1fr)]"
@@ -247,10 +248,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <section class="min-w-0 min-h-0 flex flex-col gap-3 lg:overflow-y-auto">
           <Monitor
             :lanes="lesson.monitorLanes ?? ['ecg', 'spo2_pre', 'spo2_post', 'abp']"
-            height="30vh"
+            :height="(lesson.monitorLanes?.length ?? 4) > 4 ? '38vh' : '30vh'"
             min-height="220px"
             :show-window-select="false"
             :highlight="rt.monitorHighlight.value"
+            :ranges="lesson.monitorRanges"
           />
           <LessonChart v-if="step.chart" :chart="step.chart" />
           <NumericReadoutPanel

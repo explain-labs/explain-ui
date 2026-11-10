@@ -1,0 +1,599 @@
+import { defineLesson, type LessonAction, type LessonNumeric, type LessonStep, type Op } from "@/lessons/types";
+import type { Intervention } from "@/lessons/interventions";
+import { introSteps } from "@/lessons/_shared/intro";
+
+// Neonatal shock by treatment target: four building blocks (hypovolaemic, distributive with
+// capillary leak, cardiogenic systolic/diastolic, PPHN with the duct) on the term neonate, for a
+// one-hour plenary session with fellows following on their own laptops. English only.
+//
+// Doses and factors were checked headlessly on the shipped scenarios before use (term_neonate_72h:
+// 3.545 kg, blood volume 85 ml/kg = 301 ml; term_neonate_12h for the bleed, term_neonate_1h for
+// the PPHN step). Two settings are
+// deliberately compressed in time so a case fits a 10-minute slot, and the step text says so:
+// the capillary leak (Kf ×10, a bolus leaks out within ~4 min) and the bleed (35 % over 2 min).
+
+const W = 3.545; // kg, both term scenarios
+const ML = (mlPerKg: number) => Math.round(mlPerKg * W);
+
+// a clean patient for every case: rebuild the scenario, then let it settle so the lactate
+// baseline (Lactate captures it over the first 90 s) and the interstitium are seeded
+const fresh = (scenario: string): Op[] => [
+  { kind: "loadScenario", scenario, fresh: true },
+  { kind: "calculate", seconds: 100 },
+];
+const TERM = fresh("term_neonate_72h");
+// the bleed case: a subgaleal haemorrhage presents in the first hours to day of life,
+// so a 12 h baby with the duct still half open (left-to-right)
+const NEWBORN = fresh("term_neonate_12h");
+
+// decompensated cold septic shock: myocardial depression, vasoconstriction, capillary leak, raised
+// O2 demand (fever, VO2 x1.5) and a fifth of the blood volume lost to hours of leak and poor intake.
+// Headless on term_neonate_72h (+8 min): HR 194, MAP 49 (54/46), LVO 87, SvO2 39 %, lactate 5.0
+// and rising, BE -6. After a 10 ml/kg bolus: noradrenaline 0.3 (+6 min) MAP 64, LVO 124, SvO2 52 %,
+// lactate 5.1; adrenaline 0.1 MAP 72, LVO 162, SvO2 63 %, lactate 3.6 and falling
+const COLD_SEPSIS: Op[] = [
+  { kind: "scale", group: "heart_el_max", factor: 0.3 },
+  { kind: "scale", group: "systemic_resistances", factor: 1.5 },
+  { kind: "scale", group: "blood_volume", factor: 0.8 },
+  { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
+  { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
+  { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
+];
+
+// HLHS (48 h, PGE1; engine scenario `hlhs`) with pulmonary overcirculation: PVR falls, the lungs steal
+// the single RV's output. Headless (+8 min at PVR x0.25): SpO2 77 -> 89 %, Qp:Qs 1.3 -> 4.3, Qs 152 -> 86
+// ml/kg/min, MAP 35 (45/29), lactate 2.8 and rising, lower-body DO2 halved. PVR x2.25 -> Qs ~121, MAP 43,
+// lactate falling; SVR x1.5 -> Qp:Qs 6, Qs 63, lactate 4; contractility x1.5 no help
+const HLHS = fresh("hlhs");
+const OVERCIRCULATION: Op[] = [{ kind: "scale", group: "pulmonary_resistances", factor: 0.25 }];
+
+// decompensated myocarditis: a severely depressed myocardium plus the fever's O2 demand. Headless on
+// term_neonate_72h (+8 min): HR 152, MAP 38 (44/36), CVP 8.5, LVO 84, SvO2 35 %, lactate 3.9 and rising;
+// a 10 ml/kg bolus raises LVO to ~114 with CVP 11; contractility x2.25 -> LVO ~139, SvO2 62 %, lactate falling
+const MYOCARDITIS: Op[] = [
+  { kind: "scale", group: "heart_el_max", factor: 0.15 },
+  { kind: "set", path: "Metabolism.vo2_factor", value: 1.3, it: 5 },
+];
+
+// warm septic shock: deep vasodilation, capillary leak, fever (VO2 x1.5) and a fifth of the blood
+// volume lost. Headless on term_neonate_72h (+5 min): HR 193, MAP 37 (48/31), LVO 287, SvO2 75 %,
+// diuresis 1.6 -> 0.2 ml/kg/h; lactate stays 1.5: the model has no maldistribution or cellular
+// dysfunction, so a high output keeps the tissues oxygenated (even SVR x0.15 + VO2 x2: MAP 28, lactate
+// 1.5). A 20 ml/kg bolus leaks out in minutes; SVR x2 -> MAP 48, diuresis 1.4; x4 -> MAP 62, CVP < 0
+const WARM_SEPSIS: Op[] = [
+  { kind: "scale", group: "systemic_resistances", factor: 0.25 },
+  { kind: "scale", group: "blood_volume", factor: 0.8 },
+  { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
+  { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
+  { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
+];
+const TRANSITION = fresh("term_neonate_1h");
+
+const call = (fn: string, ...args: unknown[]): Op => ({ kind: "call", fn, args });
+const bolus = (mlPerKg: number, seconds = 60): Op =>
+  call("Fluids.add_volume", ML(mlPerKg), seconds, "normal_saline", "VLB");
+
+// target buttons: change a lever relative to where it is now (the point is the target, not a drug)
+const target = (id: string, label: string, group: string, factor: number, icon = "pi pi-arrow-up"): LessonAction => ({
+  id,
+  label,
+  icon,
+  ops: [{ kind: "scale", group, factor, relative: true }],
+});
+const SVR_UP = (f: number) => target("svr-up", `Increase SVR (×${f})`, "systemic_resistances", f);
+const CONTRACTILITY_UP = target("contractility-up", "Increase contractility (×2)", "heart_el_max", 2);
+const DIASTOLIC_UP = target("diastolic-up", "Improve diastolic function (×2)", "heart_el_min", 0.5);
+const PVR_UP = target("pvr-up", "Increase PVR (×1.5)", "pulmonary_resistances", 1.5);
+
+// shared buttons
+const wait = (minutes: number): LessonAction => ({
+  id: `wait-${minutes}`,
+  label: `Fast-forward ${minutes} min`,
+  icon: "pi pi-forward",
+  severity: "secondary",
+  ops: [{ kind: "calculate", seconds: minutes * 60 }],
+});
+const again = (ops: Op[]): LessonAction => ({
+  id: "again",
+  label: "Start this case again",
+  icon: "pi pi-refresh",
+  severity: "secondary",
+  ops,
+});
+
+const num = (
+  label: string,
+  path: string | string[],
+  unit: string,
+  rounding = 0,
+  factor = 1,
+  weight_based = false,
+): LessonNumeric => ({
+  label,
+  props: Array.isArray(path) ? path : [path],
+  unit,
+  rounding,
+  factor,
+  weight_based,
+});
+const perKg = (label: string, path: string, unit: string, rounding = 0) => num(label, path, unit, rounding, 1000, true);
+
+// A blind case: the story only, a Start button that sets off the shock, a fast-forward, and room
+// to try the Interventions before the explanation step that follows it.
+const caseStep = (id: string, title: string, enter: Op[], start: Op[], ffMinutes: number, startDuration?: number): LessonStep => ({
+  id,
+  title,
+  onEnter: enter,
+  restartWith: "start",
+  actions: [
+    {
+      id: "start",
+      label: "Start the case",
+      icon: "pi pi-play",
+      severity: "danger",
+      ops: start,
+      duration: startDuration,
+    },
+    wait(ffMinutes),
+    again(enter),
+  ],
+});
+
+// The treatment targets as standing controls (Interventions tab), usable on every step. The four
+// physiological targets are relative sliders centred on "now" (no absolute value: a slider at "40 %"
+// gave the diagnosis away). They re-centre when the case starts or any step button is pressed, and set
+// the ModelScaler group (the same lever as Common tasks) to the base x the chosen change, /3 .. x3.
+// Diastolic function: right = less stiff. `read` = the group's factor on its first model.
+const relSlider = (id: string, label: string, group: string, read: string, help: string, invert = false): Intervention => ({
+  id,
+  kind: "relslider",
+  label,
+  help,
+  group,
+  read,
+  span: 3,
+  invert,
+});
+const INTERVENTIONS: Record<string, Intervention> = {
+  saline: {
+    id: "saline",
+    kind: "button",
+    label: "Fluid bolus: NaCl 0.9 % 20 ml/kg",
+    icon: "pi pi-plus",
+    help: `${ML(20)} ml over 1 min of model time.`,
+    requires: ["Fluids"],
+    ops: [bolus(20)],
+  },
+  transfusion: {
+    id: "transfusion",
+    kind: "button",
+    label: "Transfusion: packed red cells 20 ml/kg",
+    icon: "pi pi-plus",
+    help: `${ML(20)} ml over 1 min of model time (a fresh unit, Hb 12 mmol/l, SO₂ 60 %).`,
+    requires: ["Fluids"],
+    ops: [call("Fluids.add_volume", ML(20), 60, "packed_cells", "VLB")],
+  },
+  ventilate: {
+    id: "ventilate",
+    kind: "button",
+    label: "Intubate and ventilate (SLE6000)",
+    icon: "pi pi-play",
+    help: "CMV, PIP 15, PEEP 5, rate 40, Ti 0.35 s, O₂ 21 %. Spontaneous breathing stops (sedated). Change the settings on the SLE6000 tab.",
+    requires: ["Ventilator", "Breathing"],
+    ops: [
+      call("Breathing.switch_breathing", false),
+      call("Ventilator.set_tube_position", "trachea"),
+      call("Ventilator.set_circuit_connected", true),
+      call("Ventilator.sle_apply", { mode: "CMV", pip: 15, peep: 5, rr: 40, ti: 0.35, o2: 21 }),
+    ],
+  },
+  extubate: {
+    id: "extubate",
+    kind: "button",
+    label: "Extubate",
+    icon: "pi pi-stop",
+    help: "Ventilator to standby; the baby breathes again.",
+    requires: ["Ventilator", "Breathing"],
+    ops: [call("Ventilator.sle_standby"), call("Breathing.switch_breathing", true)],
+  },
+  // VA-ECMO with the scenario's own circuit (PediMag pump, Quadrox-i Neonatal, drainage RA,
+  // return aortic arch). Checked headlessly in the weak heart (contractility x0.3): 2500 rpm
+  // ~137 ml/kg/min, MAP 43 -> 57, SvO2 62 -> 83 %; from ~3000 rpm the LV stops ejecting
+  // (pulse pressure 2, LV EDP 9 -> 15): LV distension
+  ecmo_start: {
+    id: "ecmo_start",
+    kind: "button",
+    label: "Start VA-ECMO",
+    icon: "pi pi-play",
+    help: "Drainage right atrium, return aortic arch; 2500 rpm (~135 ml/kg/min), sweep gas 0.5 l/min with 60 % O₂. Supports the circulation and oxygenation.",
+    requires: ["Ecls"],
+    ops: [
+      { kind: "set", path: "Ecls.cannulation", value: "VA" },
+      { kind: "set", path: "Ecls.gas_fio2", value: 0.6, it: 1 },
+      { kind: "set", path: "Ecls.gas_flow", value: 0.5, it: 1 },
+      { kind: "set", path: "Ecls.pump_rpm", value: 2500, it: 1 },
+      { kind: "set", path: "Ecls.ecls_clamped", value: false },
+      { kind: "set", path: "Ecls.ecls_running", value: true },
+    ],
+  },
+  // VV-ECMO through the double-lumen cannula in the right atrium. Headless in severe PPHN
+  // (1 h baby, PVR x5): 3000 rpm ~137 ml/kg/min, SaO2 pre/post 60/37 -> 91/85 %, SvO2 31 -> 84 %,
+  // MAP, LV output and PAP unchanged: VV supports oxygenation, not the circulation
+  ecmo_vv_start: {
+    id: "ecmo_vv_start",
+    kind: "button",
+    label: "Start VV-ECMO",
+    icon: "pi pi-play",
+    help: "Double-lumen cannula in the right atrium; 3000 rpm (~135 ml/kg/min), sweep gas 0.5 l/min with 100 % O₂. Oxygenates; does not support the circulation.",
+    requires: ["Ecls"],
+    ops: [
+      { kind: "set", path: "Ecls.cannulation", value: "VV-DL" },
+      { kind: "set", path: "Ecls.gas_fio2", value: 1.0, it: 1 },
+      { kind: "set", path: "Ecls.gas_flow", value: 0.5, it: 1 },
+      { kind: "set", path: "Ecls.pump_rpm", value: 3000, it: 1 },
+      { kind: "set", path: "Ecls.ecls_clamped", value: false },
+      { kind: "set", path: "Ecls.ecls_running", value: true },
+    ],
+  },
+  ecmo_rpm: {
+    id: "ecmo_rpm",
+    kind: "slider",
+    label: "ECMO pump speed",
+    help: "Higher speed = more ECMO flow and more afterload for the left ventricle.",
+    requires: ["Ecls"],
+    read: "Ecls.pump_rpm",
+    min: 0,
+    max: 4000,
+    step: 100,
+    unit: " rpm",
+    it: 4,
+  },
+  ecmo_stop: {
+    id: "ecmo_stop",
+    kind: "button",
+    label: "Stop ECMO",
+    icon: "pi pi-stop",
+    requires: ["Ecls"],
+    ops: [
+      { kind: "set", path: "Ecls.ecls_running", value: false },
+      { kind: "set", path: "Ecls.ecls_clamped", value: true },
+    ],
+  },
+  contractility: relSlider("contractility", "Contractility", "heart_el_max", "LV.el_max_factor_scaling_ps", "Both ventricles and atria, relative to now (÷3 to ×3)."),
+  diastolic_function: relSlider("diastolic_function", "Diastolic function", "heart_el_min", "LV.el_min_factor_scaling_ps", "Right = a less stiff ventricle, relative to now (÷3 to ×3).", true),
+  svr: relSlider("svr", "Systemic vascular resistance", "systemic_resistances", "AA.r_factor_scaling_ps", "All systemic vessels, relative to now (÷3 to ×3)."),
+  pvr: relSlider("pvr", "Pulmonary vascular resistance", "pulmonary_resistances", "PA.r_factor_scaling_ps", "All pulmonary vessels, relative to now (÷3 to ×3)."),
+};
+
+export default defineLesson({
+  id: "neonatal-shock",
+  title: "Neonatal shock",
+  subtitle: "Treat the target, not the label",
+  lang: "en",
+  scenario: "term_neonate_72h",
+  controls: [
+    "saline", "transfusion", "contractility", "diastolic_function", "svr", "pvr", "ductus", "foramen_ovale",
+    "ventilate", "extubate", "ecmo_start", "ecmo_vv_start", "ecmo_rpm", "ecmo_stop",
+  ],
+  ventilatorStopsBreathing: true,
+  controlsToolbar: { fastForward: 2, restart: true },
+  interventions: INTERVENTIONS,
+  layout: {
+    centre: ["diagram", "sle6000"],
+  },
+  // the CO2 lane shows only while the ventilator runs (Monitor.vue hides it otherwise)
+  monitorLanes: ["ecg", "spo2_pre", "spo2_post", "abp", "resp", "co2"],
+  // ABP on a fixed neonatal scale so a narrowing pulse pressure shows as a smaller wave (autoscaling
+  // stretched every wave to the lane height); a systolic above 90 (briefly in PPHN with SVR raised) touches the top
+  monitorRanges: { abp: { range: [25, 90], grid: [40, 60] } },
+  numerics: [
+    {
+      key: "oxygen",
+      title: "Oxygen balance",
+      parameters: [
+        num("SvO₂ (mixed venous)", "Monitor.svo2", "%"),
+        // regional delivery = regional flow × arterial O2 content (Monitor). The lower body is an
+        // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
+        num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
+        num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
+        num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
+      ],
+    },
+    {
+      key: "pressure",
+      title: "Pressures",
+      parameters: [
+        num("MAP", "Monitor.minmax.abp_pres_mean", "mmHg"),
+        num("CVP", "Monitor.minmax.cvp_pres_mean", "mmHg"),
+        num("PAP", ["Monitor.minmax.pap_pres_max", "Monitor.minmax.pap_pres_min"], "mmHg"),
+      ],
+    },
+    {
+      key: "flow",
+      title: "Flow",
+      parameters: [
+        perKg("LV stroke volume", "Heart.lv_sv", "ml/kg", 2),
+        perKg("RV stroke volume", "Heart.rv_sv", "ml/kg", 2),
+        perKg("LV output", "Monitor.flows.lvo", "ml/kg/min"),
+        perKg("RV output", "Monitor.flows.rvo", "ml/kg/min"),
+      ],
+    },
+    {
+      // arterial blood gas with electrolytes, from the ascending aorta (pre-ductal)
+      key: "labs",
+      title: "Labs (arterial)",
+      parameters: [
+        num("pH", "AA.ph", "", 2),
+        num("pCO₂", "AA.pco2", "kPa", 1, 0.1333),
+        num("pO₂", "AA.po2", "kPa", 1, 0.1333),
+        num("HCO₃⁻", "AA.hco3", "mmol/l", 1),
+        num("BE", "AA.be", "mmol/l", 1),
+        num("SaO₂", "AA.so2", "%"),
+        num("Hb", "AA.solutes.hemoglobin", "mmol/l", 1),
+        num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
+        num("Glucose", "AA.solutes.glucose", "mmol/l", 1),
+        num("Na⁺", "AA.solutes.na", "mmol/l"),
+        num("K⁺", "AA.solutes.k", "mmol/l", 1),
+        num("Cl⁻", "AA.solutes.cl", "mmol/l"),
+        num("Ca²⁺ (ionised)", "AA.solutes.ca", "mmol/l", 2),
+      ],
+    },
+    {
+      key: "fluid",
+      title: "Fluid",
+      parameters: [
+        perKg("Blood volume", "Circulation.total_blood_volume", "ml/kg"),
+        num("Interstitial fluid", "Interstitium.isf_volume_ml_kg", "ml/kg"),
+        // as the scenario's own monitor card ("Diurese": Kidneys.urine_flow x60, per kg)
+        num("Diuresis", "Kidneys.urine_flow", "ml/kg/h", 1, 60, true),
+      ],
+    },
+  ],
+  steps: [
+    {
+      id: "intro",
+      title: "Shock is an oxygen-delivery problem",
+    },
+    ...introSteps(),
+    caseStep("case-1", "Case 1: a baby after a vacuum delivery", NEWBORN, [call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD")], 2, 120),
+    {
+      id: "hypovolaemic",
+      title: "Case 1 explained: hypovolaemic shock",
+      onEnter: NEWBORN,
+      restartWith: "bleed",
+      actions: [
+        {
+          id: "bleed",
+          label: "Subgaleal bleed: 35 % of blood volume over 2 min",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: [call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD")],
+          duration: 120,
+        },
+        wait(2),
+        {
+          id: "bolus",
+          label: "Bolus NaCl 0.9 % 20 ml/kg",
+          icon: "pi pi-plus",
+          ops: [bolus(20)],
+          duration: 60,
+        },
+        {
+          // back to the moment the saline was given (bleed done + 2 min), computed at once
+          id: "replay",
+          label: "Repeat the bleed (reset, bleed 35 %, wait 2 min)",
+          icon: "pi pi-replay",
+          severity: "secondary",
+          ops: [...NEWBORN, call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD"), { kind: "calculate", seconds: 240 }],
+        },
+        {
+          id: "transfuse",
+          label: "Transfuse packed red cells 20 ml/kg",
+          icon: "pi pi-plus",
+          ops: [call("Fluids.add_volume", ML(20), 60, "packed_cells", "VLB")],
+          duration: 60,
+        },
+        again(NEWBORN),
+      ],
+    },
+    caseStep("case-2", "Case 2: a 3-day-old who has been unwell for hours", TERM, COLD_SEPSIS, 5),
+    {
+      id: "septic-cold",
+      title: "Case 2 explained: cold septic shock",
+      onEnter: TERM,
+      restartWith: "cold-sepsis",
+      actions: [
+        {
+          id: "cold-sepsis",
+          label: "Cold septic shock",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: COLD_SEPSIS,
+        },
+        wait(5),
+        {
+          id: "bolus",
+          label: "Bolus NaCl 0.9 % 10 ml/kg",
+          icon: "pi pi-plus",
+          ops: [bolus(10)],
+          duration: 60,
+        },
+        SVR_UP(1.5),
+        {
+          // back to the cold shock without drugs, computed at once, to try the other drug
+          id: "replay",
+          label: "Repeat the cold sepsis (reset, sepsis 5 min, bolus, 2 min)",
+          icon: "pi pi-replay",
+          severity: "secondary",
+          ops: [...TERM, ...COLD_SEPSIS, { kind: "calculate", seconds: 300 }, bolus(10), { kind: "calculate", seconds: 120 }],
+        },
+        CONTRACTILITY_UP,
+        again(TERM),
+      ],
+    },
+    caseStep("case-4", "Case 3: a 2-week-old who stopped feeding", TERM, MYOCARDITIS, 5),
+    {
+      id: "cardiogenic-systolic",
+      title: "Case 3 explained: cardiogenic shock, the weak heart",
+      onEnter: TERM,
+      restartWith: "depress",
+      actions: [
+        {
+          id: "depress",
+          label: "Myocarditis: severely depressed contractility, fever",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: MYOCARDITIS,
+        },
+        wait(5),
+        {
+          id: "bolus",
+          label: "Bolus NaCl 0.9 % 10 ml/kg",
+          icon: "pi pi-plus",
+          ops: [bolus(10)],
+          duration: 60,
+        },
+        CONTRACTILITY_UP,
+        again(TERM),
+      ],
+    },
+    caseStep("case-5", "Case 4: a big baby of a diabetic mother", TERM, [{ kind: "scale", group: "heart_el_min", factor: 3 }], 2),
+    {
+      id: "cardiogenic-diastolic",
+      title: "Case 4 explained: cardiogenic shock, the stiff heart",
+      onEnter: TERM,
+      restartWith: "stiffen",
+      actions: [
+        {
+          id: "stiffen",
+          label: "Stiff ventricles: diastolic stiffness ×3",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: [{ kind: "scale", group: "heart_el_min", factor: 3 }],
+        },
+        {
+          id: "bolus",
+          label: "Bolus NaCl 0.9 % 10 ml/kg",
+          icon: "pi pi-plus",
+          ops: [bolus(10)],
+          duration: 60,
+        },
+        DIASTOLIC_UP,
+        {
+          id: "hr-160",
+          label: "Heart rate 160",
+          icon: "pi pi-arrow-up",
+          ops: [{ kind: "set", path: "Heart.heart_rate_ref", value: 160, it: 5 }],
+        },
+        {
+          id: "hr-100",
+          label: "Heart rate 100",
+          icon: "pi pi-arrow-down",
+          ops: [{ kind: "set", path: "Heart.heart_rate_ref", value: 100, it: 5 }],
+        },
+        again(TERM),
+      ],
+    },
+    caseStep("case-6", "Case 5: a baby one hour after birth", TRANSITION, [{ kind: "scale", group: "pulmonary_resistances", factor: 3 }], 2),
+    {
+      id: "pphn",
+      title: "Case 5 explained: PPHN, the right ventricle and the duct",
+      onEnter: TRANSITION,
+      restartWith: "pphn",
+      diagramHighlight: ["DA", "FO"],
+      controls: ["ductus"],
+      actions: [
+        {
+          id: "pphn",
+          label: "PPHN: PVR ×3",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: [{ kind: "scale", group: "pulmonary_resistances", factor: 3 }],
+        },
+        SVR_UP(1.5),
+        {
+          id: "lower-pvr",
+          label: "Lower PVR (oxygen / iNO): PVR ×1.5",
+          icon: "pi pi-arrow-down",
+          ops: [{ kind: "scale", group: "pulmonary_resistances", factor: 1.5 }],
+        },
+        {
+          id: "severe",
+          label: "Severe PPHN: PVR ×5",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: [{ kind: "scale", group: "pulmonary_resistances", factor: 5 }],
+        },
+        {
+          id: "close-duct",
+          label: "Close the duct",
+          icon: "pi pi-times",
+          severity: "danger",
+          ops: [{ kind: "control", id: "ductus", state: "off" }],
+        },
+        wait(2),
+        again(TRANSITION),
+      ],
+    },
+    caseStep("case-7", "Case 6: a 2-day-old waiting for heart surgery", HLHS, OVERCIRCULATION, 5),
+    {
+      id: "hlhs-overcirculation",
+      title: "Case 6 explained: HLHS, pulmonary overcirculation",
+      onEnter: HLHS,
+      restartWith: "pvr-falls",
+      diagramHighlight: ["DA", "FO"],
+      actions: [
+        {
+          id: "pvr-falls",
+          label: "Pulmonary vascular resistance falls",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: OVERCIRCULATION,
+        },
+        wait(5),
+        SVR_UP(1.5),
+        {
+          // back to the overcirculated baby without treatment, computed at once
+          id: "replay",
+          label: "Repeat the overcirculation (reset, PVR falls, 5 min)",
+          icon: "pi pi-replay",
+          severity: "secondary",
+          ops: [...HLHS, ...OVERCIRCULATION, { kind: "calculate", seconds: 300 }],
+        },
+        PVR_UP,
+        again(HLHS),
+      ],
+    },
+    caseStep("case-3", "Case 7: a 3-day-old with a fever", TERM, WARM_SEPSIS, 5),
+    {
+      id: "distributive",
+      title: "Case 7 explained: warm septic shock",
+      onEnter: TERM,
+      restartWith: "sepsis",
+      actions: [
+        {
+          id: "sepsis",
+          label: "Warm septic shock",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: WARM_SEPSIS,
+        },
+        wait(5),
+        {
+          id: "bolus",
+          label: "Bolus NaCl 0.9 % 20 ml/kg",
+          icon: "pi pi-plus",
+          ops: [bolus(20)],
+          duration: 60,
+        },
+        wait(2),
+        SVR_UP(2),
+        again(TERM),
+      ],
+    },
+    {
+      id: "summary",
+      title: "Summary: treat the target",
+    },
+  ],
+});

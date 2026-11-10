@@ -9,10 +9,12 @@ Lessons are **files in this repo**, bundled with the app. The working example is
 | File | Role |
 |---|---|
 | `src/lessons/<id>/lesson.ts` | The lesson definition: `export default defineLesson({...})` |
-| `src/lessons/<id>/steps/<step>.<nl\|en>.md` | Step text, one markdown file per step per language |
+| `src/lessons/<id>/steps/<step>.<nl\|en>.md` | Step text, one markdown file per step per language. A line `[[action:<id>]]` (or `[[action:a,b]]`) puts those action buttons at that point in the text; actions without a marker stay in the row under it. A line `[[reveal]]` hides the rest of the text behind a **Continue** button (put it after a question, so learners think before they read on); opened points are remembered per step until a page reload |
+| `src/lessons/actionMarkers.ts` | `splitActionMarkers`: cuts step markdown at those marker lines (tested in `actionMarkers.test.ts`) |
+| `src/components/lesson/LessonActionButton.vue` | One action button, with its progress fill (timed actions, moving controls) |
 | `src/lessons/<id>/img/*` | Images, used as a step `image` or from markdown as `![alt](img/file.svg)` |
 | `src/lessons/types.ts` | Schema: `Lesson`, `LessonStep`, `LessonAction`, `LessonNumeric`, `Op` |
-| `src/lessons/interventions.ts` | Intervention registry (`INTERVENTIONS`): the controls lessons can offer |
+| `src/lessons/interventions.ts` | Intervention registry (`INTERVENTIONS`): the controls lessons can offer. Kinds: `toggle`, `slider`, `button`, `updown` (a −/+ pair without a value; each press applies its `down`/`up` ops), and `relslider` (a slider centred on "now": it shows only the change, ÷span to ×span on a log scale, sets the ModelScaler `group` to base × change, and re-centres on every rebuild and lesson action button; `invert` for a quantity that is the inverse of its lever) |
 | `src/lessons/index.ts` | Registry: `getLesson`, `hasLesson`, `listLessons`, `loadStepMarkdown`, `imageUrl` (Vite globs) |
 | `src/lessons/i18n.ts` | `Lang`, `L10n`, `t()`, `useLessonLang()` (persisted in localStorage), UI strings |
 | `src/composables/useLesson.ts` | Runtime: load, step navigation, `applyOps`, control state |
@@ -55,11 +57,16 @@ export default defineLesson({
 |---|---|
 | `id`, `title`, `subtitle?` | Identity and header text (`L10n`: a string, or `{ nl, en }`) |
 | `scenario` | Bundled scenario to start from. A lesson account's `stateId` (curated cloud state) overrides it; the account's `scenario` field does **not** |
+| `lang?` | Language the page opens in when the reader has not chosen one (default `nl`; paper companions `en`) |
 | `autoRun?` | Start the realtime loop once the model is built (default `true`) |
 | `runOnAction?` | Start the loop when an op is applied while paused (default `true`) |
 | `controls` | Intervention ids, in display order. A control whose `requires` models are missing from the scenario is hidden |
+| `interventions?` | The lesson's own interventions (same shapes as `interventions.ts`), looked up before the shared registry, e.g. a bolus sized for this lesson's patient. A slider may set `invert` (display = factor / raw) |
+| `controlsToolbar?` | `{ fastForward?: minutes, restart?: boolean }`: a button bar at the top of the Interventions tab. Restart = the `reenter` op with `withStart`: the current step's `onEnter` (a fresh patient), then its `restartWith` action (the shock button), labelled "Restart the case (with the shock)"; without `restartWith` it is a plain "Start this case again". Hidden on steps without `onEnter` |
+| `ventilatorStopsBreathing?` | While the ventilator runs with a tube (`Ventilator.is_enabled`, `interface` "ett") the lesson switches spontaneous breathing off (a sedated, intubated child) and back on when that ends, however the ventilator was started. Non-invasive CPAP keeps the child breathing. Used by `neonatal-shock` |
 | `numerics` | Groups of numeric cards: `{ key, title, collapsed?, parameters: [{ label, props, unit?, factor?, rounding?, weight_based? }] }`. These are the same display rules as `configuration.monitors` (see [Numerics](./Numerics.md)) |
 | `monitorLanes?` | Bedside-monitor lanes (`ecg`, `spo2_pre`, `spo2_post`, `abp`, `resp`, `co2`). Default is the first four |
+| `monitorRanges?` | Fixed y-scales per lane instead of autoscaling, `{ abp: { range: [20, 100], grid: [40, 60, 80] } }`: faint reference lines with labels at the `grid` values. With autoscaling a narrow pulse pressure looked as tall as a normal one |
 | `layout?` | Page layout beyond the default; see [Layout](#layout) |
 | `steps` | The step sequence |
 
@@ -70,13 +77,14 @@ export default defineLesson({
 | `id` | Also the markdown file stem |
 | `title` | Step title (and the tooltip on the header step dot) |
 | `image?` | `{ file, caption? }`: a file in `img/`, shown under the text |
-| `actions?` | Buttons: `{ id, label, icon?, severity?, ops }` |
+| `actions?` | Buttons: `{ id, label, icon?, severity?, ops, duration? }`. With `duration` (model seconds, e.g. a bleed over 120 s) the button fills as a progress bar from the click until that much model time has passed; fast-forward jumps it, pause freezes it, a rebuild clears it |
 | `highlight?` | Numeric paths (a card's first `props` entry) to ring amber on this step |
 | `diagramHighlight?` | Diagram component/connector names (e.g. `DA`, `FO`, `VSD`, `RV_AA`) to point at with a pulsing amber outline and caption. Names missing from the scenario are skipped |
 | `diagramLabels?` | Caption per highlighted name, overriding the shared names in `src/lessons/diagramLabels.ts`. `""` highlights without a caption |
 | `monitorHighlight?` | Monitor lanes (`LaneId`) to frame in amber |
 | `source?` | Folder the step's markdown/images come from (default: the lesson's own). The shared intro uses `"_shared"` |
 | `controls?` | Intervention ids to spotlight. All controls stay usable on every step |
+| `restartWith?` | Id of the step action the Interventions toolbar's restart runs after the fresh patient (the case's shock button) |
 | `onEnter?` | Ops applied when the learner arrives on the step (and on the first load if the page opens on it) |
 | `centreTab?` | Switch the centre column to this tab (`"diagram"` / `"sle6000"`) on arrival. It is ignored if the lesson's `layout.centre` doesn't list it |
 | `draft?` | Shown only in dev builds, with a "draft" tag |
@@ -100,12 +108,13 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 |---|---|
 | `{ kind: "set", path, value, it?, at? }` | `setProp(path, value, it=1, at=0)`: numbers tween over `it` s of model time, booleans/strings swap |
 | `{ kind: "call", fn, args?, at? }` | `call(fn, args, at)`, e.g. `fn: "Drugs.set_infusion", args: ["pge1", 0.05]` |
-| `{ kind: "scale", group, factor }` | `scale(group, factor)` for each group: an absolute ModelScaler factor (1 = baseline). This is the lever of Common tasks' scale tasks, e.g. `["left_lung_elastances", "right_lung_elastances"]` for lung compliance (elastance ×2 = compliance ÷2) |
+| `{ kind: "scale", group, factor }` | `scale(group, factor)` for each group: an absolute ModelScaler factor (1 = baseline). This is the lever of Common tasks' scale tasks, e.g. `["left_lung_elastances", "right_lung_elastances"]` for lung compliance (elastance ×2 = compliance ÷2). With `relative: true` the factor multiplies the group's current one (read back from the model), e.g. "increase contractility ×2" on top of a shock |
 | `{ kind: "control", id, state }` | Drive an intervention: `"on"`/`"off"` for toggles, a raw number for sliders |
-| `{ kind: "calculate", seconds }` | Fast-forward model time synchronously |
+| `{ kind: "calculate", seconds }` | Fast-forward model time synchronously. The op list waits until the worker reports the calculation done (3 min timeout); meanwhile, and during a `loadScenario`, the step header shows "Computing…", the clicked button a spinner, and all action buttons are disabled |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |
 | `{ kind: "restart" }` | Rebuild the starting state and return to step 1 |
-| `{ kind: "loadScenario", scenario }` | Load another bundled scenario; the rest of the op list waits for the rebuild |
+| `{ kind: "reenter", withStart? }` | Re-apply the current step's `onEnter` (a fresh patient for the case on screen); with `withStart`, then run the step's `restartWith` action |
+| `{ kind: "loadScenario", scenario, fresh? }` | Load another bundled scenario; the rest of the op list waits for the rebuild. `fresh: true` rebuilds even when that scenario is already loaded (a clean patient per case, as in `neonatal-shock`) |
 | `{ kind: "experiment", id }` | Run a paper companion's experiment (see below) |
 
 ## Paper companions (`kind: "paper"`, `/paper/<id>`)

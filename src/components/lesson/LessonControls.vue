@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, ref } from "vue";
+import { computed, inject, ref } from "vue";
 import SelectButton from "primevue/selectbutton";
 import Slider from "primevue/slider";
 import InputNumber from "primevue/inputnumber";
@@ -7,6 +7,8 @@ import Button from "primevue/button";
 import { LessonKey } from "@/composables/useLesson";
 import { t, UI } from "@/lessons/i18n";
 import type { Intervention, SliderIntervention } from "@/lessons/interventions";
+import type { LessonAction } from "@/lessons/types";
+import LessonActionButton from "@/components/lesson/LessonActionButton.vue";
 
 // The lesson's intervention controls (from the interventions registry). Always
 // usable; controls the current step names in `controls` get a spotlight ring.
@@ -28,6 +30,25 @@ function onToggle(c: Intervention, v: "on" | "off" | null) {
   if (v) rt.applyControl(c.id, v); // SelectButton emits null when re-clicking the active option
 }
 
+// toolbar at the top (lesson.controlsToolbar): fast-forward and "Start this case again", as lesson
+// actions so they get the same busy/computing state as the step buttons
+const toolbar = computed<LessonAction[]>(() => {
+  const tb = rt.lesson.controlsToolbar;
+  if (!tb) return [];
+  const out: LessonAction[] = [];
+  if (tb.fastForward)
+    out.push({ id: "tb-ff", label: `Fast-forward ${tb.fastForward} min`, icon: "pi pi-forward", severity: "secondary", ops: [{ kind: "calculate", seconds: tb.fastForward * 60 }] });
+  if (tb.restart && rt.step.value.onEnter?.length)
+    out.push({
+      id: "tb-restart",
+      label: rt.step.value.restartWith ? "Restart the case (with the shock)" : "Start this case again",
+      icon: "pi pi-refresh",
+      severity: "secondary",
+      ops: [{ kind: "reenter", withStart: true }],
+    });
+  return out;
+});
+
 // ----- sliders ------------------------------------------------------------------
 const fmt = (c: SliderIntervention, v: number | undefined) =>
   v === undefined ? "—" : `${v.toFixed(c.rounding ?? 0)}${c.unit ?? ""}`;
@@ -38,8 +59,27 @@ function applyDisplay(c: SliderIntervention, display: number | null | undefined)
   const clamped = Math.max(c.min, Math.min(c.max, display));
   const current = rt.sliderValue(c);
   if (current !== undefined && Math.abs(current - clamped) < 1e-9) return;
-  rt.applyControl(c.id, clamped / rt.sliderFactor(c));
+  rt.applyControl(c.id, rt.sliderRaw(c, clamped));
 }
+
+// PrimeVue's Slider emits `slideend` only at the end of a drag; a click on the track or the arrow
+// keys only emit `change`. So `change` is applied too, debounced (a drag emits it per move), and the
+// position the learner is moving to is kept as a draft so the handle doesn't jump back meanwhile.
+const sliderDraft = ref<Record<string, number>>({});
+const sliderTimers: Record<string, number> = {};
+function onSliderMove(id: string, v: number, apply: (v: number) => void) {
+  sliderDraft.value = { ...sliderDraft.value, [id]: v };
+  window.clearTimeout(sliderTimers[id]);
+  sliderTimers[id] = window.setTimeout(() => commitSlider(id, v, apply), 250);
+}
+function commitSlider(id: string, v: number, apply: (v: number) => void) {
+  window.clearTimeout(sliderTimers[id]);
+  apply(v);
+  const next = { ...sliderDraft.value };
+  delete next[id];
+  sliderDraft.value = next;
+}
+const first = (e: any) => (Array.isArray(e?.value ?? e) ? (e.value ?? e)[0] : (e?.value ?? e));
 
 // typed values are applied on Enter or blur, not per keystroke
 const drafts = ref<Record<string, number | null>>({});
@@ -59,6 +99,9 @@ function inputValue(c: SliderIntervention): number | null {
 
 <template>
   <section class="flex flex-col gap-2">
+    <div v-if="toolbar.length" class="flex flex-wrap gap-2 pb-1">
+      <LessonActionButton v-for="a in toolbar" :key="a.id" :action="a" />
+    </div>
     <div
       v-for="c in rt.controls.value"
       :key="c.id"
@@ -99,13 +142,14 @@ function inputValue(c: SliderIntervention): number | null {
 
       <div v-else-if="c.kind === 'slider'" class="flex items-center gap-3">
         <Slider
-          :model-value="rt.sliderValue(c) ?? c.min"
+          :model-value="sliderDraft[c.id] ?? rt.sliderValue(c) ?? c.min"
           :min="c.min"
           :max="c.max"
           :step="c.step"
           class="flex-1"
           :disabled="!rt.modelReady.value"
-          @slideend="(e: any) => applyDisplay(c, Array.isArray(e.value) ? e.value[0] : e.value)"
+          @change="(v: any) => onSliderMove(c.id, first(v), (x) => applyDisplay(c, x))"
+          @slideend="(e: any) => commitSlider(c.id, first(e), (x) => applyDisplay(c, x))"
         />
         <InputNumber
           :model-value="inputValue(c)"
@@ -119,6 +163,46 @@ function inputValue(c: SliderIntervention): number | null {
           @update:model-value="(v: number | null) => (drafts = { ...drafts, [c.id]: v })"
           @keydown.enter="commitDraft(c)"
           @blur="commitDraft(c)"
+        />
+      </div>
+
+      <!-- relative slider: centred on "now", shows only the change, never the absolute value -->
+      <div v-else-if="c.kind === 'relslider'" class="flex flex-col gap-0.5">
+        <div class="flex items-center gap-3">
+          <Slider
+            :model-value="sliderDraft[c.id] ?? rt.relPosition(c)"
+            :min="-1"
+            :max="1"
+            :step="0.05"
+            class="flex-1 relslider"
+            :disabled="!rt.modelReady.value"
+            @change="(v: any) => onSliderMove(c.id, first(v), (x) => rt.applyRel(c, x))"
+            @slideend="(e: any) => commitSlider(c.id, first(e), (x) => rt.applyRel(c, x))"
+          />
+          <span class="w-12 text-right text-sm tabular-nums font-semibold">{{ rt.relLabel(c) }}</span>
+        </div>
+        <div class="flex justify-between text-[10px] opacity-50 pr-14">
+          <span>less</span><span>now</span><span>more</span>
+        </div>
+      </div>
+
+      <!-- up/down: no value shown, each press changes the target relative to now -->
+      <div v-else-if="c.kind === 'updown'" class="flex items-center gap-2 updown">
+        <Button
+          label="−"
+          size="small"
+          severity="secondary"
+          :aria-label="`${t(c.label, rt.lang.value)} down`"
+          :disabled="!rt.modelReady.value"
+          @click="rt.applyControl(c.id, 'off')"
+        />
+        <Button
+          label="+"
+          size="small"
+          severity="secondary"
+          :aria-label="`${t(c.label, rt.lang.value)} up`"
+          :disabled="!rt.modelReady.value"
+          @click="rt.applyControl(c.id, 'on')"
         />
       </div>
 
@@ -136,3 +220,11 @@ function inputValue(c: SliderIntervention): number | null {
     </div>
   </section>
 </template>
+
+<style scoped>
+.updown :deep(.p-button) {
+  min-width: 2.75rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+</style>

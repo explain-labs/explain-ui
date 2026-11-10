@@ -4,7 +4,7 @@ import Select from "primevue/select";
 import { useRealtimeBus } from "@/composables/useRealtimeBus";
 import { useExplain } from "@/composables/useExplain";
 import { MonitorRenderer } from "@/render/MonitorRenderer";
-import { ALL_LANES, LANE_DEFS, type LaneId } from "@/render/monitorLanes";
+import { ALL_LANES, LANE_DEFS, type LaneId, type LaneRange } from "@/render/monitorLanes";
 
 // Bedside patient-monitor host. Streams the Monitor model's purpose-built
 // waveform signals (fast chart channel) into a single sweep canvas, and feeds
@@ -22,13 +22,19 @@ const props = withDefaults(
     minHeight?: string;
     showWindowSelect?: boolean; // show the sweep-window picker
     highlight?: LaneId[]; // lanes to frame (lesson steps); must be among `lanes`
+    // fixed y-scale (+ faint reference lines) per lane instead of autoscaling, e.g. ABP so a
+    // narrowing pulse pressure shows as a smaller wave
+    ranges?: Partial<Record<LaneId, LaneRange>>;
   }>(),
   { lanes: () => ALL_LANES, height: "70vh", minHeight: "480px", showWindowSelect: true },
 );
 
 // Lanes are fixed for the component's lifetime (the renderer is built once on
 // mount); hosts that need a different set remount it.
-const LANES = props.lanes.map((id) => LANE_DEFS[id]);
+const LANES = props.lanes.map((id) => {
+  const r = props.ranges?.[id];
+  return r ? { ...LANE_DEFS[id], fixedRange: r.range, grid: r.grid } : LANE_DEFS[id];
+});
 const FAST_PATHS = LANES.map((l) => l.signal);
 // The CO₂ lane is only shown while the ventilator is on (capnography needs the
 // airway circuit). Its on/off state rides the slow stream as well.
