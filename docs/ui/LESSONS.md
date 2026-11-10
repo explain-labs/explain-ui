@@ -62,7 +62,7 @@ export default defineLesson({
 | `runOnAction?` | Start the loop when an op is applied while paused (default `true`) |
 | `controls` | Intervention ids, in display order. A control whose `requires` models are missing from the scenario is hidden |
 | `interventions?` | The lesson's own interventions (same shapes as `interventions.ts`), looked up before the shared registry, e.g. a bolus sized for this lesson's patient. A slider may set `invert` (display = factor / raw) |
-| `controlsToolbar?` | `{ fastForward?: minutes, restart?: boolean }`: a button bar at the top of the Interventions tab. Restart = "Start this case again", the `reenter` op (re-applies the current step's `onEnter`; hidden on steps without one) |
+| `controlsToolbar?` | `{ fastForward?: minutes, restart?: boolean }`: a button bar at the top of the Interventions tab. Restart = the `reenter` op with `withStart`: the current step's `onEnter` (a fresh patient), then its `restartWith` action (the shock button), labelled "Restart the case (with the shock)"; without `restartWith` it is a plain "Start this case again". Hidden on steps without `onEnter` |
 | `ventilatorStopsBreathing?` | While the ventilator runs with a tube (`Ventilator.is_enabled`, `interface` "ett") the lesson switches spontaneous breathing off (a sedated, intubated child) and back on when that ends, however the ventilator was started. Non-invasive CPAP keeps the child breathing. Used by `neonatal-shock` |
 | `numerics` | Groups of numeric cards: `{ key, title, collapsed?, parameters: [{ label, props, unit?, factor?, rounding?, weight_based? }] }`. These are the same display rules as `configuration.monitors` (see [Numerics](./Numerics.md)) |
 | `monitorLanes?` | Bedside-monitor lanes (`ecg`, `spo2_pre`, `spo2_post`, `abp`, `resp`, `co2`). Default is the first four |
@@ -84,6 +84,7 @@ export default defineLesson({
 | `monitorHighlight?` | Monitor lanes (`LaneId`) to frame in amber |
 | `source?` | Folder the step's markdown/images come from (default: the lesson's own). The shared intro uses `"_shared"` |
 | `controls?` | Intervention ids to spotlight. All controls stay usable on every step |
+| `restartWith?` | Id of the step action the Interventions toolbar's restart runs after the fresh patient (the case's shock button) |
 | `onEnter?` | Ops applied when the learner arrives on the step (and on the first load if the page opens on it) |
 | `centreTab?` | Switch the centre column to this tab (`"diagram"` / `"sle6000"`) on arrival. It is ignored if the lesson's `layout.centre` doesn't list it |
 | `draft?` | Shown only in dev builds, with a "draft" tag |
@@ -112,7 +113,7 @@ Actions, `onEnter` and button interventions are lists of ops, applied in order:
 | `{ kind: "calculate", seconds }` | Fast-forward model time synchronously. The op list waits until the worker reports the calculation done (3 min timeout); meanwhile, and during a `loadScenario`, the step header shows "Computing…", the clicked button a spinner, and all action buttons are disabled |
 | `{ kind: "run" }` / `{ kind: "pause" }` | Start/stop the realtime loop |
 | `{ kind: "restart" }` | Rebuild the starting state and return to step 1 |
-| `{ kind: "reenter" }` | Re-apply the current step's `onEnter` (a fresh patient for the case on screen) |
+| `{ kind: "reenter", withStart? }` | Re-apply the current step's `onEnter` (a fresh patient for the case on screen); with `withStart`, then run the step's `restartWith` action |
 | `{ kind: "loadScenario", scenario, fresh? }` | Load another bundled scenario; the rest of the op list waits for the rebuild. `fresh: true` rebuilds even when that scenario is already loaded (a clean patient per case, as in `neonatal-shock`) |
 | `{ kind: "experiment", id }` | Run a paper companion's experiment (see below) |
 
