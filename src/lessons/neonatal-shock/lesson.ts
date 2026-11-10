@@ -276,7 +276,8 @@ export default defineLesson({
     centre: ["diagram", "sle6000"],
     tasks: { categories: ["vascular_tone", "cardiac_performance", "rate_rhythm", "shunts", "blood_acidbase"] },
   },
-  monitorLanes: ["ecg", "spo2_pre", "spo2_post", "abp"],
+  // the CO2 lane shows only while the ventilator runs (Monitor.vue hides it otherwise)
+  monitorLanes: ["ecg", "spo2_pre", "spo2_post", "abp", "resp", "co2"],
   numerics: [
     {
       key: "pressure",
