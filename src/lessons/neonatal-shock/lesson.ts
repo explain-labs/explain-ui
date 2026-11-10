@@ -124,6 +124,7 @@ const caseStep = (id: string, title: string, enter: Op[], start: Op[], ffMinutes
   id,
   title,
   onEnter: enter,
+  restartWith: "start",
   actions: [
     {
       id: "start",
@@ -362,6 +363,7 @@ export default defineLesson({
       id: "hypovolaemic",
       title: "Case 1 explained: hypovolaemic shock",
       onEnter: NEWBORN,
+      restartWith: "bleed",
       actions: [
         {
           id: "bleed",
@@ -402,6 +404,7 @@ export default defineLesson({
       id: "septic-cold",
       title: "Case 2 explained: cold septic shock",
       onEnter: TERM,
+      restartWith: "cold-sepsis",
       actions: [
         {
           id: "cold-sepsis",
@@ -436,6 +439,7 @@ export default defineLesson({
       id: "distributive",
       title: "Case 3 explained: warm septic shock",
       onEnter: TERM,
+      restartWith: "sepsis",
       actions: [
         {
           id: "sepsis",
@@ -462,6 +466,7 @@ export default defineLesson({
       id: "cardiogenic-systolic",
       title: "Case 4 explained: cardiogenic shock, the weak heart",
       onEnter: TERM,
+      restartWith: "depress",
       actions: [
         {
           id: "depress",
@@ -487,6 +492,7 @@ export default defineLesson({
       id: "cardiogenic-diastolic",
       title: "Case 5 explained: cardiogenic shock, the stiff heart",
       onEnter: TERM,
+      restartWith: "stiffen",
       actions: [
         {
           id: "stiffen",
@@ -523,6 +529,7 @@ export default defineLesson({
       id: "pphn",
       title: "Case 6 explained: PPHN, the right ventricle and the duct",
       onEnter: TRANSITION,
+      restartWith: "pphn",
       diagramHighlight: ["DA", "FO"],
       controls: ["ductus"],
       actions: [
@@ -563,6 +570,7 @@ export default defineLesson({
       id: "hlhs-overcirculation",
       title: "Case 7 explained: HLHS, pulmonary overcirculation",
       onEnter: HLHS,
+      restartWith: "pvr-falls",
       diagramHighlight: ["DA", "FO"],
       actions: [
         {

@@ -520,9 +520,13 @@ export function useLesson(lesson: Lesson) {
       case "restart":
         restart();
         break;
-      case "reenter":
-        for (const o of step.value.onEnter ?? []) await applyOp(o);
+      case "reenter": {
+        const s = step.value;
+        for (const o of s.onEnter ?? []) await applyOp(o);
+        const start = op.withStart && s.restartWith ? s.actions?.find((a) => a.id === s.restartWith) : undefined;
+        if (start) for (const o of start.ops) await applyOp(o);
         break;
+      }
     }
   }
 

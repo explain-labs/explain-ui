@@ -28,8 +28,9 @@ export type Op =
   | { kind: "pause" }
   // rebuild the lesson's starting state and return to the first step
   | { kind: "restart" }
-  // re-apply the current step's onEnter (a fresh patient for the case on screen)
-  | { kind: "reenter" }
+  // re-apply the current step's onEnter (a fresh patient for the case on screen); withStart: then run
+  // the step's `restartWith` action too (e.g. set off the shock again)
+  | { kind: "reenter"; withStart?: boolean }
   // switch to another bundled scenario (the page waits for the rebuild; later
   // ops in the same list are applied once the model is ready). `fresh` rebuilds
   // even when that scenario is already loaded: a clean patient for a new case
@@ -100,6 +101,8 @@ export interface LessonStep {
   diagramLabels?: Record<string, L10n>;
   monitorHighlight?: LaneId[]; // bedside-monitor lanes to frame
   controls?: string[]; // intervention ids to spotlight (all stay usable)
+  // the action a toolbar restart runs after the fresh patient (the step's shock button)
+  restartWith?: string;
   onEnter?: Op[]; // applied when the learner arrives on this step
   centreTab?: CentreTab; // switch the centre column to this tab on arrival
   // an experiment id from `Lesson.experiments`: shows its comparison table and

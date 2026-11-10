@@ -39,7 +39,13 @@ const toolbar = computed<LessonAction[]>(() => {
   if (tb.fastForward)
     out.push({ id: "tb-ff", label: `Fast-forward ${tb.fastForward} min`, icon: "pi pi-forward", severity: "secondary", ops: [{ kind: "calculate", seconds: tb.fastForward * 60 }] });
   if (tb.restart && rt.step.value.onEnter?.length)
-    out.push({ id: "tb-restart", label: "Start this case again", icon: "pi pi-refresh", severity: "secondary", ops: [{ kind: "reenter" }] });
+    out.push({
+      id: "tb-restart",
+      label: rt.step.value.restartWith ? "Restart the case (with the shock)" : "Start this case again",
+      icon: "pi pi-refresh",
+      severity: "secondary",
+      ops: [{ kind: "reenter", withStart: true }],
+    });
   return out;
 });
 
