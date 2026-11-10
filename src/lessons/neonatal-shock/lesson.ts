@@ -55,11 +55,17 @@ const MYOCARDITIS: Op[] = [
   { kind: "set", path: "Metabolism.vo2_factor", value: 1.3, it: 5 },
 ];
 
-// warm septic shock: vasodilation and capillary leak (the distributive case)
+// warm septic shock: deep vasodilation, capillary leak, fever (VO2 x1.5) and a fifth of the blood
+// volume lost. Headless on term_neonate_72h (+5 min): HR 193, MAP 37 (48/31), LVO 287, SvO2 75 %,
+// diuresis 1.6 -> 0.2 ml/kg/h; lactate stays 1.5: the model has no maldistribution or cellular
+// dysfunction, so a high output keeps the tissues oxygenated (even SVR x0.15 + VO2 x2: MAP 28, lactate
+// 1.5). A 20 ml/kg bolus leaks out in minutes; SVR x2 -> MAP 48, diuresis 1.4; x4 -> MAP 62, CVP < 0
 const WARM_SEPSIS: Op[] = [
-  { kind: "scale", group: "systemic_resistances", factor: 0.5 },
+  { kind: "scale", group: "systemic_resistances", factor: 0.25 },
+  { kind: "scale", group: "blood_volume", factor: 0.8 },
   { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
   { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
+  { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
 ];
 const TRANSITION = fresh("term_neonate_1h");
 
@@ -428,20 +434,21 @@ export default defineLesson({
         again(TERM),
       ],
     },
-    caseStep("case-3", "Case 3: a 3-day-old with a fever", TERM, WARM_SEPSIS, 2),
+    caseStep("case-3", "Case 3: a 3-day-old with a fever", TERM, WARM_SEPSIS, 5),
     {
       id: "distributive",
       title: "Case 3 explained: warm septic shock",
       onEnter: TERM,
-      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Circulation.total_blood_volume", "Interstitium.isf_volume_ml_kg"],
+      highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Kidneys.urine_flow", "Circulation.total_blood_volume", "Interstitium.isf_volume_ml_kg"],
       actions: [
         {
           id: "sepsis",
-          label: "Sepsis: vasodilation + capillary leak",
+          label: "Warm septic shock",
           icon: "pi pi-exclamation-triangle",
           severity: "danger",
           ops: WARM_SEPSIS,
         },
+        wait(5),
         {
           id: "bolus",
           label: "Bolus NaCl 0.9 % 20 ml/kg",
