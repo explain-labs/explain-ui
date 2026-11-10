@@ -5,6 +5,7 @@
 | Septic, warm (distributive) | SVR, leak | Low MAP and low diastolic pressure, high output, normal SvO₂ | SVR up (vasopressor: noradrenaline, vasopressin); careful volume |
 | Cardiogenic, systolic | Contractility | High CVP, small SV, poor response to fluid | Inotrope, afterload, cause |
 | Cardiogenic, diastolic | Filling | High CVP, small SV, fluid raises the CVP steeply | Careful volume, rate, lusitropy |
+| HLHS, overcirculation | Qp:Qs (PVR too low for SVR) | High SpO₂, low diastolic pressure, falling systemic flow, rising lactate | PVR up (room air, no hyperventilation); avoid raising SVR |
 | PPHN | PVR (RV afterload) | Pre/post SpO₂ gap, R→L shunts | Lower PVR, keep SVR > PVR, the duct as pop-off |
 
 Three messages:

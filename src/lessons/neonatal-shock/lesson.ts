@@ -40,6 +40,13 @@ const COLD_SEPSIS: Op[] = [
   { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
 ];
 
+// HLHS (48 h, PGE1; engine scenario `hlhs`) with pulmonary overcirculation: PVR falls, the lungs steal
+// the single RV's output. Headless (+8 min at PVR x0.25): SpO2 77 -> 89 %, Qp:Qs 1.3 -> 4.3, Qs 152 -> 86
+// ml/kg/min, MAP 35 (45/29), lactate 2.8 and rising, lower-body DO2 halved. PVR x2.25 -> Qs ~121, MAP 43,
+// lactate falling; SVR x1.5 -> Qp:Qs 6, Qs 63, lactate 4; contractility x1.5 no help
+const HLHS = fresh("hlhs");
+const OVERCIRCULATION: Op[] = [{ kind: "scale", group: "pulmonary_resistances", factor: 0.25 }];
+
 // decompensated myocarditis: a severely depressed myocardium plus the fever's O2 demand. Headless on
 // term_neonate_72h (+8 min): HR 152, MAP 38 (44/36), CVP 8.5, LVO 84, SvO2 35 %, lactate 3.9 and rising;
 // a 10 ml/kg bolus raises LVO to ~114 with CVP 11; contractility x2.25 -> LVO ~139, SvO2 62 %, lactate falling
@@ -70,6 +77,7 @@ const target = (id: string, label: string, group: string, factor: number, icon =
 const SVR_UP = (f: number) => target("svr-up", `Increase SVR (×${f})`, "systemic_resistances", f);
 const CONTRACTILITY_UP = target("contractility-up", "Increase contractility (×2)", "heart_el_max", 2);
 const DIASTOLIC_UP = target("diastolic-up", "Improve diastolic function (×2)", "heart_el_min", 0.5);
+const PVR_UP = target("pvr-up", "Increase PVR (×1.5)", "pulmonary_resistances", 1.5);
 
 // shared buttons
 const wait = (minutes: number): LessonAction => ({
@@ -545,6 +553,36 @@ export default defineLesson({
         },
         wait(2),
         again(TRANSITION),
+      ],
+    },
+    caseStep("case-7", "Case 7: a 2-day-old waiting for heart surgery", HLHS, OVERCIRCULATION, 5),
+    {
+      id: "hlhs-overcirculation",
+      title: "Case 7 explained: HLHS, pulmonary overcirculation",
+      onEnter: HLHS,
+      highlight: ["Monitor.flows.da_flow", "Monitor.flows.rvo", "Monitor.do2_lb", "Lactate.arterial_lactate"],
+      monitorHighlight: ["spo2_pre", "abp"],
+      diagramHighlight: ["DA", "FO"],
+      actions: [
+        {
+          id: "pvr-falls",
+          label: "Pulmonary vascular resistance falls",
+          icon: "pi pi-exclamation-triangle",
+          severity: "danger",
+          ops: OVERCIRCULATION,
+        },
+        wait(5),
+        SVR_UP(1.5),
+        {
+          // back to the overcirculated baby without treatment, computed at once
+          id: "replay",
+          label: "Repeat the overcirculation (reset, PVR falls, 5 min)",
+          icon: "pi pi-replay",
+          severity: "secondary",
+          ops: [...HLHS, ...OVERCIRCULATION, { kind: "calculate", seconds: 300 }],
+        },
+        PVR_UP,
+        again(HLHS),
       ],
     },
     {
