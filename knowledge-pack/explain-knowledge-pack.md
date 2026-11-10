@@ -685,7 +685,7 @@ The mirror of the `ChannelWriter`/`AnimationPacker` write side, running on the *
 ````markdown
 # AnimationPacker
 
-`AnimationPacker.js` turns the **diagram definition + live model state** into the per-frame scalar stream that drives the PixiJS sprite diagram. It is worker-side infrastructure, not a physiological model. Built once at model build from `model.diagram_definition.components` (and rebuilt by `ModelEngine.update_diagram()` when the diagram is edited live), it packs each animated component's **magnitude** (volume or flow) and **tint source** (`to2`) into a fixed-stride `Float32` frame and hands it to [ChannelWriter](./ChannelWriter.md) every realtime tick. See [RealtimeChannels](./RealtimeChannels.md) for the anim frame layout and [ARCHITECTURE](./ARCHITECTURE.md) for the full pipeline.
+`AnimationPacker.js` turns the **diagram definition + live model state** into the per-frame scalar stream that drives the PixiJS sprite diagram. It is worker-side infrastructure, not a physiological model. Built once at model build from `model.diagram_definition.components` (and rebuilt by `ModelEngine.update_diagram()` when the diagram is edited live), it packs each animated component's **magnitude** (volume or flow) and **tint** (the blood's O₂ saturation, `to2 / Hb`) into a fixed-stride `Float32` frame and hands it to [ChannelWriter](./ChannelWriter.md) every realtime tick. See [RealtimeChannels](./RealtimeChannels.md) for the anim frame layout and [ARCHITECTURE](./ARCHITECTURE.md) for the full pipeline.
 
 ## Role in the engine
 
@@ -740,7 +740,9 @@ Picks the model whose `to2` colours this component:
 The per-tick hot path. No-op if `!enabled`. Cheap: one pass over precomputed descriptors, no allocation.
 
 - Writes `time` into `frame[ANIM_TIME_SLOT]`.
-- For each descriptor: sums `magProp` across all `magRefs` (skipping non-numbers) into `frame[animMagOffset(index)]`; reads `tintRef.to2` (or `0`) into `frame[animTintOffset(index)]`.
+- For each descriptor: sums `magProp` across all `magRefs` (skipping non-numbers) into `frame[animMagOffset(index)]`; writes `tintOf(tintRef)` (or `0`) into `frame[animTintOffset(index)]`.
+
+**Tint = saturation, not content.** `tintOf(m)` returns `m.to2 / m.solutes.hemoglobin` (both mmol/l, one O₂ per haem): the O₂ saturation as a fraction, within ~1.5 points of the engine's `so2`, which is a root-find kept fresh in only a few compartments. Colouring by content made a saline bolus or a bleed turn the whole diagram blue (haemodilution lowers `to2` by ~17 % for 20 ml/kg) while every saturation stayed put. A ratio also removes the dependence on the Hb level, so one colour window fits neonatal and adult circuits. Blood without haemoglobin (`URINE`) tints `0`. The renderer's colour window is in the same units (`settings.sat_lo` / `sat_hi`).
 - Calls `writer.writeAnimFrame(frame)`.
 
 ### `registry()`
@@ -4474,7 +4476,7 @@ The cannula, pump and oxygenator libraries are calibrated to the manufacturers' 
 ````markdown
 # Fluids
 
-`Fluids` gives fluids into the blood: timed **boluses and infusions** of named fluids (saline, Ringer's lactate, packed red cells, albumin, dextrose), and a continuous **maintenance** intake that replaces what the kidneys excrete. It also takes whole blood out: a timed **loss** (haemorrhage, blood sampling). Each fluid is a composition (solutes in mmol/L, albumin in g/L, no O2 or CO2) mixed into a blood compartment through its normal `volume_in`, so everything it carries spreads with the circulation.
+`Fluids` gives fluids into the blood: timed **boluses and infusions** of named fluids (saline, Ringer's lactate, packed red cells, albumin, dextrose), and a continuous **maintenance** intake that replaces what the kidneys excrete. It also takes whole blood out: a timed **loss** (haemorrhage, blood sampling). Each fluid is a composition (solutes in mmol/L, albumin in g/L, and for red cells an O₂ and CO₂ content) mixed into a blood compartment through its normal `volume_in`, so everything it carries spreads with the circulation.
 
 ## Physiology
 
@@ -4522,14 +4524,16 @@ BaseModelClass
 |---|---|
 | `normal_saline` | Na 154, Cl 154 |
 | `ringers_lactate` | Na 130, Cl 109, K 4, Ca 1.4, lactate 28 |
-| `packed_cells` | Hb 12 mmol/L (~19 g/dL), Na 140, K 4.5, Cl 105, glucose 25: a fresh unit with a plasma-equivalent base |
+| `packed_cells` | Hb 12 mmol/L (~19 g/dL), Na 140, K 4.5, Cl 105, glucose 25: a fresh unit with a plasma-equivalent base; gas content `to2` 7.2 (SO₂ 60 %), `tco2` 26 mmol/L |
 | `albumin_20%` | albumin 200 g/L, Na 130, Cl 42, unmeasured anions 32 (the caprylate and tryptophan stabilisers) |
 | `d5`, `d10` | glucose 278, 555 |
 | `maintenance` | per scenario: the resting urine composition (term Na 69, K 20.6, Cl 64, …), so intake balances output |
 
 ## Calculation
 
-**`add_volume(volume, in_time = 10, fluid_in = "normal_saline", site = "VLB")`** (mL, s) queues a fluid: `delta = volume / (in_time / 0.015)` per update, with the fluid's composition copied from the library (an unknown name gives pure water).
+**`add_volume(volume, in_time = 10, fluid_in = "normal_saline", site = "VLB")`** (mL, s) queues a fluid: `delta = volume / (in_time / 0.015)` per update, with the fluid's composition copied from the library (an unknown name gives pure water). The entry's `to2` and `tco2` keys (mmol/L, default 0) become the fluid's gas content; every other key is a solute.
+
+**Why red cells carry gas.** With O₂ and CO₂ at 0, a unit with a plasma-like strong ion difference made the recipient hypocapnic and alkalotic. 20 mL/kg after a 35 % bleed in term_neonate_72h gave PaCO₂ 13 mmHg and pH 7.83, ventilation fell to a quarter and SpO₂ to 72 %. Saline is unaffected: its chloride lowers the strong ion difference along with the CO₂ content. The unit now has the CO₂ content of mixed venous blood (26 mmol/L), consistent with its plasma-like ions, and the saturation of a ~6-day unit (60 %). SO₂ is 43–51 % at donation and rises to 95–100 % within three weeks, as O₂ diffuses through the bag. Real units are also acidic (pH 6.7–7.05, lactate ~9, K ~12 mmol/L, HCO₃⁻ ~5 at 1–3 weeks); that storage lesion is not represented.
 
 **`remove_volume(volume, out_time = 10, site = "AD")`** (mL, s) queues a whole-blood loss, the counterpart of `add_volume`: `delta = volume / (out_time / 0.015)` per update, taken with `site.volume_out`, so the blood leaves with its own composition.
 
@@ -4594,6 +4598,13 @@ One instance in every scenario with the library above; maintenance 1.35 mL/kg/h 
 ## References
 
 Standard product compositions. 20 % albumin's anions are an estimate from its charge at 200 g/L plus the stabilisers.
+
+Red-cell unit O₂ saturation and storage:
+- Yoshida T et al. Enhancing uniformity and overall quality of red cell concentrate with anaerobic storage. Blood Transfus 2017;15:172–181. [doi:10.2450/2017.0325-16](https://doi.org/10.2450/2017.0325-16): SO₂ 45.9 ± 17.5 % within 24 h of collection, ~95–100 % by three weeks.
+- Bardyn M et al. Oxygen in red blood cell concentrates: influence of donors' characteristics and blood processing. Front Physiol 2020;11:616457. [doi:10.3389/fphys.2020.616457](https://doi.org/10.3389/fphys.2020.616457): SO₂ 51.2 ± 18.5 % before storage (1701 units).
+- Yoshida T et al. The oxygen saturation of red blood cell concentrates. Transfusion 2021;62:183–193. [doi:10.1111/trf.16715](https://doi.org/10.1111/trf.16715): mean 43 % at donation (20–93 %), ~1.3-fold over 6 weeks.
+- Zürn C et al. Risk assessment of red cell transfusion in congenital heart disease. Thorac Cardiovasc Surg 2022;70:e15–e20. [doi:10.1055/s-0042-1756493](https://doi.org/10.1055/s-0042-1756493): paediatric units median 6 days; pH 6.7, K 11.9, lactate 9.0 mmol/L (≤7 days).
+- Garg P et al. Hemodiafiltration of priming solution in pediatric cardiac surgery. Artif Organs 2017;41:773–778. [doi:10.1111/aor.12830](https://doi.org/10.1111/aor.12830): units 3–20 days, pH 7.05, HCO₃⁻ 4.8 mmol/L.
 
 ````
 
@@ -5319,6 +5330,8 @@ BaseModelClass
 | `ans_sens` | – | 1.0 | Sensitivity of rate and chambers to the ANS. |
 | `hr_factor` | – | 1.0 | User heart-rate factor. |
 | `hr_override` | boolean | `false` | Pins the rate to `heart_rate_ref`, ignoring all factors. |
+| `hr_max` | beats/min | 210 | Maximum sinus rate (term neonate). The rise above `heart_rate_ref` is compressed toward it; the reference itself is never limited. |
+| `hr_soft` | beats/min | 30 | Width of the soft zone below `hr_max` where the compression starts. |
 | `cont_factor_left`, `cont_factor_right` | – | 1.0 | Contractility (left: LA, LV; right: RA halves, RV). A change is applied as a delta to the chambers' `el_max_factor_ps`. |
 | `relax_factor_left`, `relax_factor_right` | – | 1.0 | Diastolic stiffness, applied the same way to `el_min_factor_ps`. |
 | `pc_el_factor` | – | 1.0 | Pericardial stiffness (`PERICARDIUM` `el_base` and `el_k` `_factor_ps`). |
@@ -5382,6 +5395,11 @@ BaseModelClass
                     + (hr_temp_factor − 1) + (hr_drug_factor − 1) + (hr_chemo_factor − 1)
                     + (hr_cat_factor − 1))
    ```
+   **Maximum sinus rate.** The contributions add up with no limit of their own: after a 35 % bleed in term_neonate_12h, the baroreflex (+57) and the catecholamines (+74) took the rate to 254/min. A neonatal sinus tachycardia rarely exceeds ~210–220/min (above that, think of SVT). So a rise above `HR_ref` is compressed smoothly once it passes the knee `k = max(HR_ref, hr_max − hr_soft)`:
+   ```
+   HR = k + (hr_max − k) · tanh((HR − k) / (hr_max − k))      (HR > k)
+   ```
+   With the defaults, raw 192 → 191, raw 251 → 209. Resting rates sit far below the knee and are unchanged. A `heart_rate_ref` at or above `hr_max` (a user-set SVT) is kept as it is, without any rise on top.
    With `hr_override` it is `HR_ref`. It is floored at 0; at 0 the sinus node is silent.
 4. **Conduction timers**:
    - **SA firing** (every `60/HR` s while `sa_node_enabled`) starts the PQ interval and the atrial activation (`ncc_atrial = −1`). The SA timer is not saved: after a load the node fires on the first step. (It used to wait a whole interval, which skipped one beat after every load: term MAP 61 → 53 mmHg for ~2 s, enough to set the brain autoregulation ringing.)
@@ -5990,6 +6008,45 @@ Seven valves in term_neonate_72h, all owned by `Heart`:
 No literature-derived values. The valve resistance is a scenario parameter.
 
 ````
+
+### FILE: explain-engine/docs/HlhsReference.md
+
+```markdown
+# HLHS reference (hlhs, 48 h, PGE1)
+
+`model_definitions/hlhs.json` is a stable term neonate (3.5 kg, 48 h) with **hypoplastic left heart syndrome, mitral + aortic atresia**, the duct held open on PGE1, before Norwood palliation. It is generated from `term_neonate_72h` by `scripts/_make_hlhs.mjs` (lever table and calibration notes in its header) and validated with `scripts/probe_hlhs.mjs hlhs`.
+
+The targets are classic textbook values for a stable, balanced pre-Norwood HLHS (no study-specific reference set, by choice, 2026-11-10).
+
+| Quantity | Target | Model (probe_hlhs, 120 s warm-up) |
+|---|---|---|
+| SpO₂ pre / post | 75–85 %, equal (fully mixed) | 76.8 / 76.6 % |
+| Qp:Qs | ~1 (0.8–1.5) | 1.31 (Qp 706, Qs 537 ml/min) |
+| Single RV output | ~2× normal | 1243 ml/min (≈ 355 ml/kg/min) |
+| MAP | ~45 (40–55) mmHg | 48 |
+| PAP mean | ≈ systemic | 49 |
+| Lactate | < 2 mmol/l | 1.6 |
+| pH / BE | normal | 7.44 / −2.4 |
+| Atrial septum | non-restrictive, LA − RA < 3 mmHg | LA 6.0, RA 3.8; LA→RA 712 ml/min |
+| Duct | wide, systemic R→L | PA→aorta 537 ml/min, systolic gradient ~3 mmHg |
+| Arch and coronaries | retrograde, duct-fed | arch AAR→AA 252 ml/min; coronaries 34 ml/min |
+
+## Levers and why
+
+| Lever | Value | Why |
+|---|---|---|
+| Mitral + aortic atresia | `LA_LV`, `LV_AA` disabled | LV excluded; `Heart` keeps a valid cycle from the ventricular activation window |
+| Atrial septum | `diameter_fo` 6 mm, `fo_lr_factor` 1 | the whole pulmonary venous return must cross LA→RA |
+| Duct | 7 mm, `diameter_relative` 0.5 + PGE1 0.02 mcg/kg/min | 4 mm (the archived build) restricted Qs with a 12–13 mmHg systolic gradient; PGE1 (patency ×2.1) holds the duct fully open, and stopping it narrows the duct to 50 % |
+| Hypoplastic ascending aorta | AA `u_vol` ×0.6, `el_base` ×1.4 | filled retrograde |
+| PVR | pulmonary arterioles ×2.5 | ×1/2/3 gave Qp:Qs 2.5/1.6/1.2 |
+| Systemic RV | `wall_frac_rv` = LV's; RV `el_max` ×3 | the term baby's RV (a third of the LV's contractility) delivered ~300 ml/kg/min with Qs ~125 and lactate 2.7 |
+
+**Read-out caveat:** in HLHS `Monitor.svo2` (the PA saturation) is mixed blood (= SaO₂); the systemic venous saturation is the SVC's (≈ 56 %).
+
+The diagram is the ToF-style teaching diagram: the hypoplastic LV small, at a fixed size and grey (no oxygenation tint, so its stagnant blood does not read as oxygenated), the atretic mitral and aortic valves as thin 2 px lines without flow, a narrow ascending aorta, and the duct and the atrial septum (captioned ASD) in the shunt style. The atretic valves' `flow` is zeroed in the generator: a disabled resistor no longer steps and would otherwise keep, and animate, its last flow.
+
+```
 
 ### FILE: explain-engine/docs/Hormones.md
 
@@ -8143,6 +8200,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 |---|---|
 | [TermNeonateReference](./TermNeonateReference.md) | Literature reference values for a healthy term neonate at ~72 h (hemodynamics, heart, flows, breathing, gases, metabolism, shunts), graded by evidence, with the matching JSON for validating `term_neonate_72h`. |
 | [TermTransitionReference](./TermTransitionReference.md) | Literature reference values for a healthy term neonate at 1 h, 12 h and 24 h (transition), derived from the 72 h baby by within-study changes, with the ductal Doppler evidence and the matching JSONs for validating `term_neonate_1h`, `term_neonate_12h` and `term_neonate_24h`. |
+| [HlhsReference](./HlhsReference.md) | Textbook targets and the validated values for `hlhs`: stable 48 h HLHS (mitral + aortic atresia) on PGE1, generated by `scripts/_make_hlhs.mjs`. |
 | [TofReference](./TofReference.md) | Literature reference values for tetralogy of Fallot at 72 h in four grades (pink, moderate, severe on PGE1, pulmonary atresia), built on Rudolph ch 14, with the matching JSONs for validating `tof_pink`, `tof`, `tof_severe`, `tof_pa`. |
 | [chd_duct_fo_dependent](./chd_duct_fo_dependent.md) | Duct- & foramen-ovale-dependent CHD taxonomy, lesion catalog, engine-lever mapping, build roadmap, bibliography. |
 
@@ -12738,6 +12796,7 @@ Here the left-heart outflow to the body is obstructed or absent, so systemic per
 - **B1 — Hypoplastic left heart syndrome (HLHS).** *Also FO-dependent.* The LV cannot support the systemic circulation; the entire cardiac output is delivered by the RV → PDA → aorta, perfusing the arch and coronaries **retrograde**. Pulmonary venous return is obligated left→right across the FO. An intact or highly restrictive atrial septum is a lethal combination requiring emergent decompression (Connor 2007 [#22]; Schranz duct-stenting 2024 [#23]; Vlahos 2004 [#26]; Generali 2022 [#27]).
   *Engine:* `LV_AA.no_flow` or severe `r_for`↑ + LV hypoplasia (reuse the `cdh_lv_dysfunction` LV levers: `Heart.cont_factor_left`, LV `el_min` / `u_vol`); `LA_LV.no_flow` or high `r_for` (mitral atresia/stenosis); `Shunts.diameter_fo` L→R; `Pda` carrying R→L (PA→AAR; the `AAR_DA` resistor is bidirectional). The *restrictive/intact-septum* variant (`diameter_fo → 0`) is a high-value teaching toggle.
   **✅ BUILT** as `hlhs` (mitral + aortic atresia → LV fully excluded) (validator `probe_hlhs.mjs`). Calibrated single-RV parallel circulation: RV output ≈ 1.2 L/min split **Qp:Qs ≈ 1.7** (mild pulmonary over-circulation, the typical balance), systemic Qs ≈ 0.46 L/min via the duct (PA→aorta, R→L), **retrograde aortic-arch and coronary perfusion** (AAR→AA), obligate FO L→R ≈ 0.75 L/min, moderate cyanosis (SpO₂ ≈ 78%, pO₂ ≈ 34 mmHg), PAP > MAP (RV is the systemic pump). Levers: mitral+aortic atresia, `diameter_fo: 6` / `fo_lr_factor: 1`, `Pda.diameter_relative: 1.0` with a fat 4 mm duct, hypoplastic AA (`u_vol ×0.6`, `el_base ×1.4`), **pulmonary arteriolar resistance ×2 to balance Qp:Qs** (at baseline PVR the lungs steal the output → Qp:Qs ≈ 3.5, systemic hypoperfusion — itself a teaching failure mode). A second engine generalization was needed: `Heart.calc_model` now derives the cardiac cycle from the ventricular activation window when the LV has *no* outflow (aortic atresia → both `LV_AA` and `LV_PA` disabled), so the single-RV physiology keeps a valid cycle (and `HeartFunction` inputs); identity for any heart with a working LV outflow (normal, TGA, tricuspid atresia, PA-IVS).
+  **2026-11-10: rebuilt on the current engine** as `hlhs` (48 h, PGE1, stable) by `scripts/_make_hlhs.mjs`; the archived build above was on the old engine. Changes: a 7 mm duct (4 mm was restrictive), the hypertrophied systemic RV (`el_max` ×3), PVR ×2.5. See [HlhsReference](./HlhsReference.md). `hlhs_restrictive` is not rebuilt yet.
   **✅ Restrictive/intact-septum variant BUILT** as `hlhs_restrictive` (same builder, only the atrial lever differs: `diameter_fo: 1`). The atrial communication is too small to pass the whole pulmonary venous return, so the LA cannot decompress: **LA pressure rises to ≈ 21 mmHg** (vs 4.5 open — a ≈ 19 mmHg trans-septal gradient = severe pulmonary venous hypertension), the obligate shunt is choked (≈ 420 vs 750 mL/min), single-RV preload/output fall (≈ 0.8 vs 1.2 L/min), and hypoxaemia is severe (**SpO₂ ≈ 64%, pO₂ ≈ 28 mmHg, pH ≈ 7.30**) — the lethal emergency needing immediate atrial decompression (balloon/blade septostomy or stenting). It remains a stable steady state because the septum is restrictive, not fully intact (`diameter_fo → 0` would trap the LA entirely and collapse). Alveolar oedema is not separately modeled — the hypoxaemia arises from the reduced pulmonary flow + obligatory mixing.
 
 - **B2 — Critical aortic stenosis.** The LV cannot eject across the valve, so systemic perfusion becomes duct-dependent; high LV wall stress impairs coronary perfusion and drives LV dysfunction (Affolter 2014 [#24]).
@@ -15800,6 +15859,7 @@ Available scenarios are listed in `public/model_definitions/index.json`.
 
 ```json
 [
+  "hlhs",
   "term_neonate_12h",
   "term_neonate_1h",
   "term_neonate_24h",
