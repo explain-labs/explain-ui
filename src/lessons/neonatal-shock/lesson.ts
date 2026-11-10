@@ -40,6 +40,14 @@ const COLD_SEPSIS: Op[] = [
   { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
 ];
 
+// decompensated myocarditis: a severely depressed myocardium plus the fever's O2 demand. Headless on
+// term_neonate_72h (+8 min): HR 152, MAP 38 (44/36), CVP 8.5, LVO 84, SvO2 35 %, lactate 3.9 and rising;
+// a 10 ml/kg bolus raises LVO to ~114 with CVP 11; contractility x2.25 -> LVO ~139, SvO2 62 %, lactate falling
+const MYOCARDITIS: Op[] = [
+  { kind: "scale", group: "heart_el_max", factor: 0.15 },
+  { kind: "set", path: "Metabolism.vo2_factor", value: 1.3, it: 5 },
+];
+
 // warm septic shock: vasodilation and capillary leak (the distributive case)
 const WARM_SEPSIS: Op[] = [
   { kind: "scale", group: "systemic_resistances", factor: 0.5 },
@@ -434,7 +442,7 @@ export default defineLesson({
         again(TERM),
       ],
     },
-    caseStep("case-4", "Case 4: a 2-week-old who stopped feeding", TERM, [{ kind: "scale", group: "heart_el_max", factor: 0.4 }], 2),
+    caseStep("case-4", "Case 4: a 2-week-old who stopped feeding", TERM, MYOCARDITIS, 5),
     {
       id: "cardiogenic-systolic",
       title: "Case 4 explained: cardiogenic shock, the weak heart",
@@ -443,11 +451,12 @@ export default defineLesson({
       actions: [
         {
           id: "depress",
-          label: "Myocardial depression: contractility ×0.4",
+          label: "Myocarditis: severely depressed contractility, fever",
           icon: "pi pi-exclamation-triangle",
           severity: "danger",
-          ops: [{ kind: "scale", group: "heart_el_max", factor: 0.4 }],
+          ops: MYOCARDITIS,
         },
+        wait(5),
         {
           id: "bolus",
           label: "Bolus NaCl 0.9 % 10 ml/kg",

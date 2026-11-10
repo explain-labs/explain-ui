@@ -1,8 +1,8 @@
 A term baby, **14 days old** (the model uses the physiology of the 3-day-old). Last week the older brother had a fever and a runny nose, and the mother had diarrhoea. Since yesterday the baby feeds poorly, **sweats and tires during feeds**, and breathes fast. Now the baby looks **grey**, the heart rate is high, you hear a **gallop rhythm**, and the liver edge is 3 cm below the costal margin. Temperature 37.9 °C.
 
-Press **Start the case**, and fast-forward if you like.
+Press **Start the case**, then **Fast-forward 5 min** (about half a minute of computing) to see where this is going.
 
-[[action:start,wait-2]]
+[[action:start,wait-5]]
 
 Look at the monitor and the numbers on the right (pressures, flow, oxygen balance, labs). **Which term of oxygen delivery fails?**
 

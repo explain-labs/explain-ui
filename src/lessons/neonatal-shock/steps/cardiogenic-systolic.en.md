@@ -2,13 +2,15 @@
 
 The inflamed myocardium contracts poorly; the same picture is seen after **perinatal asphyxia** or with a **cardiomyopathy**.
 
-Press **Myocardial depression**.
+Press **Myocarditis**, then **Fast-forward 5 min** (about half a minute of computing).
 
-[[action:depress]]
+[[action:depress,wait-5]]
 
-> Stroke volume and output fall. What does the CVP do? Why is the heart rate up?
+> Look at the stroke volume, LV output, CVP, blood pressure, SvO₂ and lactate. Compensated or not?
 
 [[reveal]]
+
+**Decompensated.** The output is less than half of normal (about 85 ml/kg/min), the CVP is up (about 9), the blood pressure is low (MAP about 38), SvO₂ falls to the mid-30s and the lactate keeps rising, with a growing metabolic acidosis. The heart rate rises (about 150), but in the model less than you would often see (180+).
 
 The reflex answer to shock is a bolus. Try it: **Bolus NaCl 0.9 % 10 ml/kg**.
 
@@ -18,9 +20,9 @@ The reflex answer to shock is a bolus. Try it: **Bolus NaCl 0.9 % 10 ml/kg**.
 
 [[reveal]]
 
-A weak ventricle sits on the **flat part of its Frank-Starling curve**: more preload brings mostly more pressure (congestion, oedema) and little flow.
+Some flow (about 85 → 115 ml/kg/min), but at a price: the CVP rises from about 9 to 11. A weak ventricle sits on the **flat part of its Frank-Starling curve**; each extra millilitre buys less flow and more congestion (liver, lungs, oedema), and it does not fix the problem.
 
-Now treat the target that failed: **Increase contractility (×2)** (what an inotrope does).
+Now treat the target that failed: **Increase contractility (×2)** (what an inotrope does). Fast-forward a few minutes to see the lactate turn.
 
 [[action:contractility-up]]
 
@@ -28,4 +30,4 @@ Now treat the target that failed: **Increase contractility (×2)** (what an inot
 
 [[reveal]]
 
-The LV output rises (about 150 → 210) and the CVP falls (about 12 → 8): the whole Starling curve moves up. The target was **contractility**. In practice: adrenaline, dobutamine or milrinone (also lowers afterload), and treating the cause (glucose, calcium, temperature, arrhythmia).
+The LV output rises (to about 140), the CVP falls back (about 11 → 8), SvO₂ recovers to the 60s and the **lactate starts to fall**: the whole Starling curve moves up. The target was **contractility**. In practice: adrenaline, dobutamine or milrinone (also lowers afterload), and treating the cause (glucose, calcium, temperature, arrhythmia).
