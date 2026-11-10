@@ -10,7 +10,7 @@ Press **Warm septic shock**, then **Fast-forward 5 min** (about half a minute of
 
 [[reveal]]
 
-The heart rate is about 190 and the pressure low (MAP about 37, **diastolic about 31**), but the **output is high** (about 285 ml/kg/min) and SvO₂ is fine: **warm shock**. The problem is **perfusion pressure**, not total flow. The organ that shows it is the **kidney**: the **diuresis falls from about 1.6 to 0.2 ml/kg/h**.
+The heart rate is about 190 and the pressure low (MAP about 37, **diastolic about 31**), but the **output is high** (about 285 ml/kg/min) and SvO₂ is fine: **warm shock**. The problem is **perfusion pressure**, not total flow. The organ that shows it is the **kidney**: the **diuresis falls from about 1.6 to well below 1 ml/kg/h** (it fluctuates from moment to moment; watch it for a while).
 
 The **lactate stays normal** in this model. Its tissues only make lactate when the oxygen delivered falls short, and the high output prevents that (even with far deeper vasodilation and a doubled oxygen demand). In a real septic baby the lactate rises anyway, through **maldistribution** (blood bypasses the tissues in the microcirculation) and **cellular dysfunction** (the cells cannot use the oxygen). A normal lactate does not exclude septic shock.
 
@@ -32,4 +32,4 @@ Now treat the target that failed: **Increase SVR (×2)** (what a vasopressor suc
 
 [[reveal]]
 
-The pressure rises (MAP about 48), the output falls back from its hyperdynamic level, and the **diuresis recovers** (about 1.4 ml/kg/h). Press it a second time: MAP about 62, but now the **CVP goes below zero**, because the restored tone shows how much volume was lost: this baby also needs careful volume. The targets were **SVR** and **leak**: restore tone, give volume carefully. Compare with the cold shock, where the same lever made things worse.
+The pressure rises (MAP about 48), the output falls back from its hyperdynamic level, and the **diuresis recovers** (back to above 1 ml/kg/h). Press it a second time: MAP about 62, but now the **CVP goes below zero**, because the restored tone shows how much volume was lost: this baby also needs careful volume. The targets were **SVR** and **leak**: restore tone, give volume carefully. Compare with the cold shock, where the same lever made things worse.
