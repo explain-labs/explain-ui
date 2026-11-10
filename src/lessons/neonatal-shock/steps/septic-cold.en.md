@@ -1,3 +1,5 @@
+**Case 2 was cold septic shock.** The baby has been reset; now step by step.
+
 A term baby, 3 days old, who has been unwell for hours with **neonatal sepsis**. In newborns septic shock is often **cold**: the infection depresses the myocardium, the vessels constrict, the capillaries leak, and fever raises the oxygen demand. Leak and poor intake have already cost about a fifth of the blood volume.
 
 Press **Cold septic shock**, then **Fast-forward 5 min** (about half a minute of computing).

@@ -1,3 +1,5 @@
+**Case 5 was cardiogenic shock with a stiff heart** (the hypertrophic heart of the infant of a diabetic mother). The baby has been reset; now step by step.
+
 Now a ventricle that contracts well but **cannot fill**: a **stiff ventricle**. Think of the hypertrophic heart of the infant of a diabetic mother, or a heart after asphyxia.
 
 Press **Stiff ventricles**.

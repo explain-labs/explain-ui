@@ -1,3 +1,5 @@
+**Case 4 was cardiogenic shock with a weak heart** (post-asphyxial myocardial dysfunction). The baby has been reset; now step by step.
+
 A baby after **perinatal asphyxia**, or with **myocarditis**: the ventricles contract poorly.
 
 Press **Myocardial depression**.

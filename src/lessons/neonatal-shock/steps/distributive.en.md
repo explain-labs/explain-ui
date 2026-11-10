@@ -1,3 +1,5 @@
+**Case 3 was warm septic shock**, the distributive type. The baby has been reset; now step by step.
+
 The other phenotype: **warm** septic shock. Two things happen at the same time: the arterioles dilate (**SVR falls**) and the capillaries start to **leak**.
 
 Press **Sepsis: vasodilation + capillary leak**.

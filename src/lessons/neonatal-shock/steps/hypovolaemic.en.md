@@ -1,3 +1,5 @@
+**Case 1 was hypovolaemic shock** from a subgaleal bleed. The baby has been reset; now step by step.
+
 A term baby, **12 hours old**, after a difficult vacuum extraction. The head circumference is increasing: a **subgaleal bleed**. The patient has just been reset to a healthy baby of that age: the **duct is still half open**, with left-to-right flow.
 
 Press **Subgaleal bleed**. The baby loses 35 % of its blood volume over 2 minutes (in reality this usually takes longer: the clock is compressed). Don't want to wait? **Fast-forward 2 min** jumps to the end of the bleed.

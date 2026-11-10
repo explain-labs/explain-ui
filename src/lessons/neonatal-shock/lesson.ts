@@ -1,4 +1,4 @@
-import { defineLesson, type LessonAction, type LessonNumeric, type Op } from "@/lessons/types";
+import { defineLesson, type LessonAction, type LessonNumeric, type LessonStep, type Op } from "@/lessons/types";
 import type { Intervention } from "@/lessons/interventions";
 import { introSteps } from "@/lessons/_shared/intro";
 
@@ -38,6 +38,13 @@ const COLD_SEPSIS: Op[] = [
   { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
   { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
   { kind: "set", path: "Metabolism.vo2_factor", value: 1.5, it: 5 },
+];
+
+// warm septic shock: vasodilation and capillary leak (the distributive case)
+const WARM_SEPSIS: Op[] = [
+  { kind: "scale", group: "systemic_resistances", factor: 0.5 },
+  { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
+  { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
 ];
 const TRANSITION = fresh("term_neonate_1h");
 
@@ -88,6 +95,27 @@ const num = (
   weight_based,
 });
 const perKg = (label: string, path: string, unit: string, rounding = 0) => num(label, path, unit, rounding, 1000, true);
+
+// A blind case: the story only, a Start button that sets off the shock, a fast-forward, and room
+// to try the Interventions before the explanation step that follows it.
+const caseStep = (id: string, title: string, enter: Op[], start: Op[], ffMinutes: number, startDuration?: number): LessonStep => ({
+  id,
+  title,
+  onEnter: enter,
+  highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Monitor.svo2", "Lactate.arterial_lactate"],
+  actions: [
+    {
+      id: "start",
+      label: "Start the case",
+      icon: "pi pi-play",
+      severity: "danger",
+      ops: start,
+      duration: startDuration,
+    },
+    wait(ffMinutes),
+    again(enter),
+  ],
+});
 
 // The treatment targets as standing controls (Interventions tab), usable on every
 // step. The scale sliders show % of normal: the ModelScaler group factor
@@ -320,9 +348,10 @@ export default defineLesson({
       highlight: ["Monitor.svo2", "Monitor.flows.lvo", "Heart.lv_sv"],
     },
     ...introSteps(),
+    caseStep("case-1", "Case 1: a baby after a vacuum delivery", NEWBORN, [call("Fluids.remove_volume", ML(85 * 0.35), 120, "AD")], 2, 120),
     {
       id: "hypovolaemic",
-      title: "Hypovolaemic shock",
+      title: "Case 1 explained: hypovolaemic shock",
       onEnter: NEWBORN,
       highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2", "Monitor.do2_br", "Monitor.do2_lb", "Monitor.flows.da_flow"],
       actions: [
@@ -360,9 +389,10 @@ export default defineLesson({
         again(NEWBORN),
       ],
     },
+    caseStep("case-2", "Case 2: a 3-day-old who has been unwell for hours", TERM, COLD_SEPSIS, 5),
     {
       id: "septic-cold",
-      title: "Septic shock: cold",
+      title: "Case 2 explained: cold septic shock",
       onEnter: TERM,
       highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Monitor.svo2", "Monitor.do2_lb"],
       actions: [
@@ -394,9 +424,10 @@ export default defineLesson({
         again(TERM),
       ],
     },
+    caseStep("case-3", "Case 3: a 3-day-old with a fever", TERM, WARM_SEPSIS, 2),
     {
       id: "distributive",
-      title: "Septic shock: warm",
+      title: "Case 3 explained: warm septic shock",
       onEnter: TERM,
       highlight: ["Monitor.minmax.abp_pres_mean", "Monitor.flows.lvo", "Circulation.total_blood_volume", "Interstitium.isf_volume_ml_kg"],
       actions: [
@@ -405,11 +436,7 @@ export default defineLesson({
           label: "Sepsis: vasodilation + capillary leak",
           icon: "pi pi-exclamation-triangle",
           severity: "danger",
-          ops: [
-            { kind: "scale", group: "systemic_resistances", factor: 0.5 },
-            { kind: "set", path: "Interstitium.kf_factor_ps", value: 10, it: 5 },
-            { kind: "set", path: "Interstitium.sigma", value: 0.5, it: 5 },
-          ],
+          ops: WARM_SEPSIS,
         },
         {
           id: "bolus",
@@ -423,9 +450,10 @@ export default defineLesson({
         again(TERM),
       ],
     },
+    caseStep("case-4", "Case 4: a baby after a difficult birth", TERM, [{ kind: "scale", group: "heart_el_max", factor: 0.4 }], 2),
     {
       id: "cardiogenic-systolic",
-      title: "Cardiogenic shock: the weak heart",
+      title: "Case 4 explained: cardiogenic shock, the weak heart",
       onEnter: TERM,
       highlight: ["Heart.lv_sv", "Heart.lv_edp", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2"],
       actions: [
@@ -447,9 +475,10 @@ export default defineLesson({
         again(TERM),
       ],
     },
+    caseStep("case-5", "Case 5: a big baby of a diabetic mother", TERM, [{ kind: "scale", group: "heart_el_min", factor: 3 }], 2),
     {
       id: "cardiogenic-diastolic",
-      title: "Cardiogenic shock: the stiff heart",
+      title: "Case 5 explained: cardiogenic shock, the stiff heart",
       onEnter: TERM,
       highlight: ["Heart.lv_edp", "Heart.lv_sv", "Monitor.flows.lvo", "Monitor.minmax.cvp_pres_mean"],
       actions: [
@@ -483,9 +512,10 @@ export default defineLesson({
         again(TERM),
       ],
     },
+    caseStep("case-6", "Case 6: a baby one hour after birth", TRANSITION, [{ kind: "scale", group: "pulmonary_resistances", factor: 3 }], 2),
     {
       id: "pphn",
-      title: "PPHN, the right ventricle and the duct",
+      title: "Case 6 explained: PPHN, the right ventricle and the duct",
       onEnter: TRANSITION,
       highlight: ["Monitor.flows.da_flow", "Monitor.fo_flow", "Heart.rv_edp", "Monitor.do2_lb"],
       monitorHighlight: ["spo2_pre", "spo2_post"],
