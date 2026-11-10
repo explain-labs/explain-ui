@@ -248,7 +248,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <section class="min-w-0 min-h-0 flex flex-col gap-3 lg:overflow-y-auto">
           <Monitor
             :lanes="lesson.monitorLanes ?? ['ecg', 'spo2_pre', 'spo2_post', 'abp']"
-            height="30vh"
+            :height="(lesson.monitorLanes?.length ?? 4) > 4 ? '38vh' : '30vh'"
             min-height="220px"
             :show-window-select="false"
             :highlight="rt.monitorHighlight.value"

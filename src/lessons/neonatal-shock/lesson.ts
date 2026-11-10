@@ -279,8 +279,8 @@ export default defineLesson({
   // the CO2 lane shows only while the ventilator runs (Monitor.vue hides it otherwise)
   monitorLanes: ["ecg", "spo2_pre", "spo2_post", "abp", "resp", "co2"],
   // ABP on a fixed neonatal scale so a narrowing pulse pressure shows as a smaller wave (autoscaling
-  // stretched every wave to the lane height); highest systolic in the cases ~89 mmHg
-  monitorRanges: { abp: { range: [20, 100], grid: [40, 60, 80] } },
+  // stretched every wave to the lane height); a systolic above 90 (briefly in PPHN with SVR raised) touches the top
+  monitorRanges: { abp: { range: [25, 90], grid: [40, 60] } },
   numerics: [
     {
       key: "pressure",

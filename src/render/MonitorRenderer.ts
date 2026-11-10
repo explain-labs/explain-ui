@@ -274,7 +274,7 @@ export class MonitorRenderer implements RendererAdapter {
         ctx.moveTo(0, y);
         ctx.lineTo(plotR, y);
         ctx.stroke();
-        ctx.fillText(String(g), 2, y - 2);
+        if (plotBot - plotTop > 44) ctx.fillText(String(g), 2, y - 2); // labels only where they fit
       }
       ctx.restore();
     }
