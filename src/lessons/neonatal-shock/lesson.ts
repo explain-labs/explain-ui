@@ -292,6 +292,7 @@ export default defineLesson({
       title: "Flow",
       parameters: [
         perKg("LV stroke volume", "Heart.lv_sv", "ml/kg", 2),
+        perKg("RV stroke volume", "Heart.rv_sv", "ml/kg", 2),
         perKg("LV output", "Monitor.flows.lvo", "ml/kg/min"),
         perKg("RV output", "Monitor.flows.rvo", "ml/kg/min"),
         perKg("Duct (+ = L→R)", "Monitor.flows.da_flow", "ml/kg/min"),
