@@ -6,7 +6,7 @@ Press **PPHN: PVR ×3**.
 
 [[action:pphn]]
 
-> Compare the pre- and post-ductal saturations. Which way do the duct and the foramen ovale flow now?
+> Compare the pre- and post-ductal saturations. Which way do the arrows in the duct and the foramen ovale run now (diagram)?
 
 [[reveal]]
 
@@ -16,11 +16,11 @@ Support the systemic side: **Increase SVR (×1.5)** (what a vasopressor does).
 
 [[action:svr-up]]
 
-> What happens to the duct flow and the post-ductal saturation?
+> What happens in the duct (diagram) and to the post-ductal saturation?
 
 [[reveal]]
 
-The direction of the shunt depends on the **ratio of SVR to PVR**. Raising SVR cuts the right-to-left duct flow (about −63 → −20 ml/kg/min) and the post-ductal saturation rises a little (71 → 77 %). Systemic vasodilators do the opposite.
+The direction of the shunt depends on the **ratio of SVR to PVR**. Raising SVR cuts the right-to-left duct flow to about a third and the post-ductal saturation rises a little (71 → 77 %). Systemic vasodilators do the opposite.
 
 Now treat the cause: **Lower PVR** (stands for oxygen, ventilation and iNO).
 

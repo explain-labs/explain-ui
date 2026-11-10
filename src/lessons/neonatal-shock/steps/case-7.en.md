@@ -4,6 +4,6 @@ Press **Start the case**, then **Fast-forward 5 min** (about half a minute of co
 
 [[action:start,wait-5]]
 
-Look at the monitor and the numbers on the right (pressures, flow, oxygen balance, labs). In this heart the **duct** carries the whole systemic flow (negative = to the body) and the **RV output** is the only output. **Which term of oxygen delivery fails?**
+Look at the monitor and the numbers on the right (pressures, flow, oxygen balance, labs). In this heart the **duct** carries the whole systemic flow (watch its arrows in the diagram) and the **RV output** is the only output. **Which term of oxygen delivery fails?**
 
 Then treat: open the **Interventions** tab and try what helps (fluid, blood, contractility, diastolic function, SVR, PVR, the duct, ventilation, ECMO). Fast-forward to see the effect, and **Start this case again** for a fresh baby. When you are done, press **Next** for the explanation.

@@ -6,7 +6,7 @@ Press **Pulmonary vascular resistance falls**, then **Fast-forward 5 min** (abou
 
 [[action:pvr-falls,wait-5]]
 
-> The saturation rises. Is the baby better? Look at the duct flow, the RV output, the diastolic pressure, DO₂ lower body and the lactate.
+> The saturation rises. Is the baby better? Look at the duct in the diagram, the RV output, the diastolic pressure, DO₂ lower body and the lactate.
 
 [[reveal]]
 

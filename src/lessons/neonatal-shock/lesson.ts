@@ -288,6 +288,18 @@ export default defineLesson({
   monitorRanges: { abp: { range: [25, 90], grid: [40, 60] } },
   numerics: [
     {
+      key: "oxygen",
+      title: "Oxygen balance",
+      parameters: [
+        num("SvO₂ (mixed venous)", "Monitor.svo2", "%"),
+        // regional delivery = regional flow × arterial O2 content (Monitor). The lower body is an
+        // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
+        num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
+        num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
+        num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
+      ],
+    },
+    {
       key: "pressure",
       title: "Pressures",
       parameters: [
@@ -304,21 +316,6 @@ export default defineLesson({
         perKg("RV stroke volume", "Heart.rv_sv", "ml/kg", 2),
         perKg("LV output", "Monitor.flows.lvo", "ml/kg/min"),
         perKg("RV output", "Monitor.flows.rvo", "ml/kg/min"),
-        perKg("Duct (+ = L→R)", "Monitor.flows.da_flow", "ml/kg/min"),
-        perKg("Foramen ovale (+ = L→R)", "Monitor.fo_flow", "ml/kg/min"),
-        perKg("ECMO flow", "Ecls.flow_avg", "ml/kg/min"),
-      ],
-    },
-    {
-      key: "oxygen",
-      title: "Oxygen balance",
-      parameters: [
-        num("SvO₂ (mixed venous)", "Monitor.svo2", "%"),
-        // regional delivery = regional flow × arterial O2 content (Monitor). The lower body is an
-        // estimate: renal flow × 4 with the descending-aorta content (post-ductal), not a measured flow
-        num("DO₂ brain", "Monitor.do2_br", "ml O₂/min"),
-        num("DO₂ lower body (est.)", "Monitor.do2_lb", "ml O₂/min"),
-        num("Lactate", "Lactate.arterial_lactate", "mmol/l", 1),
       ],
     },
     {
