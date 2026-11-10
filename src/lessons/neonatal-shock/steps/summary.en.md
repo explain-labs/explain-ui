@@ -3,8 +3,8 @@
 | Hypovolaemic | Preload | Tachycardia, low CVP, falling SvO₂; BP late | Volume (blood if bleeding) |
 | Septic, cold | Contractility, leak (SVR high) | Near-normal MAP, narrow pulse pressure, low output, low SvO₂ | Contractility up (inotrope: adrenaline, dobutamine, milrinone); careful volume. Raising SVR makes it worse |
 | Septic, warm (distributive) | SVR, leak | Low MAP and low diastolic pressure, high output, normal SvO₂ | SVR up (vasopressor: noradrenaline, vasopressin); careful volume |
-| Cardiogenic, systolic | Contractility | High CVP/EDP, small SV, poor response to fluid | Inotrope, afterload, cause |
-| Cardiogenic, diastolic | Filling | High EDP, small EDV, fluid raises EDP | Careful volume, rate, lusitropy |
+| Cardiogenic, systolic | Contractility | High CVP, small SV, poor response to fluid | Inotrope, afterload, cause |
+| Cardiogenic, diastolic | Filling | High CVP, small SV, fluid raises the CVP steeply | Careful volume, rate, lusitropy |
 | PPHN | PVR (RV afterload) | Pre/post SpO₂ gap, R→L shunts | Lower PVR, keep SVR > PVR, the duct as pop-off |
 
 Three messages:

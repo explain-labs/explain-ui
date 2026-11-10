@@ -6,7 +6,7 @@ Press **Myocardial depression**.
 
 [[action:depress]]
 
-> Stroke volume and output fall. What do the CVP and the EDP do? Why is the heart rate up?
+> Stroke volume and output fall. What does the CVP do? Why is the heart rate up?
 
 [[reveal]]
 
@@ -14,7 +14,7 @@ The reflex answer to shock is a bolus. Try it: **Bolus NaCl 0.9 % 10 ml/kg**.
 
 [[action:bolus]]
 
-> How much did the output rise? How much did the CVP and EDP rise?
+> How much did the output rise? How much did the CVP rise?
 
 [[reveal]]
 

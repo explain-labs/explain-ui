@@ -285,8 +285,6 @@ export default defineLesson({
         num("MAP", "Monitor.minmax.abp_pres_mean", "mmHg"),
         num("CVP", "Monitor.minmax.cvp_pres_mean", "mmHg"),
         num("PAP", ["Monitor.minmax.pap_pres_max", "Monitor.minmax.pap_pres_min"], "mmHg"),
-        num("LV EDP", "Heart.lv_edp", "mmHg", 1),
-        num("RV EDP", "Heart.rv_edp", "mmHg", 1),
       ],
     },
     {
@@ -455,7 +453,7 @@ export default defineLesson({
       id: "cardiogenic-systolic",
       title: "Case 4 explained: cardiogenic shock, the weak heart",
       onEnter: TERM,
-      highlight: ["Heart.lv_sv", "Heart.lv_edp", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2"],
+      highlight: ["Heart.lv_sv", "Monitor.minmax.cvp_pres_mean", "Monitor.svo2"],
       actions: [
         {
           id: "depress",
@@ -480,7 +478,7 @@ export default defineLesson({
       id: "cardiogenic-diastolic",
       title: "Case 5 explained: cardiogenic shock, the stiff heart",
       onEnter: TERM,
-      highlight: ["Heart.lv_edp", "Heart.lv_sv", "Monitor.flows.lvo", "Monitor.minmax.cvp_pres_mean"],
+      highlight: ["Heart.lv_sv", "Monitor.flows.lvo", "Monitor.minmax.cvp_pres_mean"],
       actions: [
         {
           id: "stiffen",
@@ -517,7 +515,7 @@ export default defineLesson({
       id: "pphn",
       title: "Case 6 explained: PPHN, the right ventricle and the duct",
       onEnter: TRANSITION,
-      highlight: ["Monitor.flows.da_flow", "Monitor.fo_flow", "Heart.rv_edp", "Monitor.do2_lb"],
+      highlight: ["Monitor.flows.da_flow", "Monitor.fo_flow", "Monitor.minmax.pap_pres_max", "Monitor.do2_lb"],
       monitorHighlight: ["spo2_pre", "spo2_post"],
       diagramHighlight: ["DA", "FO"],
       controls: ["ductus"],
