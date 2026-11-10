@@ -14,7 +14,7 @@ Lessons are **files in this repo**, bundled with the app. The working example is
 | `src/components/lesson/LessonActionButton.vue` | One action button, with its progress fill (timed actions, moving controls) |
 | `src/lessons/<id>/img/*` | Images, used as a step `image` or from markdown as `![alt](img/file.svg)` |
 | `src/lessons/types.ts` | Schema: `Lesson`, `LessonStep`, `LessonAction`, `LessonNumeric`, `Op` |
-| `src/lessons/interventions.ts` | Intervention registry (`INTERVENTIONS`): the controls lessons can offer. Kinds: `toggle`, `slider`, `button`, and `updown` (a −/+ pair without a value; each press applies its `down`/`up` ops, typically a relative scale, so the control gives nothing away) |
+| `src/lessons/interventions.ts` | Intervention registry (`INTERVENTIONS`): the controls lessons can offer. Kinds: `toggle`, `slider`, `button`, `updown` (a −/+ pair without a value; each press applies its `down`/`up` ops), and `relslider` (a slider centred on "now": it shows only the change, ÷span to ×span on a log scale, sets the ModelScaler `group` to base × change, and re-centres on every rebuild and lesson action button; `invert` for a quantity that is the inverse of its lever) |
 | `src/lessons/index.ts` | Registry: `getLesson`, `hasLesson`, `listLessons`, `loadStepMarkdown`, `imageUrl` (Vite globs) |
 | `src/lessons/i18n.ts` | `Lang`, `L10n`, `t()`, `useLessonLang()` (persisted in localStorage), UI strings |
 | `src/composables/useLesson.ts` | Runtime: load, step navigation, `applyOps`, control state |

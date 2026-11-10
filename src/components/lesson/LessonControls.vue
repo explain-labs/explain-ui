@@ -122,6 +122,25 @@ function inputValue(c: SliderIntervention): number | null {
         />
       </div>
 
+      <!-- relative slider: centred on "now", shows only the change, never the absolute value -->
+      <div v-else-if="c.kind === 'relslider'" class="flex flex-col gap-0.5">
+        <div class="flex items-center gap-3">
+          <Slider
+            :model-value="rt.relPosition(c)"
+            :min="-1"
+            :max="1"
+            :step="0.05"
+            class="flex-1 relslider"
+            :disabled="!rt.modelReady.value"
+            @slideend="(e: any) => rt.applyRel(c, Array.isArray(e.value) ? e.value[0] : e.value)"
+          />
+          <span class="w-12 text-right text-sm tabular-nums font-semibold">{{ rt.relLabel(c) }}</span>
+        </div>
+        <div class="flex justify-between text-[10px] opacity-50 pr-14">
+          <span>less</span><span>now</span><span>more</span>
+        </div>
+      </div>
+
       <!-- up/down: no value shown, each press changes the target relative to now -->
       <div v-else-if="c.kind === 'updown'" class="flex items-center gap-2 updown">
         <Button

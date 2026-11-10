@@ -10,6 +10,7 @@ import {
   getIntervention,
   type ControlValue,
   type Intervention,
+  type RelSliderIntervention,
   type SliderIntervention,
   type ToggleIntervention,
 } from "@/lessons/interventions";
@@ -241,7 +242,7 @@ export function useLesson(lesson: Lesson) {
   const lookup = (id: string): Intervention | undefined => lesson.interventions?.[id] ?? getIntervention(id);
   const VENT_PATHS = ["Ventilator.is_enabled", "Ventilator.interface"];
   const readPaths = [
-    ...lesson.controls.map((id) => lookup(id)).flatMap((c) => (c && (c.kind === "toggle" || c.kind === "slider") ? [c.read] : [])),
+    ...lesson.controls.map((id) => lookup(id)).flatMap((c) => (c && (c.kind === "toggle" || c.kind === "slider" || c.kind === "relslider") ? [c.read] : [])),
     ...(lesson.ventilatorStopsBreathing ? VENT_PATHS : []),
   ];
 
@@ -326,6 +327,7 @@ export function useLesson(lesson: Lesson) {
     if (a.duration && a.duration > 0 && t0 !== undefined)
       timed.value = { ...timed.value, [actionKey(a.id)]: { start: t0, seconds: a.duration } };
     busyKey.value = actionKey(a.id);
+    recentre(); // any lesson action (a shock, a target button) moves the state: "now" is the new state
     try {
       await applyOps(a.ops);
     } finally {
@@ -370,6 +372,39 @@ export function useLesson(lesson: Lesson) {
   }
   function sliderRaw(c: SliderIntervention, display: number): number {
     return c.invert ? sliderFactor(c) / display : display / sliderFactor(c);
+  }
+
+  // ----- relative sliders (centred on "now") -------------------------------------------------------
+  // base = the lever when the slider was last re-centred; null = not taken yet (taken on the first
+  // move). Re-centred on every rebuild and by every lesson action (a shock button, a target button
+  // that changes the same lever: keeping the old base would undo it on the next move).
+  const relBase = ref<Record<string, number>>({});
+  const relSet = ref<Record<string, number>>({}); // the slider position (-1..1) the learner chose
+  function recentre() {
+    relBase.value = {};
+    relSet.value = {};
+  }
+  // position -1..1 (log of the change over log span): the chosen one, else 0 ("now")
+  function relPosition(c: RelSliderIntervention): number {
+    return relSet.value[c.id] ?? 0;
+  }
+  function relLabel(c: RelSliderIntervention): string {
+    const v = relPosition(c);
+    if (Math.abs(v) < 0.02) return "now";
+    const m = Math.pow(c.span ?? 3, Math.abs(v));
+    return `${v > 0 ? "×" : "÷"}${m.toFixed(m < 1.95 ? 2 : 1)}`;
+  }
+  function applyRel(c: RelSliderIntervention, v: number) {
+    const now = valueOf(c.read);
+    if (relBase.value[c.id] === undefined) {
+      if (now === undefined) return;
+      relBase.value = { ...relBase.value, [c.id]: now };
+    }
+    const base = relBase.value[c.id];
+    const m = Math.pow(c.span ?? 3, v); // the shown quantity's change
+    const factor = c.invert ? base / m : base * m;
+    relSet.value = { ...relSet.value, [c.id]: v };
+    applyOp({ kind: "scale", group: c.group, factor });
   }
 
   // slider position in display units: the target while tweening, else current
@@ -427,6 +462,8 @@ export function useLesson(lesson: Lesson) {
       for (const op of c.toOps ? c.toOps(target) : [{ kind: "set", path: c.read, value: target, it } as Op])
         applyOp(op);
       setPending(id, { from, target, until: Date.now() + (it + 3) * 1000 });
+    } else if (c.kind === "relslider") {
+      if (typeof state === "number") applyRel(c, state);
     } else if (c.kind === "updown") {
       // "off" = down, anything else = up
       for (const op of state === "off" ? c.down : c.up) applyOp(op);
@@ -658,6 +695,7 @@ export function useLesson(lesson: Lesson) {
       staleRows = slowValues.value;
       pending.value = {};
       timed.value = {}; // a rebuild ends whatever was playing out
+      recentre();
       needBaselines = true;
       return;
     }
@@ -713,6 +751,9 @@ export function useLesson(lesson: Lesson) {
     sliderActual,
     sliderFactor,
     sliderRaw,
+    relPosition,
+    relLabel,
+    applyRel,
     isClosing,
     isPending,
     anyPending: computed(() => Object.keys(pending.value).length > 0),

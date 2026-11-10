@@ -72,7 +72,25 @@ export interface UpDownIntervention extends InterventionBase {
   down: Op[];
 }
 
-export type Intervention = ToggleIntervention | SliderIntervention | ButtonIntervention | UpDownIntervention;
+// Slider centred on "now": shows only the change relative to the state when it was last re-centred
+// (a rebuild, or any lesson action button), never the absolute value.
+// Log scale from /span to xspan; moving it sets the ModelScaler group to base x span^v. `read` is the
+// group's factor on its first model (to take the base from). `invert`: the shown quantity is the
+// inverse of the lever (diastolic function from the stiffness group).
+export interface RelSliderIntervention extends InterventionBase {
+  kind: "relslider";
+  group: string;
+  read: string;
+  span?: number; // default 3
+  invert?: boolean;
+}
+
+export type Intervention =
+  | ToggleIntervention
+  | SliderIntervention
+  | ButtonIntervention
+  | UpDownIntervention
+  | RelSliderIntervention;
 
 export const INTERVENTIONS: Record<string, Intervention> = {
   // 100% = the duct's maximum diameter (Pda.diameter_*_max); diameter_relative

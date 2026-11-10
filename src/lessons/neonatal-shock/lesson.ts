@@ -134,17 +134,19 @@ const caseStep = (id: string, title: string, enter: Op[], start: Op[], ffMinutes
 });
 
 // The treatment targets as standing controls (Interventions tab), usable on every step. The four
-// physiological targets are up/down buttons without a value: a slider at "40 %" gave the diagnosis
-// away. Each press multiplies the current lever by STEP (or divides): the ModelScaler group,
-// relative to its current factor, the same lever as Common tasks. Diastolic function up = stiffness down.
-const STEP = 1.5;
-const upDown = (id: string, label: string, group: string, help: string, invert = false): Intervention => ({
+// physiological targets are relative sliders centred on "now" (no absolute value: a slider at "40 %"
+// gave the diagnosis away). They re-centre when the case starts or any step button is pressed, and set
+// the ModelScaler group (the same lever as Common tasks) to the base x the chosen change, /3 .. x3.
+// Diastolic function: right = less stiff. `read` = the group's factor on its first model.
+const relSlider = (id: string, label: string, group: string, read: string, help: string, invert = false): Intervention => ({
   id,
-  kind: "updown",
+  kind: "relslider",
   label,
   help,
-  up: [{ kind: "scale", group, factor: invert ? 1 / STEP : STEP, relative: true }],
-  down: [{ kind: "scale", group, factor: invert ? STEP : 1 / STEP, relative: true }],
+  group,
+  read,
+  span: 3,
+  invert,
 });
 const INTERVENTIONS: Record<string, Intervention> = {
   saline: {
@@ -251,10 +253,10 @@ const INTERVENTIONS: Record<string, Intervention> = {
       { kind: "set", path: "Ecls.ecls_clamped", value: true },
     ],
   },
-  contractility: upDown("contractility", "Contractility", "heart_el_max", "Both ventricles and atria. Each press ×1.5 or ÷1.5, relative to now."),
-  diastolic_function: upDown("diastolic_function", "Diastolic function", "heart_el_min", "Up = a less stiff ventricle. Each press ×1.5 or ÷1.5, relative to now.", true),
-  svr: upDown("svr", "Systemic vascular resistance", "systemic_resistances", "All systemic vessels. Each press ×1.5 or ÷1.5, relative to now."),
-  pvr: upDown("pvr", "Pulmonary vascular resistance", "pulmonary_resistances", "All pulmonary vessels. Each press ×1.5 or ÷1.5, relative to now."),
+  contractility: relSlider("contractility", "Contractility", "heart_el_max", "LV.el_max_factor_scaling_ps", "Both ventricles and atria, relative to now (÷3 to ×3)."),
+  diastolic_function: relSlider("diastolic_function", "Diastolic function", "heart_el_min", "LV.el_min_factor_scaling_ps", "Right = a less stiff ventricle, relative to now (÷3 to ×3).", true),
+  svr: relSlider("svr", "Systemic vascular resistance", "systemic_resistances", "AA.r_factor_scaling_ps", "All systemic vessels, relative to now (÷3 to ×3)."),
+  pvr: relSlider("pvr", "Pulmonary vascular resistance", "pulmonary_resistances", "PA.r_factor_scaling_ps", "All pulmonary vessels, relative to now (÷3 to ×3)."),
 };
 
 export default defineLesson({
