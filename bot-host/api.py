@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -40,6 +41,10 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
+# Local to this bot's glue/ directory, which is the script dir and so already
+# on sys.path.
+from session_hygiene import should_rotate, turn_stats_line
+
 
 # Fleet-wide secrets (Anthropic OAuth token). Same two-stage, non-overriding
 # load as bot.py and the other bots' api.py: plist env > secrets.env > .env.
@@ -48,8 +53,19 @@ load_dotenv(dotenv_path=Path.home() / ".config" / "claude-bots" / "secrets.env",
 
 load_dotenv(dotenv_path=Path.cwd() / ".env")
 
-BOT_NAME = os.environ.get("BOT_NAME", "cradle")
+BOT_NAME = os.environ.get("BOT_NAME", "explain")
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
+
+# Which `claude` binary the SDK runs. The plist sets CLAUDE_CLI_PATH, but a
+# plist entry alone does nothing — the SDK prefers its own bundled copy unless
+# cli_path is passed explicitly at the call site. This file went without it
+# until 2026-11-10 and was therefore silently running the SDK's bundled CLI,
+# which lags the pinned native installer; that is the exact condition the pin
+# exists to prevent (see INFRASTRUCTURE.md "Which binary runs" — concurrent
+# OAuth refresh on an old binary is what killed four bots in August 2026).
+# None is the SDK default, so an unset or missing path changes nothing.
+_cli = os.environ.get("CLAUDE_CLI_PATH", "").strip()
+CLAUDE_CLI_PATH = _cli if _cli and Path(_cli).exists() else None
 ALLOWED_TOOLS = os.environ.get(
     "ALLOWED_TOOLS", "Read,Glob,Grep,WebSearch,WebFetch"
 ).split(",")
@@ -420,20 +436,28 @@ def maybe_build(answer: str) -> tuple[str, dict | None, dict | None]:
 
 # ---------- claude call ----------
 
-async def ask_clinical(
+async def ask_explain(
     prompt: str,
     conversation_id: str,
     images: list[ImageInput] | None = None,
     attachments: list[AttachmentInput] | None = None,
 ) -> tuple[str, str | None]:
     """Run one turn against the bot's Claude session, optionally with images/files."""
+    resume = sessions.get(conversation_id)
+    if resume and should_rotate(BOT_DIR, resume, log):
+        # Context has outgrown the rotation threshold — every further resumed
+        # turn would be slower than the last. Start a fresh session instead.
+        sessions.pop(conversation_id, None)
+        save_sessions(sessions)
+        resume = None
     options = ClaudeAgentOptions(
         cwd=str(BOT_DIR),
         model=MODEL,
         setting_sources=["project"],
         permission_mode="bypassPermissions",
         allowed_tools=ALLOWED_TOOLS,
-        resume=sessions.get(conversation_id),
+        resume=resume,
+        cli_path=CLAUDE_CLI_PATH,
     )
 
     if images or attachments:
@@ -463,7 +487,9 @@ async def ask_clinical(
         prompt_arg = prompt
 
     parts: list[str] = []
-    new_session_id: str | None = sessions.get(conversation_id)
+    new_session_id: str | None = resume
+    result_msg: ResultMessage | None = None
+    t0 = time.monotonic()
 
     async for message in query(prompt=prompt_arg, options=options):
         if isinstance(message, AssistantMessage):
@@ -472,7 +498,27 @@ async def ask_clinical(
                     parts.append(block.text)
         elif isinstance(message, ResultMessage):
             new_session_id = message.session_id
+            result_msg = message
+            if message.is_error:
+                # The CLI reports the real cause here (e.g. a 401 auth failure),
+                # but the SDK's own exception collapses it to the result
+                # `subtype` — often the useless literal "success" — and drops
+                # api_error_status entirely. Raise the actionable detail first
+                # so it lands in the log before that generic exception fires.
+                detail = (
+                    message.result
+                    or "; ".join(message.errors or [])
+                    or message.subtype
+                )
+                raise RuntimeError(
+                    f"claude error result "
+                    f"(api_error_status={message.api_error_status}): {detail}"
+                )
 
+    log.info(turn_stats_line(
+        elapsed_s=time.monotonic() - t0, result=result_msg,
+        cwd=BOT_DIR, session_id=new_session_id,
+    ))
     return "\n".join(parts).strip(), new_session_id
 
 
@@ -574,11 +620,11 @@ async def ask(req: AskRequest, _key: str = Depends(require_api_key)) -> AskRespo
     pre_output = snapshot_output()
 
     try:
-        answer, new_session_id = await ask_clinical(
+        answer, new_session_id = await ask_explain(
             req.prompt, conversation_id, req.images, req.attachments
         )
     except Exception:
-        log.exception("ask_clinical failed conv=%s", conversation_id)
+        log.exception("ask_explain failed conv=%s", conversation_id)
         raise HTTPException(status_code=500, detail="claude call failed")
 
     if new_session_id and sessions.get(conversation_id) != new_session_id:
