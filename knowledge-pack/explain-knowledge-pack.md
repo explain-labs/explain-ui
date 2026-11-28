@@ -8344,15 +8344,15 @@ One instance in every scenario. It owns `PL_UMB_ART`, `PL_FETAL_ART`, `PL_FETAL_
 ### FILE: explain-engine/docs/PregnancyReference.md
 
 ```markdown
-# Pregnancy at 30 and 36 weeks: reference values
+# Pregnancy at 24, 30 and 36 weeks: reference values
 
-Reference values for validating `adult_female_pregnant_36wk` (the tables below) and `adult_female_pregnant_30wk` ([30 weeks](#30-weeks)): the calibrated non-pregnant `adult_female`
+Reference values for validating `adult_female_pregnant_36wk` (the tables below) `adult_female_pregnant_30wk` ([30 weeks](#30-weeks)) and `adult_female_pregnant_24wk` ([24 weeks](#24-weeks)): the calibrated non-pregnant `adult_female`
 ([AdultFemaleReference](./AdultFemaleReference.md)) at 36 weeks of a healthy singleton pregnancy, lying **left lateral**
 (no aortocaval compression; the engine has no model of it). The fetus is represented only as an O2 sink in the placenta.
 Compiled 2026-11-27 from a PubMed search.
 
 The machine-readable version is [`scripts/reference/adult_female_pregnant_36wk.json`](../scripts/reference/adult_female_pregnant_36wk.json),
-built by `scripts/reference/_build_adult_female_pregnant_reference.py --ga 30|36` and read by
+built by `scripts/reference/_build_adult_female_pregnant_reference.py --ga 24|30|36` and read by
 `scripts/probe_term_reference.mjs --ref scripts/reference/adult_female_pregnant_36wk.json`. Per-kg values use the
 pregnancy weight, 71 kg.
 
@@ -8519,8 +8519,10 @@ Absolute values from other cohorts are cross-checks only; absolute targets only 
 | 10 | lungs | airway resistance x0.5, chest wall x1.25 stiffer, thorax unstressed volume to FRC 1.9 L | Rrs 1.6, Crs 81, FRC 26.7 mL/kg |
 | 11 | metabolism | whole-body VO2 242 incl. heart + uteroplacental, glucose 4.7, temperature 36.8 | VO2 ~238, glucose 4.8, 36.9 degC |
 
-3. **Re-anchoring** as `adult_female`, with: the maintenance intake re-measured after the final kidney trims; a post-fold
-   heart-rate correction (the folded baroreflex baked in a few bpm of braking); the brain references captured last.
+3. **Re-anchoring** as `adult_female`, with: the maintenance intake re-measured after the final kidney trims; after the
+   baroreflex fold, heart rate and systemic resistance nudged back to their targets, the baroreflex re-anchored once more
+   at that state, and a last heart-rate-only nudge (the folded reflex had baked in a few bpm of braking and let the
+   pressure drift: 24-wk MAP 81.5 instead of 78); the brain references captured last.
 4. **Display:** a placenta node (`PL`) beside the uterus, uterus/placenta discs at 0.6 of their natural size, `fUT`/`fPL`
    read-outs on the circulation panels.
 
@@ -8620,7 +8622,98 @@ Validation: reference probe 30 weeks, no row flagged (HR 76, CO ~6.6 L/min, MAP 
 | Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
 |---|---|---|---|---|---|---|---|
 
+## 24 weeks
+
+`adult_female_pregnant_24wk` (`--ga 24`), mid-pregnancy. Decisions (user, 2026-11-28): cardiac output and heart rate as the
+within-series step of Mulder 2021 (meta-analysis of studies with a non-pregnant reference: x1.27 / +10.7 bpm at 22-28 wk vs
+x1.29 / +14.6 at 29-35 wk) applied to the calibrated 30-week values (CO ~6.96 L/min, HR 74); MAP 78 (the mid-pregnancy low
+point, de Haas 2022 BP meta-analysis, -4); renal blood flow x1.6 (Dunlop 1981: renal plasma flow at its +80 % plateau,
+16-26 wk); plasma volume x1.28 (Aguree 2019's 24/30-week step on the 30-week x1.40). Weight 65.9 kg; fetus 0.67 kg; uterine
+flow 440 mL/min; uterus (x11) and intervillous volume (95 mL) scaled with the uterine flow (grade C).
+
+Validation: reference probe, no row flagged (HR 74.1, MAP 79.1, CO ~6.7-7.0 L/min, SV 93, SVR 11.2, blood volume 4.55 L, Hb
+12.0, uterine ~410 mL/min, O2 sink 7.4, GFR ~132, renal ~1290 mL/min, PaCO2 31.7); 30-min drift as 30/36 weeks (slow
+interstitial -> plasma shift ~18 mL); respiratory suite flags only the intended low PaCO2. The post-fold changes moved
+30 and 36 weeks slightly toward their targets (30: HR 77.3 / MAP 82.1; 36: HR 79.8 / MAP 81.4).
+
+### Hemodynamics, heart and flows
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+| Heart rate (`hr`) | bpm | 74 | 65–95 | Mulder 2021 meta-analysis bins: +10.7 bpm (22-28 wk) vs +14.6 (29-35 wk); the 24/30 step applied to the 30-wk 78; 24 wk gestation, left lateral | B | Mulder E et al (PMID 33630403); Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: -4 bpm vs 30 wk (Mulder 2021 within-series). User decision 2026-11-28: within-series step from the calibrated 30-wk values. |
+| Cardiac output (`lvo`) | mL/kg/min | 105.6 | 84.5–126.7 | meta-analysis, studies with a non-pregnant reference (105 studies); 24 wk gestation, left lateral | B | Mulder E et al (PMID 33630403); Meah VL et al (PMID 26794234) | Change: x1.27 vs x1.29 at 29-35 wk (Mulder 2021); the 24/30 step applied to the 30-wk 7.07 L/min. ~6.96 L/min. SVR lowest at 22-28 wk (-25 %, Mulder; Clapp 1997 at 24 wk). |
+| Right ventricular output (`rvo`) | mL/kg/min | 105.6 | 84.5–126.7 | 24 wk gestation, left lateral | A/B | Meah VL et al (PMID 26794234) |  |
+| LV stroke volume (`lv_sv`) | mL/kg | 1.43 |  | derived CO / HR; 24 wk gestation, left lateral | B (derived) | Meah VL et al (PMID 26794234); Mahendru AA et al (PMID 24406777) | Change: x1.09 (derived). 94 mL. |
+| LV end-diastolic volume (`lv_edv`) | mL/kg | 2.49 |  | CMR ~34 wk vs postpartum; 24 wk gestation, left lateral | B | Ducas RA et al | Change: x1.29 (Ducas 2014). Reference only in spirit: Ducas's CO rise (+85 %) is an outlier against option B; expect the model's EDV lower. |
+| Mean arterial pressure (true mean) (`map_mean`) | mmHg | 78 | 66–90 | arm cuff, mixed posture (BP meta-analysis), mid-pregnancy low point; 24 wk gestation, left lateral | B | de Haas S et al (PMID 34929556); Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: -4. User decision 78. Clapp 1997 places the low point at 16 wk (-6); by 24 wk pressure may be recovering. |
+| Diastolic BP (`dbp`) | mmHg | 61 | 48–76 | arm cuff, mixed posture (BP meta-analysis); 24 wk gestation, left lateral | B | de Haas S et al (PMID 34929556) | Change: -4 (mid-pregnancy).  |
+| Systemic vascular resistance (`svr`) | WU | 10.6 |  | derived (MAP - CVP)/CO; 24 wk gestation, left lateral | C (derived) | Clark SL et al; Meah VL et al (PMID 26794234) | Change: ~x0.76 (Clark reports x0.79).  |
+| Central venous pressure (`cvp`) | mmHg | 4 | 2–7 | PA catheter, left lateral (n=10); 24 wk gestation, left lateral | B | Clark SL et al; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: x1.00.  |
+| Pulmonary artery wedge pressure (`pawp`) | mmHg | 10.1 | —–13 | PA catheter; 24 wk gestation, left lateral | B | Clark SL et al; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: x1.00.  |
+| Pulmonary vascular resistance (`pvr`) | WU | 0.58 |  | scaled from the 30-wk decision (no mid-pregnancy invasive data); 24 wk gestation, left lateral | C | Clark SL et al; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: x0.68.  |
+| Mean PAP (`pap_m`) | mmHg | 12.8 | —–20 | PA catheter (derived unchanged); 24 wk gestation, left lateral | C | Clark SL et al; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: ~x1.0.  |
+| Renal blood flow (`renal`) | mL/kg/min | 20.6 | 18.7–22.6 | effective renal plasma flow, 3rd trimester; 24 wk gestation, left lateral | C | Dunlop W | Change: ~x1.6 (Dunlop 1981: renal plasma flow +80 % plateau at 16-26 wk, haematocrit-corrected). ~1360 mL/min. |
+
+### Breathing
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+| Minute ventilation (`mv`) | mL/kg/min | 107.3 |  | (model base 5.7 L/min); 24 wk gestation, left lateral | B | Spatling L et al (PMID 1515406) | Change: x1.24. 7.1 L/min. |
+| Tidal volume (`vt`) | mL/kg | 7.15 |  | (model base 380 mL); 24 wk gestation, left lateral | B | Spatling L et al (PMID 1515406) | Change: x1.24. 471 mL. |
+| Respiratory rate (`rr`) | /min | 15 | 12–20 | 24 wk gestation, left lateral | B | Spatling L et al (PMID 1515406) | Change: unchanged.  |
+| FRC (`frc`) | mL/kg | 33.2 |  | (model base 2.3 L); 24 wk gestation, left lateral | B/C | Craig DB, Toole MA (PMID 1201469); Gee JB et al | Change: ~x0.95 (interpolated). ~2.18 L. |
+| Respiratory system compliance (`crs`) | mL/cmH2O | 86 |  | lung unchanged, chest wall lower; 24 wk gestation, left lateral | C | Gee JB et al | Change: ~x0.96.  |
+| Respiratory resistance (`rrs`) | cmH2O/L/s | 1.92 |  | total pulmonary resistance; 24 wk gestation, left lateral | B | Gee JB et al | Change: x0.6.  |
+
+### Gases and saturations
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+| PaCO2 (`pco2`) | mmHg | 32 | 30–34 | 24 wk gestation, left lateral | B/C | Spatling L et al (PMID 1515406); Textbook / review; not checked against a retrieved source | Change: -5.5 (Spatling alveolar -4). User decision ~32. |
+| Arterial pH (`ph`) | - | 7.44 | 7.4–7.47 | 24 wk gestation, left lateral | C | Textbook / review; not checked against a retrieved source | Change: compensated respiratory alkalosis.  |
+| Bicarbonate (`hco3`) | mmol/L | 21 | 19–23 | 24 wk gestation, left lateral | C | Textbook / review; not checked against a retrieved source | Change: -3.  |
+| PaO2 (`po2`) | mmHg | 100 | 85–110 | semi-recumbent, left lateral tilt; 24 wk gestation, left lateral | B | Templeton A, Kelman GR (PMID 10937) | Change: A-a unchanged.  |
+| SpO2 (`spo2`) | % | 98 | 96–100 | 24 wk gestation, left lateral | C | Textbook / review; not checked against a retrieved source |  |
+
+### Metabolism
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+| Whole-body O2 consumption (maternal + uteroplacental) (`vo2`) | mL/kg/min | 3.44 |  | calorimetry, pre-pregnancy -> 3rd trimester (n=34); 24 wk gestation, left lateral | A | Butte NF et al (PMID 15159239); Forsum E et al; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: BMR x1.18 (Butte 2004, 22-wk visit, interpolated). 227 mL/min at 65.9 kg. |
+| Respiratory quotient (`rq`) | - | 0.82 |  | 24 wk gestation, left lateral | B | Spatling L et al (PMID 1515406) | Change: unchanged.  |
+| Core temperature (`temp`) | degC | 36.8 | 36.3–37.5 | 24 wk gestation, left lateral | C | Hartgill TW et al | Change: falls slightly.  |
+| Fasting glucose (`glucose`) | mmol/L | 4.7 | 3.9–5.1 | from 6 wk (n=361); 24 wk gestation, left lateral | B | Mills JL et al (PMID 9751245); Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: -0.2.  |
+| Arterial lactate (`lactate`) | mmol/L | 1 | 0.5–2.2 | 24 wk gestation, left lateral | C | Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: unchanged (non-fasting x1.26 weak).  |
+
+### Blood and kidneys
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+| Blood volume (`blood_volume`) | mL/kg | 68.6 |  | plasma x1.28 (Aguree 2019 24/30-wk step on the 30-wk x1.40) + red cells +125 mL (Taylor & Lind 1979, iron, interpolated); 24 wk gestation, left lateral | B | de Haas S et al; Taylor DJ, Lind T; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: x1.20 (derived). 4.52 L. Two studies combined (breaks the one-study rule). |
+| Haemoglobin (`hb`) | g/dL | 12.1 | 11–13.5 | red cell mass / blood volume; 24 wk gestation, left lateral | B/C | Taylor DJ, Lind T; de Haas S et al; Murphy MM et al | Change: x0.90 (with iron). User decision: with iron. Murphy 2002 Hct only -4 % (conflict noted). |
+| Haematocrit (`hct`) | % | 36 | 33–40 | 24 wk gestation, left lateral | B/C | Taylor DJ, Lind T; de Haas S et al | Change: x0.90.  |
+| Albumin (`albumin`) | g/L | 38.3 | 33–43 | pre-pregnancy -> 20 / 32 wk (n=93), interpolated; 24 wk gestation, left lateral | A/B | Murphy MM et al; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: x0.89.  |
+| Sodium (`na`) | mmol/L | 136 | 132–140 | plasma osmolality -10 mOsm/kg; 24 wk gestation, left lateral | C | Davison JM et al | Change: -4.  |
+| GFR (absolute, not indexed) (`gfr_abs`) | mL/min | 131 | 121–158 | inulin clearance, 22.3 wk vs postpartum (n=12); 24 wk gestation, left lateral | B | Saxena AR et al; Dunlop W; Calibrated non-pregnant adult_female reference (scripts/reference/adult_female | Change: x1.25 (Dunlop x1.5). User decision: inulin (Saxena). Pregnancy GFR is not indexed to 1.73 m2. |
+
+### Uterus
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+| Uterine blood flow (`ut_flow`) | mL/min | 440 | 310–610 | Doppler volume flow, longitudinal (Flo 2010 299 at 22 wk, Konje 2001 513 at 20 wk): ratio 0.63 to 36 wk applied to 700; 24 wk gestation, left lateral | B/C | Flo K et al; Konje JC et al; Metcalfe J et al | Change: ~9-10 % of CO. Absolute values differ ~2x between the studies; only their ratio is used. |
+| Placental (intervillous) flow (`pl_flow`) | mL/min | 375 |  | textbook ~80-90 % of uterine flow; 24 wk gestation, left lateral | C | Textbook / review; not checked against a retrieved source |  |
+| Uterine artery pulsatility index (`ut_pi`) | - | 0.94 |  | Doppler reference curve at 24 wk; 24 wk gestation, left lateral | A/B | Gomez O et al | Non-pregnant model 2.66. |
+| Uterus + placenta + fetus O2 consumption (`uteroplacental_vo2`) | mL O2/min | 7.4 | 6–9 | fetus 0.67 kg (Hadlock 1991) x 6.6 mL/kg/min + placenta ~3; 24 wk gestation, left lateral | B | Acharya G, Sitras V; Challier JC et al; Metcalfe J et al; Hadlock FP et al (PMID 1887021) | Change: absolute. The fetus is an O2 sink (user decision). |
+
+### Shunts
+
+| Variable | Unit | Reference | Range | Method, cohort, n | Grade | Source | Notes |
+|---|---|---|---|---|---|---|---|
+
 ## Open items
+
+- **30-week renal blood flow** (x1.45) may be low against Dunlop's mid-pregnancy plateau (+80 % renal plasma flow at
+  16-26 wk, falling in the third trimester); the 24-week set uses x1.6.
 
 - **Slow interstitial -> plasma shift** of ~20 mL per 30 min (slowing; total fluid conserved); re-seeding the interstitium at
   the end did not stop it.
@@ -8803,7 +8896,7 @@ Not tied to a single class — physiology/clinical background and scenario-build
 
 | Doc | What it covers |
 |---|---|
-| [PregnancyReference](./PregnancyReference.md) | Reference values for `adult_female` at 30 and 36 weeks of a healthy pregnancy (left lateral, fetus as an O2 sink), derived as non-pregnant values x within-study longitudinal changes, with the matching JSONs for validating `adult_female_pregnant_30wk` and `adult_female_pregnant_36wk`. |
+| [PregnancyReference](./PregnancyReference.md) | Reference values for `adult_female` at 24, 30 and 36 weeks of a healthy pregnancy (left lateral, fetus as an O2 sink), derived as non-pregnant values x within-study longitudinal changes, with the matching JSONs for validating `adult_female_pregnant_24wk`, `_30wk` and `_36wk`. |
 | [AdultFemaleReference](./AdultFemaleReference.md) | Literature reference values for a healthy adult woman (26 y, 60 kg, supine rest), with heart and central flows anchored on cardiac MRI norms for women 20–29, graded by evidence, with the matching JSON for validating `adult_female`. |
 | [TermNeonateReference](./TermNeonateReference.md) | Literature reference values for a healthy term neonate at ~72 h (hemodynamics, heart, flows, breathing, gases, metabolism, shunts), graded by evidence, with the matching JSON for validating `term_neonate_72h`. |
 | [TermTransitionReference](./TermTransitionReference.md) | Literature reference values for a healthy term neonate at 1 h, 12 h and 24 h (transition), derived from the 72 h baby by within-study changes, with the ductal Doppler evidence and the matching JSONs for validating `term_neonate_1h`, `term_neonate_12h` and `term_neonate_24h`. |
@@ -16477,6 +16570,7 @@ Available scenarios are listed in `public/model_definitions/index.json`.
 ```json
 [
   "adult_female",
+  "adult_female_pregnant_24wk",
   "adult_female_pregnant_30wk",
   "adult_female_pregnant_36wk",
   "hlhs",
